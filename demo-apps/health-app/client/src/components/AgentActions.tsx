@@ -76,8 +76,8 @@ export function AgentActions() {
       elevation={2}
       sx={{
         position: 'fixed',
-        top: 160,
-        right: 20,
+        bottom: 80,
+        right: 60,
         p: 2,
         display: 'flex',
         flexDirection: 'column',
@@ -86,7 +86,7 @@ export function AgentActions() {
         borderRadius: 2,
         boxShadow: 3,
         zIndex: 1000,
-        maxWidth: 340,
+        maxWidth: 480,
       }}
     >
       <div className='flex flex-row gap-2 w-auto'>
