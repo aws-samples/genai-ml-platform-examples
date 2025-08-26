@@ -22,7 +22,7 @@
     "@types/aws-lambda": "^8.10.145"
   },
   "dependencies": {
-    "aws-cdk-lib": "2.186.0",
+    "aws-cdk-lib": "2.189.1",
     "constructs": "^10.0.0"
   }
 }
