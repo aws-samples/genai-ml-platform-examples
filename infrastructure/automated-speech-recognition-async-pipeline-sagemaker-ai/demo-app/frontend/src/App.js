@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AppConfig } from  './config/AppConfig' ;
 
 function App() {
   const [audioFile, setAudioFile] = useState('');
@@ -18,10 +19,11 @@ function App() {
   }, []);
 
   const connectWebSocket = () => {
-    wsRef.current = new WebSocket('ws://localhost:8080/ws');
+    wsRef.current = new WebSocket('ws://'+AppConfig.websocket_url+'/ws');
     
     wsRef.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log(data);
       if (data.type === 'summary') {
         setSummary(data.content);
         setIsProcessing(false);
