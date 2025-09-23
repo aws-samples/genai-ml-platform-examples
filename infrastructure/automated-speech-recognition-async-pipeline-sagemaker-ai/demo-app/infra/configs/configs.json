@@ -1,0 +1,18 @@
+{
+    "websocket_url": "wss://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com/prod",
+    "api_url": "https://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com",
+    "sagemaker_endpoints": [
+        {
+            "name": "parakeet",
+            "endpoint_name": "<your-endpoint-name>",
+            "type": "async",
+            "sns_topic_arn": "arn:aws:sns:us-west-2:xxxxxxxxxx:async-success",
+            "output_bucket": "sagemaker-us-west-2-xxxxxxxxxx"
+        },
+        {
+            "name": "nim",
+            "endpoint_name": "<your-endpoint-name>",
+            "type": "realtime"
+        }
+    ]
+}

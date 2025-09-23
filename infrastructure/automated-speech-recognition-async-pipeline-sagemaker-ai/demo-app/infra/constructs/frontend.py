@@ -1,16 +1,20 @@
 from aws_cdk import (
     aws_s3 as s3,
+    aws_apigatewayv2 as apigatewayv2,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_s3_deployment as s3deploy,
     DockerImage,
+    BundlingOptions,
+    BundlingOutput,
     RemovalPolicy,
+    Stack,
 )
 from constructs import Construct
 
 
 class FrontendConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs):
+    def __init__(self, scope: Construct, construct_id: str, websocket_stage_url: str, api_url: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
         bucket = s3.Bucket(
@@ -22,10 +26,6 @@ class FrontendConstruct(Construct):
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True,
         )
-
-        # oai = cloudfront.OriginAccessIdentity(self, "OAI", comment="OAI for FrontendBucket")
-
-        # bucket.grant_read(oai)
 
         self.distribution = cloudfront.Distribution(
             self,
@@ -45,22 +45,45 @@ class FrontendConstruct(Construct):
             ],
         )
 
+        
+        # Deploy the built frontend
         s3deploy.BucketDeployment(
             self,
             "FrontendDeployment",
             sources=[
                 s3deploy.Source.asset(
                     "../frontend",
-                    bundling={
-                        "image": DockerImage.from_registry("node:18"),
-                        "command": [
+                    bundling=BundlingOptions(
+                        image=DockerImage.from_registry("node:18"),
+                        command=[
                             "bash", "-c",
-                            "npm ci --cache /tmp/empty-cache && npm run build && cp -r build/* /asset-output/"
+                            # Create temp dir, copy only needed files there, cd into it
+                            "mkdir -p /tmp/builddir && "
+                            "cp -r /asset-input/package.json /tmp/builddir/ && "
+                            "cp -r /asset-input/package-lock.json /tmp/builddir/ && "
+                            "cp -r /asset-input/public /tmp/builddir/ && "
+                            "cp -r /asset-input/scripts /tmp/builddir/ && "
+                            "cp -r /asset-input/src /tmp/builddir/ && "
+                            "cd /tmp/builddir && "
+                            "npm ci --cache /tmp/npm-cache && "
+                            "sed -i \"s|\\${WEBSOCKET_URL}|${WEBSOCKET_URL}|g\" src/config/AppConfig.js && "
+                            "sed -i \"s|\\${API_URL}|${API_URL}|g\" src/config/AppConfig.js && "
+                            "npm run build && "
+                            "cp -r build/. /asset-output/ || (echo 'No build output!' && exit 1)"
                         ],
-                    },
+                        environment={
+                            "WEBSOCKET_URL": websocket_stage_url,
+                            "API_URL": api_url,
+                            "HOME": "/tmp"
+                        },
+                        output_type=BundlingOutput.NOT_ARCHIVED,
+                        user="node"
+                    )
                 )
             ],
             destination_bucket=bucket,
             distribution=self.distribution,
             distribution_paths=["/*"],
         )
+
+

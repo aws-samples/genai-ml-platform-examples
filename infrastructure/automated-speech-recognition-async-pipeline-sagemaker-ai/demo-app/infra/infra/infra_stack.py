@@ -3,6 +3,7 @@ from aws_cdk import (
     CfnOutput,
 )
 from constructs import Construct
+from constructs.backend import BackendConstruct
 from constructs.frontend import FrontendConstruct
 
 class InfraStack(Stack):
@@ -10,12 +11,18 @@ class InfraStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        frontend = FrontendConstruct(self, "Frontend")
+        backend = BackendConstruct(self, "Backend")
 
-        print(f'frontend: {frontend}')
+        frontend = FrontendConstruct(self, "Frontend", backend.websocket_stage.url)
 
-        # CfnOutput(
-        #     self,
-        #     "FrontendUrl",
-        #     value=f"https://{frontend.distribution.distribution_domain_name}",
-        # )
+        CfnOutput(
+            self,
+            "WebSocketAPIUrl",
+            value=backend.websocket_api.api_endpoint,
+        )
+
+        CfnOutput(
+            self,
+            "FrontendUrl",
+            value=f"https://{frontend.distribution.distribution_domain_name}",
+        )
