@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { AppConfig } from  './config/AppConfig' ;
-// import { AppConfig } from  './config/AppConfigDev' ;
+import { AppConfig } from process.env.NODE_ENV === 'development' 
+  ? './config/AppConfigDev' 
+  : './config/AppConfig';
 
 function App() {
   const [audioFile, setAudioFile] = useState('');
