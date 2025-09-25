@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import './App.css';
 import { AppConfig as ProdConfig } from './config/AppConfig';
 import { AppConfig as DevConfig } from './config/AppConfigDev';
 
@@ -9,11 +10,20 @@ function App() {
   const [audioFile, setAudioFile] = useState('');
   const [audioFiles, setAudioFiles] = useState([]);
   const [style, setStyle] = useState('');
-  const [summary, setSummary] = useState('Waiting for transcription...');
+  const [summary, setSummary] = useState('Waiting for summary...');
+  const [transcription, setTranscription] = useState('Waiting for transcription...');
+  const [activeTab, setActiveTab] = useState('summary');
   const [isProcessing, setIsProcessing] = useState(false);
   const [sessionState, setSessionState] = useState(false);
+  const [inputMode, setInputMode] = useState('file'); // 'file', 'record', or 'upload'
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState(null);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [theme, setTheme] = useState('modern'); // 'modern' or 'cassette'
   const audioRef = useRef(null);
   const wsRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const streamRef = useRef(null);
 
   useEffect(() => {
     connectWebSocket();
@@ -53,6 +63,9 @@ function App() {
       if (data.text) {
         // Handle streaming text from Bedrock
         setSummary(prev => prev === 'Processing transcription...' ? data.text : prev + data.text);
+      } else if (data.transcription) {
+        // Handle transcription data
+        setTranscription(data.transcription);
       } else if (data.complete) {
         // Streaming completed, re-enable buttons
         setIsProcessing(false);
@@ -94,38 +107,160 @@ function App() {
     }
   };
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === 'audio/wav') {
+      setUploadedFile(file);
+      if (audioRef.current) {
+        audioRef.current.src = URL.createObjectURL(file);
+        audioRef.current.load();
+      }
+    } else {
+      alert('Please select a WAV file');
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      
+      const chunks = [];
+      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        setRecordedBlob(blob);
+        if (audioRef.current) {
+          audioRef.current.src = URL.createObjectURL(blob);
+          audioRef.current.load();
+        }
+      };
+      
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      alert('Error accessing microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      streamRef.current.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+    }
+  };
+
+  const uploadToS3 = async (audioBlob, fileName) => {
+    // Get presigned URL
+    const uploadResponse = await fetch(AppConfig.api_url + '/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: fileName,
+        contentType: audioBlob.type || 'audio/wav'
+      })
+    });
+
+    if (!uploadResponse.ok) throw new Error('Failed to get upload URL');
+    
+    const { uploadUrl, s3Uri } = await uploadResponse.json();
+
+    // Upload file to S3
+    const s3Response = await fetch(uploadUrl, {
+      method: 'PUT',
+      body: audioBlob,
+      headers: {
+        'Content-Type': audioBlob.type || 'audio/wav'
+      }
+    });
+
+    if (!s3Response.ok) throw new Error('Failed to upload to S3');
+    
+    return s3Uri;
+  };
+
   const startTranscription = async (mode) => {
-    if (!audioFile || !style) {
-      alert('Please select both an audio file and summarization style');
+    if (!style) {
+      alert('Please select a summarization style');
+      return;
+    }
+
+    if (inputMode === 'file' && !audioFile) {
+      alert('Please select an audio file');
+      return;
+    }
+
+    if (inputMode === 'record' && !recordedBlob) {
+      alert('Please record audio first');
+      return;
+    }
+
+    if (inputMode === 'upload' && !uploadedFile) {
+      alert('Please upload a WAV file');
       return;
     }
 
     setIsProcessing(true);
     setSummary('Processing transcription...');
+    setTranscription('Processing transcription...');
 
     try {
-      const audioResponse = await fetch(`audio/${audioFile}`);
-      const audioBlob = await audioResponse.blob();
-      const audioBase64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result.split(',')[1]);
-        reader.readAsDataURL(audioBlob);
-      });
+      let audioBlob;
+      let fileName;
+      
+      if (inputMode === 'file') {
+        const audioResponse = await fetch(`audio/${audioFile}`);
+        audioBlob = await audioResponse.blob();
+        fileName = audioFile;
+      } else if (inputMode === 'record') {
+        audioBlob = recordedBlob;
+        fileName = `recorded-${Date.now()}.wav`;
+      } else {
+        audioBlob = uploadedFile;
+        fileName = uploadedFile.name;
+      }
 
-      const response = await fetch(AppConfig.api_url+'/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          audio: audioBase64, 
-          style, 
+      const fileSizeMB = audioBlob.size / (1024 * 1024);
+      let requestBody;
+
+      if (fileSizeMB > 6) {
+        // Use S3 upload for large files
+        setSummary('Uploading large file...');
+        const s3Uri = await uploadToS3(audioBlob, fileName);
+        requestBody = {
+          s3Uri: s3Uri,
+          style,
           endpoint_name: mode,
           session_id: localStorage.getItem('connectionId')
-        })
+        };
+      } else {
+        // Use base64 for small files
+        const audioBase64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(audioBlob);
+        });
+        requestBody = {
+          audio: audioBase64,
+          style,
+          endpoint_name: mode,
+          session_id: localStorage.getItem('connectionId')
+        };
+      }
+
+      setSummary('Processing transcription...');
+      const response = await fetch(AppConfig.api_url + '/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      
-      // Don't set isProcessing to false here - let the streaming complete first
       
     } catch (error) {
       console.error('Error:', error);
@@ -135,19 +270,74 @@ function App() {
   };
 
   return (
-    <div className="container">
+    <div className={`container ${theme}`}>
+      <div className="theme-toggle">
+        <button 
+          onClick={() => setTheme(theme === 'modern' ? 'cassette' : 'modern')}
+          className={`theme-btn ${theme}`}
+        >
+          {theme === 'modern' ? '📼' : '💻'} {theme === 'modern' ? 'Cassette' : 'Modern'}
+        </button>
+      </div>
       <h1>Audio Transcription & Summarization</h1>
       
       <div className="controls">
         <div className="selector-group">
-          <label>Select Audio File:</label>
-          <select value={audioFile} onChange={handleAudioChange}>
-            <option value="">Choose audio file...</option>
-            {audioFiles.map(file => (
-              <option key={file} value={file}>{file}</option>
-            ))}
+          <label>Input Mode:</label>
+          <select value={inputMode} onChange={(e) => setInputMode(e.target.value)}>
+            <option value="file">Select Audio File</option>
+            <option value="record">Record Audio</option>
+            <option value="upload">Upload WAV File</option>
           </select>
         </div>
+
+        {inputMode === 'file' && (
+          <div className="selector-group">
+            <label>Select Audio File:</label>
+            <select value={audioFile} onChange={handleAudioChange}>
+              <option value="">Choose audio file...</option>
+              {audioFiles.map(file => (
+                <option key={file} value={file}>{file}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {inputMode === 'record' && (
+          <div className="selector-group">
+            <label>Voice Recording:</label>
+            <div className="recording-controls">
+              <button 
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isProcessing}
+                className={`record-btn ${isRecording ? 'recording' : ''}`}
+              >
+                {isRecording ? 'Stop Recording' : 'Start Recording'}
+              </button>
+              {recordedBlob && <span className="recorded-indicator">✓ Audio recorded</span>}
+            </div>
+          </div>
+        )}
+
+        {inputMode === 'upload' && (
+          <div className="selector-group">
+            <label>Upload WAV File:</label>
+            <div className="upload-controls">
+              <input 
+                type="file" 
+                accept=".wav,audio/wav" 
+                onChange={handleFileUpload}
+                disabled={isProcessing}
+                id="file-upload"
+                style={{ display: 'none' }}
+              />
+              <label htmlFor="file-upload" className={`upload-btn ${isProcessing ? 'disabled' : ''}`}>
+                📁 Choose WAV File
+              </label>
+              {uploadedFile && <span className="uploaded-indicator">✓ {uploadedFile.name}</span>}
+            </div>
+          </div>
+        )}
 
         <div className="selector-group">
           <label>Summarization Style:</label>
@@ -184,9 +374,31 @@ function App() {
       </div>
 
       <div className="output">
-        <h3>Summary Output:</h3>
-        <div className="summary-box">
-          <ReactMarkdown>{summary}</ReactMarkdown>
+        <div className="tabs">
+          <button 
+            className={`tab ${activeTab === 'summary' ? 'active' : ''}`}
+            onClick={() => setActiveTab('summary')}
+          >
+            Summary Output
+          </button>
+          <button 
+            className={`tab ${activeTab === 'transcription' ? 'active' : ''}`}
+            onClick={() => setActiveTab('transcription')}
+          >
+            Transcription
+          </button>
+        </div>
+        <div className="tab-content">
+          {activeTab === 'summary' && (
+            <div className="summary-box">
+              <ReactMarkdown>{summary}</ReactMarkdown>
+            </div>
+          )}
+          {activeTab === 'transcription' && (
+            <div className="transcription-box">
+              <p>{transcription}</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

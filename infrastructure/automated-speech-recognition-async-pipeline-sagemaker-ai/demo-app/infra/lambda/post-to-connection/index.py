@@ -12,6 +12,21 @@ apigateway_client = boto3.client('apigatewaymanagementapi', endpoint_url=endpoin
 
 s3_client = boto3.client('s3')
 
+def format_transcript(transcript):
+    if isinstance(transcript, str):
+        transcript = json.loads(transcript)
+    
+    channels = {}
+    for item in transcript:
+        channel = item.get('channel_tag', 1)
+        text = item['alternatives'][0]['transcript']
+        
+        if channel not in channels:
+            channels[channel] = []
+        channels[channel].append(text)
+    
+    return [{'channel_tag': ch, 'text': ' '.join(texts)} for ch, texts in channels.items()]
+
 def handler(event, context):
     # Handle sns topic
     if 'Records' in event:
@@ -32,17 +47,25 @@ def handler(event, context):
         style = custom_attributes['style']
         
         # Load transcription from outputLocation
-        transcription  = s3_client.get_object(
+        raw_transcription = s3_client.get_object(
             Bucket=output_location.split('/')[2],
             Key='/'.join(output_location.split('/')[3:])
         )['Body'].read().decode('utf-8')
+        
+        # Parse and extract text from array format
+        transcription_array = json.loads(raw_transcription)
+        transcription = transcription_array[0] if isinstance(transcription_array, list) else raw_transcription
 
     else:
         # Real-time
-        transcription = event.get('transcription', '')
-        transcription = transcription['predictions'][0]['results']
-        # Convert to string
-        transcription = json.dumps(transcription)
+        raw_transcription = event.get('transcription', '')
+        print(f'transcription: {raw_transcription}')
+        if 'predictions' in raw_transcription:
+            raw_transcription = raw_transcription['predictions'][0]['results']
+        else:
+            raw_transcription = raw_transcription['text']
+        
+        transcription = format_transcript(raw_transcription)
         connection_id = event.get('session_id', '')
         style = event.get('style', 'brief')
 
@@ -58,13 +81,22 @@ def handler(event, context):
         system_prompt = f'Create a bullet point summary of the following audio transcription. Return in markdown format.'
     
     try:
+        # Send formatted transcript
+        apigateway_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps({'transcription': json.dumps(transcription, indent=2)})
+        )
+
+        # Combine all channel texts for summarization
+        # combined_text = ' '.join([ch['text'] for ch in transcription])
+        
         # Use Bedrock converse streaming API
         response = bedrock_client.converse_stream(
             modelId='global.anthropic.claude-sonnet-4-20250514-v1:0',
             messages=[
                 {
                     'role': 'user',
-                    'content': [{'text': transcription}]
+                    'content': [{'text': json.dumps(transcription) if isinstance(transcription, list) else transcription}]
                 }
             ],
             system=[{'text': system_prompt}]

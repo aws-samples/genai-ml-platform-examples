@@ -14,10 +14,11 @@ s3_client = boto3.client('s3')
 lambda_client = boto3.client('lambda')
 
 def validate_body(body):
-    if 'audio' not in body:
+    # Check for either audio data or S3 URI
+    if 'audio' not in body and 's3Uri' not in body:
         return {
             'statusCode': 400,
-            'body': 'No audio provided'
+            'body': 'No audio or s3Uri provided'
         }
 
     # Get endpoint_name from body
@@ -66,26 +67,44 @@ def handler(event, context):
             'body': 'No matching endpoint found'
         }
     try:
-        # Decode base64 audio
-        audio_data = base64.b64decode(body_json['audio'])
         print("matching_endpoint:")
         print(matching_endpoint)
+        
+        # Handle S3 URI or base64 audio data
+        if 's3Uri' in body_json:
+            # Use provided S3 URI
+            input_location = body_json['s3Uri']
+            audio_data = None
+            
+            # For real-time endpoints, we need to download the file
+            if matching_endpoint.get('type') != 'async':
+                # Parse S3 URI to get bucket and key
+                s3_parts = input_location.replace('s3://', '').split('/', 1)
+                bucket = s3_parts[0]
+                key = s3_parts[1]
+                
+                # Download audio data for real-time processing
+                response = s3_client.get_object(Bucket=bucket, Key=key)
+                audio_data = response['Body'].read()
+        else:
+            # Decode base64 audio
+            audio_data = base64.b64decode(body_json['audio'])
+            input_location = None
         
         # Invoke endpoint based on type
         if matching_endpoint.get('type') == 'async':
             print('Async endpoint')
             
-            # For async, upload audio to S3 first
-            audio_key = f"audio-input/{uuid.uuid4()}.wav"
-            
-            s3_client.put_object(
-                Bucket=audio_bucket,
-                Key=audio_key,
-                Body=audio_data,
-                ContentType='audio/wav'
-            )
-            
-            input_location = f"s3://{audio_bucket}/{audio_key}"
+            # For async, use S3 location or upload audio to S3 first
+            if not input_location:
+                audio_key = f"audio-input/{uuid.uuid4()}.wav"
+                s3_client.put_object(
+                    Bucket=audio_bucket,
+                    Key=audio_key,
+                    Body=audio_data,
+                    ContentType='audio/wav'
+                )
+                input_location = f"s3://{audio_bucket}/{audio_key}"
             
             response = sagemaker_client.invoke_endpoint_async(
                 EndpointName=matching_endpoint.get('endpoint_name'),
@@ -110,7 +129,7 @@ def handler(event, context):
             response = sagemaker_client.invoke_endpoint(
                 EndpointName=matching_endpoint.get('endpoint_name'),
                 Body=audio_data,
-                ContentType='audio/wav',
+                ContentType='audio/wav'
             )
 
             # Parse the response

@@ -18,12 +18,14 @@ body {
   border-radius: 15px;
   padding: 30px;
   box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+  position: relative;
 }
 
 h1 {
   text-align: center;
   color: #333;
   margin-bottom: 30px;
+  margin-top: 20px;
   font-size: 2.2em;
 }
 
@@ -132,6 +134,341 @@ audio {
   color: #495057;
 }
 
+.recording-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.record-btn {
+  padding: 10px 20px;
+  border: 2px solid #dc3545;
+  background: white;
+  color: #dc3545;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.record-btn:hover:not(:disabled) {
+  background: #dc3545;
+  color: white;
+}
+
+.record-btn.recording {
+  background: #dc3545;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.recorded-indicator {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.upload-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.upload-btn {
+  padding: 10px 20px;
+  border: 2px solid #667eea;
+  background: white;
+  color: #667eea;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s;
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+}
+
+.upload-btn:hover:not(.disabled) {
+  background: #667eea;
+  color: white;
+}
+
+.upload-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.uploaded-indicator {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+}
+
+.theme-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  background: rgba(150,150,150,0.2);
+  color: black;
+  cursor: pointer;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s;
+  width: 120px;
+  text-align: center;
+}
+
+.theme-btn.cassette{
+  color: white;
+}
+
+.theme-btn:hover {
+  background: rgba(150,150,150,0.3);
+}
+
+/* Cassette Theme */
+.container.cassette {
+  background: linear-gradient(145deg, #2c2c2c, #1a1a1a);
+  border: 4px solid #444;
+  border-radius: 20px;
+  box-shadow: 
+    inset 0 0 20px rgba(0,0,0,0.5),
+    0 10px 30px rgba(0,0,0,0.3);
+  position: relative;
+}
+
+.container.cassette::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 8px;
+  background: linear-gradient(90deg, #666, #333, #666);
+  border-radius: 4px;
+}
+
+.container.cassette h1 {
+  color: #f0f0f0;
+  text-shadow: 0 0 10px rgba(255,255,255,0.3);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+}
+
+.container.cassette .controls {
+  background: rgba(0,0,0,0.3);
+  padding: 20px;
+  border-radius: 15px;
+  border: 2px solid #555;
+}
+
+.container.cassette label {
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.container.cassette select {
+  background: #333;
+  color: #fff;
+  border: 2px solid #666;
+  border-radius: 5px;
+}
+
+.container.cassette .audio-player {
+  background: radial-gradient(circle, #1a1a1a, #000);
+  border: 3px solid #444;
+  position: relative;
+  padding: 30px;
+}
+
+.container.cassette .audio-player::before,
+.container.cassette .audio-player::after {
+  content: '';
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border: 8px solid #666;
+  border-radius: 50%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.container.cassette .audio-player::before {
+  left: 20%;
+  background: radial-gradient(circle, #333 30%, #666 70%);
+}
+
+.container.cassette .audio-player::after {
+  right: 20%;
+  background: radial-gradient(circle, #333 30%, #666 70%);
+}
+
+.container.cassette audio {
+  background: #222;
+  border-radius: 10px;
+  filter: sepia(20%) hue-rotate(10deg);
+}
+
+.container.cassette .transcribe-btn {
+  background: linear-gradient(145deg, #444, #222);
+  border: 2px solid #666;
+  color: #fff;
+  text-shadow: 0 0 5px rgba(255,255,255,0.3);
+  font-family: 'Courier New', monospace;
+  position: relative;
+}
+
+.container.cassette .transcribe-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid #fff;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.container.cassette .transcribe-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #555, #333);
+  box-shadow: 0 0 15px rgba(255,255,255,0.2);
+}
+
+.container.cassette .summary-box {
+  background: #1a1a1a;
+  border: 2px solid #444;
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+}
+
+.container.cassette .record-btn {
+  background: #333;
+  border: 2px solid #666;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .record-btn.recording {
+  background: #660000;
+  border-color: #ff0000;
+  box-shadow: 0 0 10px rgba(255,0,0,0.5);
+}
+
+.container.cassette .upload-btn {
+  background: #333;
+  border: 2px solid #666;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .upload-btn:hover:not(.disabled) {
+  background: #555;
+  border-color: #888;
+}
+
+.container.cassette .uploaded-indicator {
+  color: #4CAF50;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .output h3 {
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 2px solid #e9ecef;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 12px 24px;
+  border: none;
+  background: transparent;
+  color: #6c757d;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+  font-size: 16px;
+}
+
+.tab:hover {
+  color: #495057;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.tab.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.tab-content {
+  min-height: 200px;
+}
+
+.transcription-box {
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 10px;
+  padding: 20px;
+  min-height: 150px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #495057;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.container.cassette .tabs {
+  border-bottom: 2px solid #444;
+}
+
+.container.cassette .tab {
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.container.cassette .tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.container.cassette .tab.active {
+  color: #fff;
+  border-bottom-color: #666;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.container.cassette .transcription-box {
+  background: #1a1a1a;
+  border: 2px solid #444;
+  color: #ccc;
+}
+
 @media (max-width: 768px) {
   .controls {
     grid-template-columns: 1fr;
@@ -140,5 +477,25 @@ audio {
   .transcription-buttons {
     flex-direction: column;
     align-items: center;
+  }
+  
+  .recording-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .tabs {
+    flex-direction: column;
+  }
+  
+  .tab {
+    text-align: center;
+    border-bottom: none;
+    border-right: 3px solid transparent;
+  }
+  
+  .tab.active {
+    border-bottom: none;
+    border-right-color: #667eea;
   }
 }

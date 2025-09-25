@@ -20,7 +20,17 @@ class BackendConstruct(Construct):
         super().__init__(scope, construct_id, **kwargs)
 
         # Create an s3 bucket to upload files for async
-        audio_s3_bucket = s3.Bucket(self, 'AudioBucket')
+        audio_s3_bucket = s3.Bucket(
+            self, 'AudioBucket',
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[s3.HttpMethods.PUT, s3.HttpMethods.POST],
+                    allowed_origins=['*'],
+                    allowed_headers=['*'],
+                    max_age=3000
+                )
+            ]
+        )
 
         # Create DynamoDB table for sessions
         sessions_table = dynamodb.Table(
@@ -162,7 +172,41 @@ class BackendConstruct(Construct):
         )
 
         audio_s3_bucket.grant_put(transcribe_api_role)
+        audio_s3_bucket.grant_read(transcribe_api_role)
         post_to_connection_fn.grant_invoke(transcribe_api_role)
+
+        # Create upload API role
+        upload_api_role = iam.Role(
+            self, 'UploadAPIRole',
+            assumed_by=iam.ServicePrincipal('lambda.amazonaws.com'),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name('service-role/AWSLambdaBasicExecutionRole')
+            ],
+            inline_policies={
+                'S3PresignedUrlPolicy': iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=['s3:PutObject', 's3:PutObjectAcl'],
+                            resources=[f'{audio_s3_bucket.bucket_arn}/*']
+                        )
+                    ]
+                )
+            }
+        )
+
+        # Deploy upload API for presigned URLs
+        upload_fn = _lambda.Function(
+            self, 'UploadHandler',
+            runtime=_lambda.Runtime.PYTHON_3_9,
+            handler='index.handler',
+            code=_lambda.Code.from_asset('lambda/upload'),
+            environment={
+                'S3_INPUT_BUCKET': audio_s3_bucket.bucket_name
+            },
+            role=upload_api_role,
+            timeout=Duration.seconds(30)
+        )
 
         # Deploy a transcription API
         transcribe_fn = _lambda.Function(
@@ -206,4 +250,14 @@ class BackendConstruct(Construct):
                 'TranscribeIntegration',
                 transcribe_fn
             )
-        )   
+        )
+
+        # Add route for upload function
+        self.http_api.add_routes(
+            path='/upload',
+            methods=[apigatewayv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration(
+                'UploadIntegration',
+                upload_fn
+            )
+        )
