@@ -14,7 +14,7 @@ from constructs import Construct
 
 
 class FrontendConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, websocket_stage_url: str, api_url: str, **kwargs):
+    def __init__(self, scope: Construct, construct_id: str, websocket_stage_url: str, api_url: str, user_pool_id: str, user_pool_client_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
         bucket = s3.Bucket(
@@ -68,12 +68,16 @@ class FrontendConstruct(Construct):
                             "npm ci --cache /tmp/npm-cache && "
                             "sed -i \"s|\\${WEBSOCKET_URL}|${WEBSOCKET_URL}|g\" src/config/AppConfig.js && "
                             "sed -i \"s|\\${API_URL}|${API_URL}|g\" src/config/AppConfig.js && "
+                            "sed -i \"s|\\${USER_POOL_ID}|${USER_POOL_ID}|g\" src/config/AppConfig.js && "
+                            "sed -i \"s|\\${USER_POOL_CLIENT_ID}|${USER_POOL_CLIENT_ID}|g\" src/config/AppConfig.js && "
                             "npm run build && "
                             "cp -r build/. /asset-output/ || (echo 'No build output!' && exit 1)"
                         ],
                         environment={
                             "WEBSOCKET_URL": websocket_stage_url,
                             "API_URL": api_url,
+                            "USER_POOL_ID": user_pool_id,
+                            "USER_POOL_CLIENT_ID": user_pool_client_id,
                             "HOME": "/tmp"
                         },
                         output_type=BundlingOutput.NOT_ARCHIVED,

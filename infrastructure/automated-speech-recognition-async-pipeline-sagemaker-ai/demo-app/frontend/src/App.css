@@ -212,6 +212,8 @@ audio {
   position: absolute;
   top: 15px;
   right: 15px;
+  display: flex;
+  gap: 10px;
 }
 
 .theme-btn {
@@ -234,6 +236,119 @@ audio {
 
 .theme-btn:hover {
   background: rgba(150,150,150,0.3);
+}
+
+.logout-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  background: #dc3545;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.logout-btn:hover {
+  background: #c82333;
+}
+
+.login-form {
+  max-width: 400px;
+  margin: 50px auto;
+  padding: 30px;
+  background: #f8f9fa;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.login-form h2 {
+  text-align: center;
+  margin-bottom: 30px;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #555;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+}
+
+/* Cassette theme login form */
+.container.cassette .login-form {
+  background: #1a1a1a;
+  border: 2px solid #444;
+}
+
+.container.cassette .login-form h2 {
+  color: #f0f0f0;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .form-group label {
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.container.cassette .form-group input {
+  background: #333;
+  color: #fff;
+  border: 2px solid #666;
+}
+
+.container.cassette .login-btn {
+  background: linear-gradient(145deg, #444, #222);
+  border: 2px solid #666;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .logout-btn {
+  background: #660000;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .logout-btn:hover {
+  background: #880000;
 }
 
 /* Cassette Theme */
@@ -469,6 +584,115 @@ audio {
   color: #ccc;
 }
 
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.auth-form {
+  background: white;
+  padding: 40px;
+  border-radius: 15px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-form h2 {
+  text-align: center;
+  margin-bottom: 30px;
+  color: #333;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 15px;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.auth-form button[type="submit"] {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 15px;
+}
+
+.auth-form button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-links button {
+  background: none;
+  border: none;
+  color: #667eea;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 14px;
+}
+
+.error {
+  color: #dc3545;
+  text-align: center;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.user-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.sign-out-btn {
+  padding: 8px 16px;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.sign-out-btn:hover {
+  background: #c82333;
+}
+
+.container.cassette .user-info {
+  border-bottom: 1px solid #444;
+  color: #ccc;
+}
+
+.container.cassette .sign-out-btn {
+  background: #660000;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .sign-out-btn:hover {
+  background: #880000;
+}
+
 @media (max-width: 768px) {
   .controls {
     grid-template-columns: 1fr;
@@ -497,5 +721,23 @@ audio {
   .tab.active {
     border-bottom: none;
     border-right-color: #667eea;
+  }
+  
+  .user-info {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+  
+  .theme-toggle {
+    position: static;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  
+  .login-form {
+    margin: 20px auto;
+    padding: 20px;
   }
 }

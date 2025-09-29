@@ -11,13 +11,13 @@ class BackendStack(Stack):
 
         sagemaker_endpoints = configs.get('sagemaker_endpoints')
 
-        backend = BackendConstruct(self, "Backend", sagemaker_endpoints)
+        self.backend = BackendConstruct(self, "Backend", sagemaker_endpoints)
         
         # Output the WebSocket URL for the frontend stack to use
         self.websocket_url_output = CfnOutput(
             self,
             "WebSocketURL",
-            value=backend.websocket_stage.url,
+            value=self.backend.websocket_stage.url,
             export_name="WebSocketURL"
         )
 
@@ -25,6 +25,23 @@ class BackendStack(Stack):
         self.http_api_url_output = CfnOutput(
             self,
             "HTTPAPIURL",
-            value=backend.http_api.url or "",
+            value=self.backend.http_api.url or "",
             export_name="HTTPAPIURL"
+        )
+
+        # Output Cognito configuration
+        self.user_pool_id_output = CfnOutput(
+            self,
+            "UserPoolId",
+            value=self.backend.user_pool.user_pool_id,
+            description="Cognito User Pool ID - Add this to configs.json",
+            export_name="UserPoolId"
+        )
+
+        self.user_pool_client_id_output = CfnOutput(
+            self,
+            "UserPoolClientId",
+            value=self.backend.user_pool_client.user_pool_client_id,
+            description="Cognito User Pool Client ID - Add this to configs.json",
+            export_name="UserPoolClientId"
         )

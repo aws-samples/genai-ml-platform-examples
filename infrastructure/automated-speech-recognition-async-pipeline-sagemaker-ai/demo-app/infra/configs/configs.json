@@ -1,13 +1,16 @@
 {
-    "websocket_url": "wss://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com/prod",
-    "api_url": "https://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com",
+    "region": "<your-deployment-region>",
+    "websocket_url": "wss://xxxxxxxxxx.execute-api.<your-deployment-region>.amazonaws.com/prod",
+    "api_url": "https://xxxxxxxxxx.execute-api.<your-deployment-region>.amazonaws.com",
+    "user_pool_id": "YOUR_USER_POOL_ID",
+    "user_pool_client_id": "YOUR_USER_POOL_CLIENT_ID",
     "sagemaker_endpoints": [
         {
             "name": "parakeet",
             "endpoint_name": "<your-endpoint-name>",
             "type": "async",
-            "sns_topic_arn": "arn:aws:sns:us-west-2:xxxxxxxxxx:async-success",
-            "output_bucket": "sagemaker-us-west-2-xxxxxxxxxx"
+            "sns_topic_arn": "<your-async-success-topic-arn>",
+            "output_bucket": "<your-async-output-bucket>"
         },
         {
             "name": "nim",

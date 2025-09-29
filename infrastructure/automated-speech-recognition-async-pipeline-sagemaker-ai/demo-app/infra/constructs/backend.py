@@ -9,8 +9,10 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_sns as sns,
     aws_sns_subscriptions as subs,
+    aws_cognito as cognito,
     RemovalPolicy,
-    Duration
+    Duration,
+    Stack
 )
 from constructs import Construct
 import json
@@ -18,6 +20,21 @@ import json
 class BackendConstruct(Construct):
     def __init__(self, scope: Construct, construct_id: str, sagemaker_endpoints, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Create Cognito User Pool
+        self.user_pool = cognito.UserPool(
+            self, 'VoiceAIUserPool',
+            sign_in_aliases=cognito.SignInAliases(email=True),
+            auto_verify=cognito.AutoVerifiedAttrs(email=True),
+            removal_policy=RemovalPolicy.DESTROY
+        )
+
+        self.user_pool_client = cognito.UserPoolClient(
+            self, 'VoiceAIUserPoolClient',
+            user_pool=self.user_pool,
+            auth_flows=cognito.AuthFlow(user_password=True, user_srp=True),
+            generate_secret=False
+        )
 
         # Create an s3 bucket to upload files for async
         audio_s3_bucket = s3.Bucket(
@@ -152,8 +169,8 @@ class BackendConstruct(Construct):
                     )
 
                 # Grant S3 permissions to post_to_connection_role
-                input_s3_bucket = s3.Bucket.from_bucket_name(self, f'InputBucket-{sagemaker_endpoint.get("name")}', sagemaker_endpoint.get('output_bucket'))
-                input_s3_bucket.grant_read(post_to_connection_role)
+                output_s3_bucket = s3.Bucket.from_bucket_name(self, f'OutputBucket-{sagemaker_endpoint.get("name")}', sagemaker_endpoint.get('output_bucket'))
+                output_s3_bucket.grant_read(post_to_connection_role)
 
         # Grant DynamoDB permissions to Lambda functions
         sessions_table.grant_read_write_data(connect_fn)
@@ -242,7 +259,17 @@ class BackendConstruct(Construct):
             }
         )
 
-        # Add route for transcribe function
+        # Create Cognito JWT authorizer
+        authorizer = apigatewayv2.HttpAuthorizer(
+            self, 'CognitoAuthorizer',
+            http_api=self.http_api,
+            type=apigatewayv2.HttpAuthorizerType.JWT,
+            identity_source=['$request.header.Authorization'],
+            jwt_issuer=f'https://cognito-idp.{Stack.of(self).region}.amazonaws.com/{self.user_pool.user_pool_id}',
+            jwt_audience=[self.user_pool_client.user_pool_client_id]
+        )
+
+        # Add protected routes without authorizer first (will add manually)
         self.http_api.add_routes(
             path='/transcribe',
             methods=[apigatewayv2.HttpMethod.POST],
@@ -252,7 +279,6 @@ class BackendConstruct(Construct):
             )
         )
 
-        # Add route for upload function
         self.http_api.add_routes(
             path='/upload',
             methods=[apigatewayv2.HttpMethod.POST],

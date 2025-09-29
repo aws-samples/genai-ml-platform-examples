@@ -3,10 +3,21 @@ import ReactMarkdown from 'react-markdown';
 import './App.css';
 import { AppConfig as ProdConfig } from './config/AppConfig';
 import { AppConfig as DevConfig } from './config/AppConfigDev';
+import { Amplify, Auth } from 'aws-amplify';
+import { Authenticator } from '@aws-amplify/ui-react';
+import '@aws-amplify/ui-react/styles.css';
 
 const AppConfig = process.env.NODE_ENV === 'development' ? DevConfig : ProdConfig;
 
-function App() {
+Amplify.configure({
+  Auth: {
+    region: 'us-west-2',
+    userPoolId: AppConfig.user_pool_id,
+    userPoolWebClientId: AppConfig.user_pool_client_id
+  }
+});
+
+function AudioApp({ signOut, user }) {
   const [audioFile, setAudioFile] = useState('');
   const [audioFiles, setAudioFiles] = useState([]);
   const [style, setStyle] = useState('');
@@ -15,17 +26,20 @@ function App() {
   const [activeTab, setActiveTab] = useState('summary');
   const [isProcessing, setIsProcessing] = useState(false);
   const [sessionState, setSessionState] = useState(false);
-  const [inputMode, setInputMode] = useState('file'); // 'file', 'record', or 'upload'
+  const [inputMode, setInputMode] = useState('file');
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
-  const [theme, setTheme] = useState('modern'); // 'modern' or 'cassette'
+  const [theme, setTheme] = useState('modern');
+  const [authToken, setAuthToken] = useState(null);
+
   const audioRef = useRef(null);
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
 
   useEffect(() => {
+    getAuthToken();
     connectWebSocket();
     loadAudioFiles();
     return () => {
@@ -34,6 +48,19 @@ function App() {
       }
     };
   }, []);
+
+  const getAuthToken = async () => {
+    try {
+      const session = await Auth.currentSession();
+      setAuthToken(session.getIdToken().getJwtToken());
+    } catch (error) {
+      console.error('Error getting auth token:', error);
+    }
+  };
+
+
+
+
 
   const loadAudioFiles = async () => {
     try {
@@ -51,8 +78,6 @@ function App() {
     wsRef.current.onopen = () => {
       console.log('WebSocket connection established');
       setSessionState(true);
-      // The connection ID is not directly available in the frontend
-      // You need to send a message to get it back from the server
       wsRef.current.send(JSON.stringify({ action: 'getConnectionId' }));
     }
     
@@ -91,10 +116,10 @@ function App() {
     wsRef.current.onclose = () => {      
       console.log('WebSocket connection closed');
       setSessionState(false);
-      setTimeout(function() {
-        console.log('Retrying connection')
+      setTimeout(() => {
+        console.log('Retrying connection');
         connectWebSocket();
-      }, 1000);;
+      }, 1000);
     };
   };
 
@@ -159,7 +184,10 @@ function App() {
     // Get presigned URL
     const uploadResponse = await fetch(AppConfig.api_url + '/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
       body: JSON.stringify({
         fileName: fileName,
         contentType: audioBlob.type || 'audio/wav'
@@ -256,7 +284,10 @@ function App() {
       setSummary('Processing transcription...');
       const response = await fetch(AppConfig.api_url + '/transcribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify(requestBody)
       });
 
@@ -277,6 +308,9 @@ function App() {
           className={`theme-btn ${theme}`}
         >
           {theme === 'modern' ? '📼' : '💻'} {theme === 'modern' ? 'Cassette' : 'Modern'}
+        </button>
+        <button onClick={signOut} className="logout-btn">
+          Logout
         </button>
       </div>
       <h1>Audio Transcription & Summarization</h1>
@@ -402,6 +436,16 @@ function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Authenticator>
+      {({ signOut, user }) => (
+        <AudioApp signOut={signOut} user={user} />
+      )}
+    </Authenticator>
   );
 }
 
