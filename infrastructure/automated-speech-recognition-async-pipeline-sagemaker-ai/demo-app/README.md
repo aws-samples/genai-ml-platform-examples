@@ -41,7 +41,7 @@ Edit `infra/configs/configs.json` with your SageMaker endpoint details:
 
 ```json
 {
-    "region": "<deployment-region",
+    "region": "<deployment-region>",
     "websocket_url": "wss://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com/prod",
     "api_url": "https://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com",
     "user_pool_id": "YOUR_USER_POOL_ID",
