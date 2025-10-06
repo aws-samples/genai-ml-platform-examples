@@ -25,6 +25,7 @@ function AudioApp({ signOut, user }) {
   const [transcription, setTranscription] = useState('Waiting for transcription...');
   const [activeTab, setActiveTab] = useState('summary');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState(0);
   const [sessionState, setSessionState] = useState(false);
   const [inputMode, setInputMode] = useState('file');
   const [isRecording, setIsRecording] = useState(false);
@@ -94,12 +95,18 @@ function AudioApp({ signOut, user }) {
       } else if (data.complete) {
         // Streaming completed, re-enable buttons
         setIsProcessing(false);
+        setProcessingStage(0);
+        if (window.processingLoop) clearInterval(window.processingLoop);
       } else if (data.error) {
         setSummary(`Error: ${data.error}`);
         setIsProcessing(false);
+        setProcessingStage(0);
+        if (window.processingLoop) clearInterval(window.processingLoop);
       } else if (data.type === 'summary') {
         setSummary(data.content);
         setIsProcessing(false);
+        setProcessingStage(0);
+        if (window.processingLoop) clearInterval(window.processingLoop);
       } else if (data.type === 'progress') {
         setSummary(`Processing: ${data.message}`);
       } else if (data.connectionId) {
@@ -234,8 +241,20 @@ function AudioApp({ signOut, user }) {
     }
 
     setIsProcessing(true);
+    setProcessingStage(1);
     setSummary('Processing transcription...');
     setTranscription('Processing transcription...');
+
+    // Progress through stages with consistent timing
+    const loopInterval = setInterval(() => {
+      setProcessingStage(prev => {
+        if (prev >= 4) return 1;
+        return prev + 1;
+      });
+    }, 2000);
+    
+    // Store interval to clear it later
+    window.processingLoop = loopInterval;
 
     try {
       let audioBlob;
@@ -297,6 +316,8 @@ function AudioApp({ signOut, user }) {
       console.error('Error:', error);
       setSummary('Error starting transcription. Please try again.');
       setIsProcessing(false);
+      setProcessingStage(0);
+      if (window.processingLoop) clearInterval(window.processingLoop);
     }
   };
 
@@ -313,7 +334,8 @@ function AudioApp({ signOut, user }) {
           Logout
         </button>
       </div>
-      <h1>Audio Transcription & Summarization</h1>
+      <h1>Voice Analytics Studio</h1>
+      <h2>From Speech to Insights</h2>
       
       <div className="controls">
         <div className="selector-group">
@@ -405,6 +427,36 @@ function AudioApp({ signOut, user }) {
         >
           Async
         </button>
+      </div>
+
+      <div className="pipeline-visualization">
+        <div className="pipeline-icons">
+          <div className={`pipeline-icon ${processingStage >= 1 ? 'active' : ''}`}>
+            <img src="/images/audio.png" alt="Audio" />
+            <span>Audio</span>
+          </div>
+          <div className={`pipeline-arrow ${processingStage >= 2 ? 'flowing' : ''}`}>→</div>
+          <div className={`pipeline-icon ${processingStage >= 2 ? 'active' : ''}`}>
+            <img src="/images/nim.png" alt="NIM" />
+            <span>NIM</span>
+          </div>
+          <div className={`pipeline-arrow ${processingStage >= 3 ? 'flowing' : ''}`}>→</div>
+          <div className={`pipeline-icon ${processingStage >= 3 ? 'active' : ''}`}>
+            <img src="/images/amazon_bedrock.png" alt="Bedrock" />
+            <span>Amazon Bedrock</span>
+          </div>
+          <div className={`pipeline-arrow ${processingStage >= 4 ? 'flowing' : ''}`}>→</div>
+          <div className={`pipeline-icon ${processingStage >= 4 ? 'active' : ''}`}>
+            <img src="/images/insight.png" alt="Insights" />
+            <span>Insights</span>
+          </div>
+        </div>
+        <div className="pipeline-commentary">
+          {processingStage === 1 && "Processing audio input..."}
+          {processingStage === 2 && "Transcribing audio to text with NVIDIA parakeet..."}
+          {processingStage === 3 && "Summarising transcription with Anthropic Claude Sonnet 4.5..."}
+          {processingStage === 4 && "Generating insights and analysis..."}
+        </div>
       </div>
 
       <div className="output">

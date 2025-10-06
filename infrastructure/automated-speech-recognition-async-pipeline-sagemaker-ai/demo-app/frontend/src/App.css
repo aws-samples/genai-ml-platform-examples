@@ -24,9 +24,15 @@ body {
 h1 {
   text-align: center;
   color: #333;
-  margin-bottom: 30px;
   margin-top: 20px;
   font-size: 2.2em;
+}
+
+h2 {
+  text-align: center;
+  color: #333;
+  margin-bottom: 30px;
+  font-size: 1.2em;
 }
 
 .controls {
@@ -73,6 +79,151 @@ audio {
   width: 100%;
   max-width: 500px;
   height: 60px;
+}
+
+.pipeline-visualization {
+  margin: 30px 0;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 15px;
+  border: 2px solid #dee2e6;
+}
+
+.pipeline-icons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.pipeline-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 15px;
+  border-radius: 12px;
+  background: white;
+  border: 2px solid #e9ecef;
+  transition: all 0.3s ease;
+  min-width: 80px;
+}
+
+.pipeline-icon img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  margin-bottom: 8px;
+  transition: transform 0.3s ease;
+}
+
+.pipeline-icon span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6c757d;
+  text-align: center;
+}
+
+.pipeline-icon.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #667eea10, #764ba210);
+  animation: pulse-icon 2s infinite;
+}
+
+.pipeline-icon.active img {
+  transform: scale(1.1);
+}
+
+.pipeline-icon.active span {
+  color: #667eea;
+}
+
+.pipeline-arrow {
+  font-size: 24px;
+  color: #adb5bd;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.pipeline-arrow.flowing {
+  color: #667eea;
+  animation: flow-arrow 1.5s infinite;
+}
+
+.pipeline-commentary {
+  text-align: center;
+  margin-top: 15px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #667eea;
+  min-height: 20px;
+  font-style: italic;
+}
+
+@keyframes pulse-icon {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes flow-arrow {
+  0%, 100% { transform: translateX(0) scale(1); opacity: 0.7; }
+  50% { transform: translateX(5px) scale(1.2); opacity: 1; }
+}
+
+.container.cassette .pipeline-visualization {
+  background: linear-gradient(145deg, #2c2c2c, #1a1a1a);
+  border: 2px solid #444;
+}
+
+.container.cassette .pipeline-icon {
+  background: #333;
+  border-color: #555;
+}
+
+.container.cassette .pipeline-icon span {
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.container.cassette .pipeline-icon.active {
+  border-color: #666;
+  background: linear-gradient(145deg, #444, #222);
+  box-shadow: 0 0 10px rgba(255,255,255,0.1);
+}
+
+.container.cassette .pipeline-icon.active span {
+  color: #fff;
+}
+
+.container.cassette .pipeline-arrow {
+  color: #666;
+}
+
+.container.cassette .pipeline-arrow.flowing {
+  color: #fff;
+  text-shadow: 0 0 5px rgba(255,255,255,0.5);
+}
+
+.container.cassette .pipeline-commentary {
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .pipeline-icons {
+    flex-direction: column;
+    gap: 15px;
+  }
+  
+  .pipeline-arrow {
+    transform: rotate(90deg);
+    font-size: 20px;
+  }
 }
 
 .transcription-buttons {
@@ -375,6 +526,13 @@ audio {
 }
 
 .container.cassette h1 {
+  color: #f0f0f0;
+  text-shadow: 0 0 10px rgba(255,255,255,0.3);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+}
+
+.container.cassette h2 {
   color: #f0f0f0;
   text-shadow: 0 0 10px rgba(255,255,255,0.3);
   font-family: 'Courier New', monospace;
