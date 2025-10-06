@@ -23,7 +23,7 @@ function AudioApp({ signOut, user }) {
   const [style, setStyle] = useState('');
   const [summary, setSummary] = useState('Waiting for summary...');
   const [transcription, setTranscription] = useState('Waiting for transcription...');
-  const [activeTab, setActiveTab] = useState('summary');
+  const [activeTab, setActiveTab] = useState('transcription');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState(0);
   const [sessionState, setSessionState] = useState(false);
@@ -31,6 +31,7 @@ function AudioApp({ signOut, user }) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
+  const [fileSizeMB, setFileSizeMB] = useState(0);
   const [theme, setTheme] = useState('modern');
   const [authToken, setAuthToken] = useState(null);
 
@@ -130,12 +131,24 @@ function AudioApp({ signOut, user }) {
     };
   };
 
-  const handleAudioChange = (e) => {
+  const handleAudioChange = async (e) => {
     const file = e.target.value;
     setAudioFile(file);
     if (file && audioRef.current) {
       audioRef.current.src = `audio/${file}`;
       audioRef.current.load();
+      
+      // Check file size for button disabling
+      try {
+        const response = await fetch(`audio/${file}`);
+        const blob = await response.blob();
+        setFileSizeMB(blob.size / (1024 * 1024));
+      } catch (error) {
+        console.error('Error checking file size:', error);
+        setFileSizeMB(0);
+      }
+    } else {
+      setFileSizeMB(0);
     }
   };
 
@@ -143,12 +156,14 @@ function AudioApp({ signOut, user }) {
     const file = e.target.files[0];
     if (file && file.type === 'audio/wav') {
       setUploadedFile(file);
+      setFileSizeMB(file.size / (1024 * 1024));
       if (audioRef.current) {
         audioRef.current.src = URL.createObjectURL(file);
         audioRef.current.load();
       }
     } else {
       alert('Please select a WAV file');
+      setFileSizeMB(0);
     }
   };
 
@@ -165,6 +180,7 @@ function AudioApp({ signOut, user }) {
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: 'audio/wav' });
         setRecordedBlob(blob);
+        setFileSizeMB(blob.size / (1024 * 1024));
         if (audioRef.current) {
           audioRef.current.src = URL.createObjectURL(blob);
           audioRef.current.load();
@@ -184,6 +200,22 @@ function AudioApp({ signOut, user }) {
       mediaRecorderRef.current.stop();
       streamRef.current.getTracks().forEach(track => track.stop());
       setIsRecording(false);
+    }
+  };
+
+  const resetResults = () => {
+    setSummary('Waiting for summary...');
+    setTranscription('Waiting for transcription...');
+    setProcessingStage(0);
+    setAudioFile('');
+    setStyle('');
+    setUploadedFile(null);
+    setRecordedBlob(null);
+    setFileSizeMB(0);
+    setActiveTab('transcription')
+    if (window.processingLoop) clearInterval(window.processingLoop);
+    if (audioRef.current) {
+      audioRef.current.src = '';
     }
   };
 
@@ -273,6 +305,7 @@ function AudioApp({ signOut, user }) {
       }
 
       const fileSizeMB = audioBlob.size / (1024 * 1024);
+      setFileSizeMB(fileSizeMB);
       let requestBody;
 
       if (fileSizeMB > 6) {
@@ -401,7 +434,6 @@ function AudioApp({ signOut, user }) {
             <option value="">Choose style...</option>
             <option value="brief">Brief</option>
             <option value="detailed">Detailed</option>
-            <option value="bullet-points">Bullet Points</option>
           </select>
         </div>
       </div>
@@ -416,7 +448,8 @@ function AudioApp({ signOut, user }) {
         <button 
           className="transcribe-btn placeholder1" 
           onClick={() => startTranscription('nim')}
-          disabled={isProcessing}
+          disabled={isProcessing || fileSizeMB > 15}
+          title={fileSizeMB > 10 ? 'File too large for real-time processing (>15MB)' : ''}
         >
           Real-time
         </button>
@@ -426,6 +459,13 @@ function AudioApp({ signOut, user }) {
           disabled={isProcessing}
         >
           Async
+        </button>
+        <button 
+          className="reset-btn" 
+          onClick={resetResults}
+          disabled={isProcessing}
+        >
+          Reset
         </button>
       </div>
 
@@ -462,16 +502,22 @@ function AudioApp({ signOut, user }) {
       <div className="output">
         <div className="tabs">
           <button 
-            className={`tab ${activeTab === 'summary' ? 'active' : ''}`}
-            onClick={() => setActiveTab('summary')}
-          >
-            Summary Output
-          </button>
-          <button 
             className={`tab ${activeTab === 'transcription' ? 'active' : ''}`}
             onClick={() => setActiveTab('transcription')}
           >
             Transcription
+          </button>
+          <button 
+            className={`tab ${activeTab === 'summary' ? 'active' : ''}`}
+            onClick={() => setActiveTab('summary')}
+          >
+            Summary
+            {(summary === 'Processing transcription...' || summary.startsWith('Processing:')) && (
+              <span className="processing-badge">processing</span>
+            )}
+            {summary !== 'Waiting for summary...' && summary !== 'Processing transcription...' && !summary.startsWith('Processing:') && !summary.startsWith('Error:') && (
+              <span className="ready-badge">ready</span>
+            )}
           </button>
         </div>
         <div className="tab-content">

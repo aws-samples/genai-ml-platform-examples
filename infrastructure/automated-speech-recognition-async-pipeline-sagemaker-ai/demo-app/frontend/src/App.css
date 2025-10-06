@@ -82,7 +82,7 @@ audio {
 }
 
 .pipeline-visualization {
-  margin: 30px 0;
+  margin: 10px 0;
   padding: 20px;
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
   border-radius: 15px;
@@ -261,6 +261,30 @@ audio {
 }
 
 .transcribe-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.reset-btn {
+  padding: 15px 30px;
+  font-size: 16px;
+  font-weight: 600;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+  color: white;
+}
+
+.reset-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+}
+
+.reset-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -623,6 +647,19 @@ audio {
   box-shadow: 0 0 15px rgba(255,255,255,0.2);
 }
 
+.container.cassette .reset-btn {
+  background: linear-gradient(145deg, #444, #222);
+  border: 2px solid #666;
+  color: #fff;
+  text-shadow: 0 0 5px rgba(255,255,255,0.3);
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .reset-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #555, #333);
+  box-shadow: 0 0 15px rgba(255,255,255,0.2);
+}
+
 .container.cassette .summary-box {
   background: #1a1a1a;
   border: 2px solid #444;
@@ -697,6 +734,28 @@ audio {
   background: rgba(102, 126, 234, 0.1);
 }
 
+.ready-badge {
+  background: #28a745;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.processing-badge {
+  background: #ffc107;
+  color: #212529;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .tab-content {
   min-height: 200px;
 }
@@ -734,6 +793,17 @@ audio {
   color: #fff;
   border-bottom-color: #666;
   background: rgba(255, 255, 255, 0.1);
+}
+
+.container.cassette .ready-badge {
+  background: #4CAF50;
+  font-family: 'Courier New', monospace;
+}
+
+.container.cassette .processing-badge {
+  background: #ffeb3b;
+  color: #333;
+  font-family: 'Courier New', monospace;
 }
 
 .container.cassette .transcription-box {
