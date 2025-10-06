@@ -62,10 +62,11 @@ def handler(event, context):
         print(f'transcription: {raw_transcription}')
         if 'predictions' in raw_transcription:
             raw_transcription = raw_transcription['predictions'][0]['results']
+            print(f'formatting: {raw_transcription}')    
+            transcription = format_transcript(raw_transcription)
         else:
-            raw_transcription = raw_transcription['text']
+            transcription = raw_transcription['text']
         
-        transcription = format_transcript(raw_transcription)
         connection_id = event.get('session_id', '')
         style = event.get('style', 'brief')
 
@@ -89,10 +90,13 @@ def handler(event, context):
 
         # Combine all channel texts for summarization
         # combined_text = ' '.join([ch['text'] for ch in transcription])
+
+        model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        # model_id = "global.anthropic.claude-sonnet-4-20250514-v1:0"
         
         # Use Bedrock converse streaming API
         response = bedrock_client.converse_stream(
-            modelId='global.anthropic.claude-sonnet-4-20250514-v1:0',
+            modelId=model_id,
             messages=[
                 {
                     'role': 'user',
