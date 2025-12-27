@@ -1,6 +1,6 @@
 datasets
 opensearch-py
-mlflow==2.22.1
+mlflow==3.5.0rc0
 sagemaker-mlflow
 langchain
 langgraph
