@@ -1,0 +1,18 @@
+# Requirements for mlp_sdk examples
+
+# Core dependencies
+mlp_sdk>=0.1.0
+pandas>=1.3.0
+numpy>=1.21.0
+scikit-learn>=1.0.0
+boto3>=1.26.0
+
+# For Jupyter notebooks
+jupyter>=1.0.0
+ipykernel>=6.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Optional: for better notebook experience
+ipywidgets>=7.6.0
+tqdm>=4.62.0
