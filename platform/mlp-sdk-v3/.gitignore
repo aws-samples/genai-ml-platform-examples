@@ -1,0 +1,39 @@
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+__pycache__/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+sagemaker_venv
+.sagemaker_venv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite
+CLAUDE.md
+
+# KIRO
+.hypothesis
+.pytest_cache
+*/.hypothesis
+*/.pytest_cache
+htmlcov
+.coverage
+coverage.xml
