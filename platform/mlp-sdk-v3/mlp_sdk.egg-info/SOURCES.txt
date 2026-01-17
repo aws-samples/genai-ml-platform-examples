@@ -11,6 +11,7 @@ mlp_sdk.egg-info/dependency_links.txt
 mlp_sdk.egg-info/requires.txt
 mlp_sdk.egg-info/top_level.txt
 mlp_sdk/wrappers/__init__.py
+mlp_sdk/wrappers/deployment.py
 mlp_sdk/wrappers/feature_store.py
 mlp_sdk/wrappers/pipeline.py
 mlp_sdk/wrappers/processing.py

@@ -46,13 +46,13 @@ Requires-Dist: pytest-mock>=3.10.0; extra == "test"
 Requires-Dist: pytest-cov>=4.0.0; extra == "test"
 Requires-Dist: moto[sagemaker]>=4.2.0; extra == "test"
 
-# mlp_sdk
+# mlp_sdk_v3
 
 A Python wrapper library for SageMaker SDK v3 with configuration-driven defaults.
 
 ## Overview
 
-The mlp_sdk simplifies SageMaker operations by providing a session-based interface with configuration-driven defaults. Built on top of the SageMaker Python SDK v3, it abstracts infrastructure complexity while maintaining full compatibility with the underlying SDK.
+The mlp_sdk_v3 simplifies SageMaker operations by providing a session-based interface with configuration-driven defaults. Built on top of the SageMaker Python SDK v3, it abstracts infrastructure complexity while maintaining full compatibility with the underlying SDK.
 
 ### Key Features
 
@@ -67,7 +67,7 @@ The mlp_sdk simplifies SageMaker operations by providing a session-based interfa
 ## Installation
 
 ```bash
-pip install mlp_sdk
+pip install mlp_sdk_v3
 ```
 
 ## Quick Start
@@ -89,7 +89,7 @@ See [examples/QUICKSTART.md](examples/QUICKSTART.md) for a complete quick start 
 ### Basic Usage
 
 ```python
-from mlp_sdk import MLP_Session
+from mlp_sdk_v3 import MLP_Session
 
 # Initialize session with default configuration
 session = MLP_Session()
@@ -140,7 +140,7 @@ pipeline = session.create_pipeline(
 
 ### Configuration File Location
 
-By default, mlp_sdk loads configuration from:
+By default, mlp_sdk_v3 loads configuration from:
 ```
 /home/sagemaker-user/.config/admin-config.yaml
 ```
@@ -213,12 +213,12 @@ trainer = session.run_training_job(
 
 ## Encryption Setup
 
-mlp_sdk supports AES-256-GCM encryption for sensitive configuration values.
+mlp_sdk_v3 supports AES-256-GCM encryption for sensitive configuration values.
 
 ### Generating an Encryption Key
 
 ```python
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Generate a new encryption key
 key = ConfigurationManager.generate_key()
@@ -232,7 +232,7 @@ print(f"Encryption key: {key}")
 
 ```python
 import os
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Set environment variable
 os.environ['MLP_SDK_ENCRYPTION_KEY'] = 'your-base64-encoded-key'
@@ -245,7 +245,7 @@ session = MLP_Session(config_path="encrypted-config.yaml")
 #### From File
 
 ```python
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Load key from file
 key = ConfigurationManager.load_key_from_file("/path/to/keyfile")
@@ -258,7 +258,7 @@ config_manager = ConfigurationManager(
 #### From AWS KMS
 
 ```python
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Load key from KMS
 key = ConfigurationManager.load_key_from_kms(
@@ -274,7 +274,7 @@ config_manager = ConfigurationManager(
 ### Encrypting Configuration Files
 
 ```python
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Generate or load encryption key
 key = ConfigurationManager.generate_key()
@@ -296,7 +296,7 @@ config_manager.encrypt_config_file(
 ### Decrypting Configuration Files
 
 ```python
-from mlp_sdk.config import ConfigurationManager
+from mlp_sdk_v3.config import ConfigurationManager
 
 # Load encryption key
 key = ConfigurationManager.load_key_from_env()
@@ -389,10 +389,10 @@ print(config)
 
 ## Error Handling
 
-mlp_sdk provides detailed error messages with AWS error details:
+mlp_sdk_v3 provides detailed error messages with AWS error details:
 
 ```python
-from mlp_sdk import MLP_Session, ValidationError, AWSServiceError, ConfigurationError
+from mlp_sdk_v3 import MLP_Session, ValidationError, AWSServiceError, ConfigurationError
 
 try:
     session = MLP_Session()
@@ -415,7 +415,7 @@ except ConfigurationError as e:
 
 ### MLP_Session
 
-Main interface for all mlp_sdk operations.
+Main interface for all mlp_sdk_v3 operations.
 
 #### Methods
 
@@ -469,8 +469,8 @@ Handles configuration loading and encryption.
 
 ```bash
 # Clone the repository
-git clone https://github.com/example/mlp_sdk.git
-cd mlp_sdk
+git clone https://github.com/example/mlp_sdk_v3.git
+cd mlp_sdk_v3
 
 # Install in development mode with test dependencies
 pip install -e ".[dev]"
@@ -489,7 +489,7 @@ pytest tests/unit/
 pytest tests/property/
 
 # Run with coverage
-pytest --cov=mlp_sdk
+pytest --cov=mlp_sdk_v3
 
 # Run specific test file
 pytest tests/unit/test_session.py
@@ -499,16 +499,16 @@ pytest tests/unit/test_session.py
 
 ```bash
 # Format code
-black mlp_sdk tests
+black mlp_sdk_v3 tests
 
 # Sort imports
-isort mlp_sdk tests
+isort mlp_sdk_v3 tests
 
 # Lint code
-flake8 mlp_sdk tests
+flake8 mlp_sdk_v3 tests
 
 # Type checking
-mypy mlp_sdk
+mypy mlp_sdk_v3
 ```
 
 ## Requirements
@@ -530,7 +530,7 @@ Contributions are welcome! Please read our contributing guidelines and submit pu
 
 ## Support
 
-For issues, questions, or contributions, please visit our [GitHub repository](https://github.com/example/mlp_sdk).
+For issues, questions, or contributions, please visit our [GitHub repository](https://github.com/example/mlp_sdk_v3).
 
 ## Examples
 
