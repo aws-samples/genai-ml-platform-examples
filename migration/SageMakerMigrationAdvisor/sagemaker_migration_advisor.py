@@ -314,7 +314,7 @@ OUTPUT:
         st.success(f"Retrying step: {step}")
     
     def download_results(self):
-        """Generate downloadable results in multiple formats"""
+        """Generate downloadable results in multiple formats using PDFReportGenerator"""
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         
         # Generate JSON results
@@ -325,8 +325,37 @@ OUTPUT:
         }
         json_str = json.dumps(results, indent=2)
         
-        # Generate PDF report
-        pdf_buffer = self.generate_pdf_report()
+        # Generate PDF report using PDFReportGenerator
+        pdf_buffer = None
+        try:
+            from pdf_report_generator import PDFReportGenerator
+            
+            # Get diagram folder path
+            current_dir = os.getcwd()
+            diagram_folder = os.path.join(current_dir, 'generated-diagrams')
+            
+            # Create PDF generator
+            pdf_gen = PDFReportGenerator(
+                workflow_state=st.session_state.workflow_state,
+                diagram_folder=diagram_folder,
+                model_name=st.session_state.model_name
+            )
+            
+            # Generate PDF
+            with st.spinner("Generating PDF report..."):
+                pdf_buffer = pdf_gen.generate_report()
+            
+            if pdf_buffer:
+                logger.info("PDF report generated successfully")
+            else:
+                logger.warning("PDF generation returned None")
+                
+        except ImportError as e:
+            logger.error(f"Missing reportlab dependency: {e}")
+            st.error("PDF generation requires reportlab. Install with: pip install reportlab")
+        except Exception as e:
+            logger.error(f"Error generating PDF: {e}", exc_info=True)
+            st.error(f"PDF generation failed: {str(e)}")
         
         # Show report preview
         st.markdown("### 📋 Report Contents")
@@ -380,7 +409,8 @@ OUTPUT:
                     help="Raw data for further processing"
                 )
         else:
-            st.error("PDF generation failed. Please check the logs for details.")
+            st.warning("PDF generation failed. Downloading JSON data only.")
+            st.info("💡 To enable PDF generation, ensure reportlab is installed: pip install reportlab")
             st.download_button(
                 label="📥 Download JSON Data",
                 data=json_str,
@@ -389,377 +419,6 @@ OUTPUT:
                 help="Raw data for further processing"
             )
     
-    def generate_pdf_report(self):
-        """Generate a comprehensive PDF migration report"""
-        try:
-            from reportlab.lib.pagesizes import letter, A4
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import inch
-            from reportlab.lib import colors
-            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
-            from io import BytesIO
-            
-            # Create PDF buffer
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
-            
-            # Get styles
-            styles = getSampleStyleSheet()
-            
-            # Custom styles
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
-                fontSize=24,
-                spaceAfter=30,
-                alignment=TA_CENTER,
-                textColor=colors.HexColor('#2E86AB')
-            )
-            
-            heading_style = ParagraphStyle(
-                'CustomHeading',
-                parent=styles['Heading2'],
-                fontSize=16,
-                spaceAfter=12,
-                spaceBefore=20,
-                textColor=colors.HexColor('#FF6B35')
-            )
-            
-            subheading_style = ParagraphStyle(
-                'CustomSubHeading',
-                parent=styles['Heading3'],
-                fontSize=14,
-                spaceAfter=8,
-                spaceBefore=12,
-                textColor=colors.HexColor('#2E86AB')
-            )
-            
-            body_style = ParagraphStyle(
-                'CustomBody',
-                parent=styles['Normal'],
-                fontSize=11,
-                spaceAfter=8,
-                alignment=TA_JUSTIFY,
-                leftIndent=0,
-                rightIndent=0
-            )
-            
-            # Build story
-            story = []
-            
-            # Title page
-            story.append(Paragraph("SageMaker Migration Advisory Report", title_style))
-            story.append(Spacer(1, 0.5*inch))
-            
-            # Executive summary table
-            exec_data = [
-                ['Report Generated', datetime.datetime.now().strftime('%B %d, %Y at %I:%M %p')],
-                ['AI Model Used', st.session_state.model_name],
-                ['Analysis Scope', 'Complete Architecture Migration Assessment'],
-                ['Report Status', 'Ready for Implementation']
-            ]
-            
-            exec_table = Table(exec_data, colWidths=[2*inch, 3*inch])
-            exec_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8F9FA')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#DEE2E6')),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]))
-            
-            story.append(exec_table)
-            story.append(PageBreak())
-            
-            # Table of Contents
-            story.append(Paragraph("Table of Contents", heading_style))
-            toc_data = [
-                "1. Executive Summary",
-                "2. Current Architecture Analysis", 
-                "3. Clarification Questions & Answers",
-                "4. Proposed SageMaker Architecture",
-                "   4.1 Architecture Design",
-                "   4.2 Architecture Diagrams",
-                "5. Total Cost of Ownership Analysis",
-                "6. Migration Roadmap",
-                "7. Implementation Recommendations",
-                "8. Appendices"
-            ]
-            
-            for item in toc_data:
-                story.append(Paragraph(item, body_style))
-            
-            story.append(PageBreak())
-            
-            # Add content sections
-            self._add_executive_summary(story, heading_style, subheading_style, body_style)
-            self._add_architecture_analysis(story, heading_style, subheading_style, body_style)
-            self._add_qa_section(story, heading_style, subheading_style, body_style)
-            self._add_sagemaker_design(story, heading_style, subheading_style, body_style)
-            self._add_tco_analysis(story, heading_style, subheading_style, body_style)
-            self._add_migration_roadmap(story, heading_style, subheading_style, body_style)
-            self._add_implementation_recommendations(story, heading_style, subheading_style, body_style)
-            
-            # Build PDF
-            doc.build(story)
-            buffer.seek(0)
-            return buffer.getvalue()
-            
-        except ImportError:
-            st.error("PDF generation requires reportlab. Install with: pip install reportlab")
-            return None
-        except Exception as e:
-            st.error(f"Error generating PDF: {str(e)}")
-            return None
-    
-    def _add_executive_summary(self, story, heading_style, subheading_style, body_style):
-        """Add executive summary section to PDF"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        
-        story.append(Paragraph("1. Executive Summary", heading_style))
-        
-        # Get workflow state
-        workflow_state = st.session_state.workflow_state
-        completed_steps = len(workflow_state.get('completed_steps', []))
-        
-        summary_text = f"""
-        This comprehensive migration advisory report provides a detailed analysis and roadmap for migrating your current 
-        ML/GenAI architecture to Amazon SageMaker. The assessment includes {completed_steps} completed analysis phases, 
-        covering current state architecture, clarification requirements, proposed SageMaker design, cost analysis, 
-        and a detailed implementation roadmap.
-        
-        <b>Key Findings:</b>
-        • Current architecture has been thoroughly analyzed and documented
-        • Migration requirements and constraints have been clarified through interactive Q&A
-        • A modern SageMaker-based architecture has been designed to address current limitations
-        • Total cost of ownership analysis shows projected benefits and investment requirements
-        • A step-by-step migration roadmap provides clear implementation guidance
-        
-        <b>Recommendation:</b>
-        Proceed with the proposed SageMaker migration following the detailed roadmap provided in this report. 
-        The migration will improve scalability, reduce operational overhead, and provide better ML lifecycle management.
-        """
-        
-        story.append(Paragraph(summary_text, body_style))
-        story.append(PageBreak())
-    
-    def _add_architecture_analysis(self, story, heading_style, subheading_style, body_style):
-        """Add current architecture analysis section"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        
-        story.append(Paragraph("2. Current Architecture Analysis", heading_style))
-        
-        arch_response = st.session_state.workflow_state['agent_responses'].get('description', {})
-        if arch_response:
-            story.append(Paragraph("2.1 Architecture Overview", subheading_style))
-            
-            # Clean and format the architecture analysis
-            analysis_text = str(arch_response.get('output', 'No architecture analysis available.'))
-            analysis_text = analysis_text.replace('\n', '<br/>')
-            
-            story.append(Paragraph(analysis_text, body_style))
-        else:
-            story.append(Paragraph("No architecture analysis data available.", body_style))
-        
-        story.append(PageBreak())
-    
-    def _add_qa_section(self, story, heading_style, subheading_style, body_style):
-        """Add Q&A section to PDF"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        from reportlab.lib.units import inch
-        
-        story.append(Paragraph("3. Clarification Questions & Answers", heading_style))
-        
-        qa_session = st.session_state.workflow_state.get('qa_session', {})
-        qa_response = st.session_state.workflow_state['agent_responses'].get('qa', {})
-        
-        if qa_session and qa_session.get('conversation', []):
-            story.append(Paragraph("3.1 Interactive Q&A Session", subheading_style))
-            
-            for i, exchange in enumerate(qa_session['conversation']):
-                story.append(Paragraph(f"<b>Question {i+1}:</b>", subheading_style))
-                question_text = exchange.get('question', '').replace('\n', '<br/>')
-                story.append(Paragraph(question_text, body_style))
-                
-                story.append(Paragraph(f"<b>Answer {i+1}:</b>", subheading_style))
-                answer_text = exchange.get('answer', 'No answer provided').replace('\n', '<br/>')
-                story.append(Paragraph(answer_text, body_style))
-                
-                # Add synthesis if available
-                if exchange.get('synthesis'):
-                    story.append(Paragraph(f"<b>AI Understanding:</b>", subheading_style))
-                    synthesis_text = exchange.get('synthesis', '').replace('\n', '<br/>')
-                    story.append(Paragraph(f"✓ {synthesis_text}", body_style))
-                
-                story.append(Spacer(1, 0.2*inch))
-        
-        if qa_response:
-            story.append(Paragraph("3.2 Comprehensive Analysis", subheading_style))
-            final_analysis = str(qa_response.get('output', '')).replace('\n', '<br/>')
-            story.append(Paragraph(final_analysis, body_style))
-        
-        story.append(PageBreak())
-    
-    def _add_sagemaker_design(self, story, heading_style, subheading_style, body_style):
-        """Add SageMaker design section"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        
-        story.append(Paragraph("4. Proposed SageMaker Architecture", heading_style))
-        
-        sagemaker_response = st.session_state.workflow_state['agent_responses'].get('sagemaker', {})
-        if sagemaker_response:
-            story.append(Paragraph("4.1 Architecture Design", subheading_style))
-            
-            design_text = str(sagemaker_response.get('output', 'No SageMaker design available.')).replace('\n', '<br/>')
-            story.append(Paragraph(design_text, body_style))
-        else:
-            story.append(Paragraph("No SageMaker architecture design available.", body_style))
-        
-        # Add diagram section with actual images if available
-        self._add_diagram_section(story, heading_style, subheading_style, body_style)
-        
-        story.append(PageBreak())
-    
-    def _add_diagram_section(self, story, heading_style, subheading_style, body_style):
-        """Add architecture diagrams section with actual images"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak, Image as ReportLabImage
-        from reportlab.lib.units import inch
-        import os
-        
-        story.append(Paragraph("4.2 Architecture Diagrams", subheading_style))
-        
-        diagram_response = st.session_state.workflow_state['agent_responses'].get('diagram', {})
-        
-        if diagram_response:
-            # Add diagram generation result text
-            diagram_text = str(diagram_response.get('output', '')).replace('\n', '<br/>')
-            if diagram_text and diagram_text.strip():
-                story.append(Paragraph("**Diagram Generation Summary:**", subheading_style))
-                story.append(Paragraph(diagram_text, body_style))
-                story.append(Spacer(1, 0.2*inch))
-        
-        # Check for actual diagram files
-        diagram_folder = 'generated-diagrams'
-        if os.path.exists(diagram_folder):
-            diagram_files = [f for f in os.listdir(diagram_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
-            
-            if diagram_files:
-                story.append(Paragraph("**Generated Architecture Diagrams:**", subheading_style))
-                story.append(Spacer(1, 0.1*inch))
-                
-                for i, diagram_file in enumerate(diagram_files[:4]):  # Limit to 4 diagrams to avoid PDF bloat
-                    try:
-                        img_path = os.path.join(diagram_folder, diagram_file)
-                        
-                        # Add diagram title
-                        diagram_title = diagram_file.replace('_', ' ').replace('.png', '').replace('.jpg', '').replace('.jpeg', '').title()
-                        story.append(Paragraph(f"<b>Diagram {i+1}: {diagram_title}</b>", body_style))
-                        
-                        # Add the image to PDF
-                        # Calculate appropriate size (max width 6 inches, maintain aspect ratio)
-                        img = ReportLabImage(img_path, width=6*inch, height=4*inch)
-                        story.append(img)
-                        story.append(Spacer(1, 0.2*inch))
-                        
-                        # Add caption
-                        story.append(Paragraph(f"<i>Figure {i+1}: {diagram_title}</i>", body_style))
-                        story.append(Spacer(1, 0.3*inch))
-                        
-                    except Exception as e:
-                        # If image can't be loaded, add a note
-                        story.append(Paragraph(f"<i>Note: Could not embed {diagram_file} - {str(e)}</i>", body_style))
-                        story.append(Spacer(1, 0.1*inch))
-                
-                if len(diagram_files) > 4:
-                    story.append(Paragraph(f"<i>Note: {len(diagram_files) - 4} additional diagrams are available in the generated-diagrams folder.</i>", body_style))
-            else:
-                story.append(Paragraph("No diagram image files found in the generated-diagrams folder.", body_style))
-        else:
-            if diagram_response:
-                story.append(Paragraph("Diagram generation was attempted but no diagram files were created. This may be due to service limitations or errors during generation.", body_style))
-            else:
-                story.append(Paragraph("No architecture diagrams were generated during this session.", body_style))
-        
-        story.append(Spacer(1, 0.2*inch))
-    
-    def _add_tco_analysis(self, story, heading_style, subheading_style, body_style):
-        """Add TCO analysis section"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        
-        story.append(Paragraph("5. Total Cost of Ownership Analysis", heading_style))
-        
-        tco_response = st.session_state.workflow_state['agent_responses'].get('tco', {})
-        if tco_response:
-            story.append(Paragraph("5.1 Cost Analysis", subheading_style))
-            
-            tco_text = str(tco_response.get('output', 'No TCO analysis available.')).replace('\n', '<br/>')
-            story.append(Paragraph(tco_text, body_style))
-        else:
-            story.append(Paragraph("No TCO analysis data available.", body_style))
-        
-        story.append(PageBreak())
-    
-    def _add_migration_roadmap(self, story, heading_style, subheading_style, body_style):
-        """Add migration roadmap section"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
-        
-        story.append(Paragraph("6. Migration Roadmap", heading_style))
-        
-        navigator_response = st.session_state.workflow_state['agent_responses'].get('navigator', {})
-        if navigator_response:
-            story.append(Paragraph("6.1 Implementation Steps", subheading_style))
-            
-            roadmap_text = str(navigator_response.get('output', 'No migration roadmap available.')).replace('\n', '<br/>')
-            story.append(Paragraph(roadmap_text, body_style))
-        else:
-            story.append(Paragraph("No migration roadmap data available.", body_style))
-        
-        story.append(PageBreak())
-    
-    def _add_implementation_recommendations(self, story, heading_style, subheading_style, body_style):
-        """Add implementation recommendations"""
-        from reportlab.platypus import Paragraph, Spacer
-        
-        story.append(Paragraph("7. Implementation Recommendations", heading_style))
-        
-        recommendations = """
-        <b>7.1 Pre-Migration Checklist</b><br/>
-        • Ensure all team members have appropriate AWS training<br/>
-        • Set up development and testing environments<br/>
-        • Establish backup and rollback procedures<br/>
-        • Create detailed project timeline with milestones<br/>
-        • Identify and mitigate potential risks<br/><br/>
-        
-        <b>7.2 Success Criteria</b><br/>
-        • All ML models successfully migrated to SageMaker<br/>
-        • Performance metrics meet or exceed current benchmarks<br/>
-        • Cost targets achieved as outlined in TCO analysis<br/>
-        • Team productivity maintained or improved<br/>
-        • Security and compliance requirements satisfied<br/><br/>
-        
-        <b>7.3 Post-Migration Activities</b><br/>
-        • Monitor system performance and costs<br/>
-        • Optimize resource utilization<br/>
-        • Implement advanced SageMaker features<br/>
-        • Conduct team training on new workflows<br/>
-        • Document lessons learned and best practices<br/><br/>
-        
-        <b>7.4 Support and Resources</b><br/>
-        • AWS Support: Consider upgrading to Business or Enterprise support<br/>
-        • AWS Professional Services: Engage for complex migration scenarios<br/>
-        • AWS Training: Enroll team in SageMaker certification programs<br/>
-        • Community: Join AWS ML community forums and user groups
-        """
-        
-        story.append(Paragraph(recommendations, body_style))
     
     def handle_architecture_input(self):
         """Handle architecture input step"""
@@ -1381,7 +1040,7 @@ This information provides a solid foundation for designing the SageMaker migrati
             st.info("✅ SageMaker architecture design is complete. You can now proceed to generate architecture diagrams.")
     
     def handle_diagram_step(self):
-        """Handle diagram generation step"""
+        """Handle diagram generation step using DiagramGenerator class"""
         st.markdown('<div class="step-header">📊 Step 4: Architecture Diagram Generation</div>', unsafe_allow_html=True)
         
         sagemaker_response = st.session_state.workflow_state['agent_responses'].get('sagemaker', {})
@@ -1401,83 +1060,79 @@ This information provides a solid foundation for designing the SageMaker migrati
                         progress = st.empty()
                         progress.info("🔄 Initializing diagram generation tools...")
                         
-                        # Ensure the generated-diagrams folder exists
-                        diagram_folder = 'generated-diagrams'
-                        os.makedirs(diagram_folder, exist_ok=True)
+                        # Import DiagramGenerator
+                        from diagram_generator import DiagramGenerator
                         
-                        # Check current working directory
+                        # Get current working directory
                         current_dir = os.getcwd()
                         logger.info(f"Current working directory: {current_dir}")
-                        logger.info(f"Diagram folder path: {os.path.abspath(diagram_folder)}")
                         
-                        # Setup MCP client for diagram generation
-                        domain_name_tools = MCPClient(lambda: stdio_client(
-                            StdioServerParameters(command="uvx", args=["awslabs.aws-diagram-mcp-server"])
-                        ))
+                        # Create DiagramGenerator instance
+                        diagram_gen = DiagramGenerator(
+                            workspace_dir=current_dir,
+                            bedrock_model=st.session_state.bedrock_model,
+                            system_prompt=DIAGRAM_GENERATION_SYSTEM_PROMPT,
+                            user_prompt=DIAGRAM_GENERATION_USER_PROMPT
+                        )
                         
                         progress.info("🤖 Generating architecture diagrams...")
                         
-                        with domain_name_tools:
-                            tools = domain_name_tools.list_tools_sync() + [image_reader, use_llm, load_tool]
-                            
-                            # Log available tools
-                            tool_names = [tool.name if hasattr(tool, 'name') else str(tool) for tool in tools]
-                            logger.info(f"Available tools for diagram generation: {tool_names}")
-                            
-                            diagram_agent = Agent(
-                                model=st.session_state.bedrock_model,
-                                tools=tools,
-                                system_prompt=DIAGRAM_GENERATION_SYSTEM_PROMPT,
-                                load_tools_from_directory=False
-                            )
-                            
-                            diagram_input = str(sagemaker_response.get('output', '')) + "\n" + DIAGRAM_GENERATION_USER_PROMPT
-                            
-                            # Log the input being sent
-                            logger.info(f"Diagram generation input length: {len(diagram_input)}")
-                            logger.info(f"Diagram generation input preview: {diagram_input[:300]}...")
-                            
-                            response = diagram_agent(diagram_input)
-                            
-                            # Log the response
-                            response_str = str(response)
-                            logger.info(f"Diagram generation response length: {len(response_str)}")
-                            logger.info(f"Diagram generation response preview: {response_str[:300]}...")
-                            
-                            progress.info("💾 Saving diagram information...")
-                            
-                            # Check if any files were created in the diagrams folder
-                            files_after = os.listdir(diagram_folder) if os.path.exists(diagram_folder) else []
-                            logger.info(f"Files in diagram folder after generation: {files_after}")
-                            
-                            self.save_interaction('Diagram Agent', diagram_input, response_str, 'diagram')
+                        # Generate diagrams
+                        architecture_design = str(sagemaker_response.get('output', ''))
+                        result = diagram_gen.generate_diagram(architecture_design)
+                        
+                        progress.info("💾 Saving diagram information...")
+                        
+                        # Save interaction
+                        self.save_interaction(
+                            'Diagram Agent',
+                            f"Architecture design (length: {len(architecture_design)} chars)",
+                            result['response'],
+                            'diagram'
+                        )
+                        
+                        # Mark step as complete
+                        if 'diagram' not in st.session_state.workflow_state['completed_steps']:
                             st.session_state.workflow_state['completed_steps'].append('diagram')
-                            st.session_state.workflow_state['current_step'] = 'tco'
+                        st.session_state.workflow_state['current_step'] = 'tco'
+                        
+                        progress.empty()
+                        
+                        # Show result based on status
+                        if result['status'] == 'success':
+                            st.success(f"✅ Diagram generated! Found {len(result['diagram_paths'])} diagram(s) in {result['folder']}")
                             
-                            progress.empty()
+                            # Display diagram info
+                            for path in result['diagram_paths']:
+                                file_size = os.path.getsize(path)
+                                st.info(f"📄 {os.path.basename(path)} ({file_size:,} bytes)")
+                        
+                        elif result['status'] == 'no_files':
+                            st.warning("⚠️ Diagram generation completed, but no image files were found. Check the response below for details.")
+                        
+                        elif result['status'] == 'error':
+                            st.error(f"❌ Diagram generation failed: {result['error']}")
                             
-                            # Show more detailed success message
-                            if files_after:
-                                st.success(f"✅ Diagram generated! Found {len(files_after)} files in generated-diagrams folder.")
-                            else:
-                                st.warning("⚠️ Diagram generation completed, but no image files were found. Check the response below for details.")
+                            # Check if it's a Bedrock service error
+                            if "serviceUnavailableException" in result['error'] or "Bedrock is unable to process" in result['error']:
+                                st.warning("⚠️ AWS Bedrock service is temporarily unavailable. This is a transient issue.")
+                                st.info("💡 You can retry later or skip this step to continue with the migration analysis.")
                             
-                            # Show the response immediately
+                            # Save error
+                            st.session_state.workflow_state['errors']['diagram'] = result['error']
+                        
+                        # Show the response
+                        if result['response']:
                             st.markdown("**Diagram Generation Response:**")
-                            st.write(response_str)
-                            
-                            st.rerun()
+                            st.write(result['response'])
+                        
+                        st.rerun()
                     
                     except Exception as e:
                         error_msg = str(e)
                         logger.error(f"Diagram generation error: {error_msg}", exc_info=True)
                         
                         st.error(f"❌ Diagram generation failed: {error_msg}")
-                        
-                        # Check if it's a Bedrock service error
-                        if "serviceUnavailableException" in error_msg or "Bedrock is unable to process" in error_msg:
-                            st.warning("⚠️ AWS Bedrock service is temporarily unavailable. This is a transient issue.")
-                            st.info("💡 You can retry later or skip this step to continue with the migration analysis.")
                         
                         # Save error information
                         self.save_interaction('Diagram Agent', "Diagram generation attempted", f"ERROR: {error_msg}", 'diagram')
@@ -1489,7 +1144,8 @@ This information provides a solid foundation for designing the SageMaker migrati
                     
                     # Mark as completed with skip note
                     self.save_interaction('Diagram Agent', "User skipped diagram generation", "Diagram generation skipped by user", 'diagram')
-                    st.session_state.workflow_state['completed_steps'].append('diagram')
+                    if 'diagram' not in st.session_state.workflow_state['completed_steps']:
+                        st.session_state.workflow_state['completed_steps'].append('diagram')
                     st.session_state.workflow_state['current_step'] = 'tco'
                     
                     st.rerun()
@@ -1502,19 +1158,24 @@ This information provides a solid foundation for designing the SageMaker migrati
             st.write(diagram_response.get('output', ''))
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Try to display generated diagrams
-            diagram_folder = 'generated-diagrams'
-            
-            # Debug information
-            st.write(f"**Debug Info:** Checking for diagrams in: {os.path.abspath(diagram_folder)}")
-            st.write(f"**Debug Info:** Folder exists: {os.path.exists(diagram_folder)}")
-            
-            if os.path.exists(diagram_folder):
-                all_files = os.listdir(diagram_folder)
-                diagram_files = [f for f in all_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg'))]
+            # Try to display generated diagrams using DiagramGenerator
+            try:
+                from diagram_generator import DiagramGenerator
                 
-                st.write(f"**Debug Info:** All files in folder: {all_files}")
-                st.write(f"**Debug Info:** Image files found: {diagram_files}")
+                current_dir = os.getcwd()
+                diagram_gen = DiagramGenerator(
+                    workspace_dir=current_dir,
+                    bedrock_model=st.session_state.bedrock_model,
+                    system_prompt=DIAGRAM_GENERATION_SYSTEM_PROMPT,
+                    user_prompt=DIAGRAM_GENERATION_USER_PROMPT
+                )
+                
+                diagram_files = diagram_gen._list_diagram_files()
+                
+                # Debug information
+                st.write(f"**Debug Info:** Checking for diagrams in: {diagram_gen.diagram_folder}")
+                st.write(f"**Debug Info:** Folder exists: {os.path.exists(diagram_gen.diagram_folder)}")
+                st.write(f"**Debug Info:** Image files found: {len(diagram_files)}")
                 
                 if diagram_files:
                     st.markdown("**Generated Diagrams:**")
@@ -1522,76 +1183,30 @@ This information provides a solid foundation for designing the SageMaker migrati
                     # Display diagrams in a grid layout
                     cols = st.columns(min(len(diagram_files), 3))  # Max 3 columns
                     
-                    for idx, diagram_file in enumerate(diagram_files):
+                    for idx, img_path in enumerate(diagram_files):
                         try:
-                            img_path = os.path.join(diagram_folder, diagram_file)
-                            
-                            # Check if file actually exists and has content
-                            if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
-                                with cols[idx % 3]:
-                                    st.image(img_path, caption=diagram_file)
-                                    
-                                    # Add file info
-                                    file_size = os.path.getsize(img_path)
-                                    st.caption(f"Size: {file_size:,} bytes")
-                            else:
-                                st.warning(f"File {diagram_file} is empty or doesn't exist")
+                            with cols[idx % 3]:
+                                st.image(img_path, caption=os.path.basename(img_path))
+                                
+                                # Add file info
+                                file_size = os.path.getsize(img_path)
+                                st.caption(f"Size: {file_size:,} bytes")
                                 
                         except Exception as e:
-                            st.error(f"Could not display {diagram_file}: {e}")
-                            logger.error(f"Error displaying diagram {diagram_file}: {e}", exc_info=True)
+                            st.error(f"Could not display {os.path.basename(img_path)}: {e}")
+                            logger.error(f"Error displaying diagram {img_path}: {e}", exc_info=True)
                 else:
-                    st.info("No image files found in the generated-diagrams folder.")
-                    if all_files:
-                        st.write("Files found (but not images):", all_files)
-            else:
-                st.warning(f"Generated-diagrams folder does not exist at: {os.path.abspath(diagram_folder)}")
-                
-                # Search for image files in current directory and subdirectories
-                st.info("Searching for recently created image files...")
-                
-                import glob
-                import time
-                
-                # Search for image files created in the last hour
-                current_time = time.time()
-                recent_images = []
-                
-                # Search patterns
-                search_patterns = [
-                    "*.png", "*.jpg", "*.jpeg", "*.gif", "*.svg",
-                    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.svg"
-                ]
-                
-                for pattern in search_patterns:
-                    for file_path in glob.glob(pattern, recursive=True):
-                        try:
-                            file_time = os.path.getmtime(file_path)
-                            if current_time - file_time < 3600:  # Last hour
-                                recent_images.append((file_path, file_time))
-                        except:
-                            continue
-                
-                if recent_images:
-                    st.write("**Recently created image files:**")
-                    recent_images.sort(key=lambda x: x[1], reverse=True)  # Sort by time, newest first
+                    st.info("No diagram image files found in the generated-diagrams folder.")
                     
-                    for file_path, file_time in recent_images[:10]:  # Show up to 10 most recent
-                        time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(file_time))
-                        st.write(f"- {file_path} (created: {time_str})")
-                        
-                        # Try to display the image
-                        try:
-                            st.image(file_path, caption=f"Found: {os.path.basename(file_path)}")
-                        except Exception as e:
-                            st.write(f"  Could not display: {e}")
-                
-                # Try to create the folder if it doesn't exist
-                try:
-                    os.makedirs(diagram_folder, exist_ok=True)
-                    st.info(f"Created diagrams folder at: {os.path.abspath(diagram_folder)}")
-                except Exception as e:
-                    st.error(f"Could not create diagrams folder: {e}")
+                    # Show folder contents for debugging
+                    if os.path.exists(diagram_gen.diagram_folder):
+                        all_files = os.listdir(diagram_gen.diagram_folder)
+                        if all_files:
+                            st.write("Files found (but not valid images):", all_files)
+            
+            except Exception as e:
+                st.error(f"Error displaying diagrams: {e}")
+                logger.error(f"Error in diagram display: {e}", exc_info=True)
     
     def handle_tco_step(self):
         """Handle TCO analysis step"""
