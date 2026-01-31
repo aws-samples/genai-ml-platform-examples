@@ -1,0 +1,16 @@
+{
+  "AWS_REGION": "us-east-1",
+  "SAGEMAKER_ROLE": "arn:aws:iam::YOUR_ACCOUNT:role/SageMakerExecutionRole",
+  "S3_BUCKET": "your-sagemaker-bucket",
+  "S3_PREFIX": "llama-finetuning",
+  "MODEL_ID": "meta-textgeneration-llama-3-2-3b",
+  "MODEL_VERSION": "*",
+  "TRAINING_INSTANCE_TYPE": "ml.g5.2xlarge",
+  "PIPELINE_NAME": "llama-finetuning-pipeline",
+  "MODEL_PACKAGE_GROUP_NAME": "llama-finetuned-models",
+  "PROCESSING_INSTANCE_TYPE": "ml.m5.xlarge",
+  "PROCESSING_INSTANCE_COUNT": 1,
+  "EPOCHS": "4",
+  "MAX_INPUT_LENGTH": "2048",
+  "INSTRUCTION_TUNED": "True"
+}

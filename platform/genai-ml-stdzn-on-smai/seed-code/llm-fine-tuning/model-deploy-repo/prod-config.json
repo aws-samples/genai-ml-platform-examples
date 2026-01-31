@@ -1,0 +1,15 @@
+{
+  "Parameters": {
+    "SageMakerProjectName": "llama-finetuning",
+    "SageMakerProjectId": "project-id",
+    "ModelPackageArn": "arn:aws:sagemaker:region:account:model-package/package-name",
+    "ModelExecutionRoleArn": "arn:aws:iam::account:role/SageMakerExecutionRole",
+    "EndpointInstanceType": "ml.g5.2xlarge",
+    "EndpointInstanceCount": "1"
+  },
+  "Tags": {
+    "sagemaker:project-name": "llama-finetuning",
+    "sagemaker:project-id": "project-id",
+    "sagemaker:deployment-stage": "prod"
+  }
+}

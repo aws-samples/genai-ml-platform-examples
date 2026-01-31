@@ -1,0 +1,27 @@
+# Core AWS and ML packages
+sagemaker>=2.254.2
+boto3>=1.40.65
+botocore>=1.40.65
+
+# MLflow for experiment tracking
+mlflow>=3.0.0
+
+# Data processing and ML
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.5.0
+
+# Hugging Face datasets for data loading
+datasets>=3.0.0
+transformers>=4.45.0
+
+# Additional dependencies for processing
+jsonlines>=4.0.0
+nltk>=3.9.0
+rouge-score>=0.1.2
+evaluate>=0.4.0
+tiktoken>=0.7.0
+
+# Development and testing
+pytest>=8.0.0
+black>=24.0.0
