@@ -1,0 +1,280 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - pip install --upgrade pip boto3 sagemaker
+      
+  build:
+    commands:
+      - echo "Starting endpoint validation tests..."
+      - |
+        python << 'EOF'
+        import boto3
+        import json
+        import time
+        import os
+        from datetime import datetime
+        
+        # Initialize AWS clients
+        sm_client = boto3.client('sagemaker')
+        runtime_client = boto3.client('sagemaker-runtime')
+        cfn_client = boto3.client('cloudformation')
+        
+        print("=" * 80)
+        print("ENDPOINT VALIDATION TEST")
+        print("=" * 80)
+        
+        # Get environment variables from CodePipeline
+        project_name = os.environ.get('SAGEMAKER_PROJECT_NAME', '')
+        project_id = os.environ.get('SAGEMAKER_PROJECT_ID', '')
+        stack_name = os.environ.get('STACK_NAME', '')
+        
+        print(f"\nProject Name: {project_name}")
+        print(f"Project ID: {project_id}")
+        print(f"Stack Name: {stack_name}")
+        
+        # Method 1: Get endpoint name from CloudFormation stack outputs
+        endpoint_name = None
+        if stack_name:
+            try:
+                print(f"\nFetching endpoint name from CloudFormation stack: {stack_name}")
+                response = cfn_client.describe_stacks(StackName=stack_name)
+                if response['Stacks']:
+                    outputs = response['Stacks'][0].get('Outputs', [])
+                    for output in outputs:
+                        if output['OutputKey'] == 'EndpointName':
+                            endpoint_name = output['OutputValue']
+                            print(f"✓ Found endpoint from stack outputs: {endpoint_name}")
+                            break
+            except Exception as e:
+                print(f"⚠ Could not get endpoint from stack: {str(e)}")
+        
+        # Method 2: Construct endpoint name from project info (fallback)
+        if not endpoint_name and project_name and project_id:
+            endpoint_name = f"{project_name}-{project_id}"
+            print(f"\n⚠ Using constructed endpoint name: {endpoint_name}")
+        
+        # Method 3: Search for endpoints with project tags (last resort)
+        if not endpoint_name:
+            print("\n⚠ Searching for endpoint by project tags...")
+            try:
+                response = sm_client.list_endpoints(
+                    SortBy='CreationTime',
+                    SortOrder='Descending',
+                    MaxResults=50
+                )
+                for endpoint in response['Endpoints']:
+                    ep_name = endpoint['EndpointName']
+                    if project_name in ep_name or project_id in ep_name:
+                        endpoint_name = ep_name
+                        print(f"✓ Found matching endpoint: {endpoint_name}")
+                        break
+            except Exception as e:
+                print(f"✗ Error searching for endpoints: {str(e)}")
+        
+        if not endpoint_name:
+            print("\n✗ ERROR: Could not determine endpoint name")
+            print("Available environment variables:")
+            for key, value in os.environ.items():
+                if 'SAGEMAKER' in key or 'STACK' in key or 'ENDPOINT' in key:
+                    print(f"  {key}={value}")
+            exit(1)
+        
+        print(f"\n{'=' * 80}")
+        print(f"Testing Endpoint: {endpoint_name}")
+        print(f"{'=' * 80}")
+        
+        # Wait for endpoint to be InService
+        print("\n[1/4] Checking endpoint status...")
+        max_wait_time = 1800  # 30 minutes
+        start_time = time.time()
+        
+        while True:
+            try:
+                response = sm_client.describe_endpoint(EndpointName=endpoint_name)
+                status = response['EndpointStatus']
+                print(f"  Status: {status}")
+                
+                if status == 'InService':
+                    print("  ✓ Endpoint is InService and ready for testing")
+                    break
+                elif status in ['Failed', 'RollingBack']:
+                    print(f"  ✗ Endpoint deployment failed with status: {status}")
+                    if 'FailureReason' in response:
+                        print(f"  Failure Reason: {response['FailureReason']}")
+                    exit(1)
+                elif time.time() - start_time > max_wait_time:
+                    print(f"  ✗ Timeout waiting for endpoint (>{max_wait_time}s)")
+                    exit(1)
+                else:
+                    print(f"  Waiting for endpoint to be ready... ({int(time.time() - start_time)}s elapsed)")
+                    time.sleep(30)
+            except sm_client.exceptions.ClientError as e:
+                print(f"  ✗ Error checking endpoint: {str(e)}")
+                exit(1)
+        
+        # Run inference tests
+        print("\n[2/4] Running inference tests...")
+        
+        test_cases = [
+            {
+                "name": "Basic Text Generation",
+                "payload": {
+                    "inputs": "Hello, how are you today?",
+                    "parameters": {
+                        "max_new_tokens": 50,
+                        "temperature": 0.7,
+                        "top_p": 0.9
+                    }
+                },
+                "expected_min_length": 10
+            },
+            {
+                "name": "Summarization Task",
+                "payload": {
+                    "inputs": "Summarize the following: Machine learning is a method of data analysis that automates analytical model building. It is a branch of artificial intelligence based on the idea that systems can learn from data, identify patterns and make decisions with minimal human intervention.",
+                    "parameters": {
+                        "max_new_tokens": 100,
+                        "temperature": 0.5
+                    }
+                },
+                "expected_min_length": 20
+            },
+            {
+                "name": "Question Answering",
+                "payload": {
+                    "inputs": "Question: What is the capital of France? Answer:",
+                    "parameters": {
+                        "max_new_tokens": 30,
+                        "temperature": 0.3
+                    }
+                },
+                "expected_min_length": 5
+            }
+        ]
+        
+        test_results = []
+        passed_tests = 0
+        failed_tests = 0
+        
+        for i, test in enumerate(test_cases, 1):
+            print(f"\n  Test {i}/{len(test_cases)}: {test['name']}")
+            print(f"  Input: {test['payload']['inputs'][:60]}...")
+            
+            try:
+                start = time.time()
+                response = runtime_client.invoke_endpoint(
+                    EndpointName=endpoint_name,
+                    ContentType='application/json',
+                    Body=json.dumps(test['payload'])
+                )
+                latency = time.time() - start
+                
+                result = json.loads(response['Body'].read().decode())
+                
+                # Validate response
+                if isinstance(result, list) and len(result) > 0:
+                    output_text = result[0].get('generated_text', '')
+                elif isinstance(result, dict):
+                    output_text = result.get('generated_text', result.get('outputs', ''))
+                else:
+                    output_text = str(result)
+                
+                output_length = len(output_text)
+                
+                # Check if response meets minimum length requirement
+                if output_length >= test['expected_min_length']:
+                    print(f"  ✓ PASSED")
+                    print(f"    Latency: {latency:.2f}s")
+                    print(f"    Output length: {output_length} chars")
+                    print(f"    Output preview: {output_text[:100]}...")
+                    status = "PASSED"
+                    passed_tests += 1
+                else:
+                    print(f"  ✗ FAILED: Response too short ({output_length} < {test['expected_min_length']})")
+                    status = "FAILED"
+                    failed_tests += 1
+                
+                test_results.append({
+                    "test_name": test['name'],
+                    "status": status,
+                    "latency_seconds": round(latency, 2),
+                    "output_length": output_length,
+                    "output_preview": output_text[:200]
+                })
+                
+            except Exception as e:
+                print(f"  ✗ FAILED: {str(e)}")
+                failed_tests += 1
+                test_results.append({
+                    "test_name": test['name'],
+                    "status": "FAILED",
+                    "error": str(e)
+                })
+        
+        # Check endpoint metrics
+        print("\n[3/4] Checking endpoint health metrics...")
+        try:
+            endpoint_desc = sm_client.describe_endpoint(EndpointName=endpoint_name)
+            print(f"  Endpoint ARN: {endpoint_desc['EndpointArn']}")
+            print(f"  Creation Time: {endpoint_desc['CreationTime']}")
+            print(f"  Last Modified: {endpoint_desc['LastModifiedTime']}")
+            
+            # Get endpoint config details
+            config_name = endpoint_desc['EndpointConfigName']
+            config = sm_client.describe_endpoint_config(EndpointConfigName=config_name)
+            variant = config['ProductionVariants'][0]
+            print(f"  Instance Type: {variant['InstanceType']}")
+            print(f"  Instance Count: {variant['InitialInstanceCount']}")
+            print("  ✓ Endpoint configuration validated")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not fetch endpoint metrics: {str(e)}")
+        
+        # Generate test report
+        print("\n[4/4] Generating test report...")
+        
+        report = {
+            "endpoint_name": endpoint_name,
+            "test_timestamp": datetime.utcnow().isoformat(),
+            "project_name": project_name,
+            "project_id": project_id,
+            "summary": {
+                "total_tests": len(test_cases),
+                "passed": passed_tests,
+                "failed": failed_tests,
+                "success_rate": f"{(passed_tests/len(test_cases)*100):.1f}%"
+            },
+            "test_results": test_results
+        }
+        
+        with open('test-results.json', 'w') as f:
+            json.dump(report, f, indent=2)
+        
+        print("  ✓ Test report saved to test-results.json")
+        
+        # Final summary
+        print(f"\n{'=' * 80}")
+        print("TEST SUMMARY")
+        print(f"{'=' * 80}")
+        print(f"Total Tests: {len(test_cases)}")
+        print(f"Passed: {passed_tests} ✓")
+        print(f"Failed: {failed_tests} ✗")
+        print(f"Success Rate: {(passed_tests/len(test_cases)*100):.1f}%")
+        print(f"{'=' * 80}")
+        
+        if failed_tests > 0:
+            print("\n✗ ENDPOINT VALIDATION FAILED")
+            print("The endpoint is not functioning correctly. Deployment should not proceed.")
+            exit(1)
+        else:
+            print("\n✓ ENDPOINT VALIDATION SUCCESSFUL")
+            print("All tests passed. Endpoint is ready for production traffic.")
+            exit(0)
+        EOF
+
+artifacts:
+  files:
+    - test-results.json

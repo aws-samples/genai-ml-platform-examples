@@ -1,0 +1,242 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - pip install --upgrade pip boto3 sagemaker
+      
+  build:
+    commands:
+      - echo "Extracting model package details..."
+      - export MODEL_PACKAGE_ARN=$(python -c "import json; event=json.load(open('/tmp/event.json')) if __import__('os').path.exists('/tmp/event.json') else {'detail':{'ModelPackageArn':''}}; print(event.get('detail',{}).get('ModelPackageArn',''))")
+      - |
+        python << 'EOF'
+        import boto3
+        import json
+        import os
+        from datetime import datetime
+        
+        # Generate timestamp for unique resource names (format: YYYYMMDD-HHMMSS)
+        timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+        print(f"Deployment timestamp: {timestamp}")
+        
+        # Helper function to truncate names to 63 characters (SageMaker limit)
+        def truncate_name(name, max_length=63):
+            if len(name) <= max_length:
+                return name
+            truncated = name[:max_length]
+            print(f"Truncated name from {len(name)} to {max_length} chars: {truncated}")
+            return truncated
+        
+        # Get environment variables
+        model_package_group_name = os.environ['SOURCE_MODEL_PACKAGE_GROUP_NAME']
+        sagemaker_project_id = os.environ['SAGEMAKER_PROJECT_ID']
+        sagemaker_project_name = os.environ['SAGEMAKER_PROJECT_NAME']
+        export_template_name = os.environ['EXPORT_TEMPLATE_NAME']
+        export_prod_config = os.environ['EXPORT_TEMPLATE_PROD_CONFIG']
+        model_execution_role = os.environ['MODEL_EXECUTION_ROLE_ARN']
+        
+        print(f"Model Package Group: {model_package_group_name}")
+        
+        # Get SageMaker client
+        sm_client = boto3.client('sagemaker')
+        
+        # Get the latest approved model package
+        response = sm_client.list_model_packages(
+            ModelPackageGroupName=model_package_group_name,
+            ModelApprovalStatus='Approved',
+            SortBy='CreationTime',
+            SortOrder='Descending',
+            MaxResults=1
+        )
+        
+        if not response['ModelPackageSummaryList']:
+            raise Exception(f"No approved model packages found in {model_package_group_name}")
+        
+        model_package_arn = response['ModelPackageSummaryList'][0]['ModelPackageArn']
+        print(f"Latest approved model: {model_package_arn}")
+        
+        # Get model package details
+        model_package = sm_client.describe_model_package(ModelPackageName=model_package_arn)
+        
+        # Extract container image and model data
+        container = model_package['InferenceSpecification']['Containers'][0]
+        image_uri = container['Image']
+        
+        # Handle both ModelDataUrl (tar.gz) and ModelDataSource (directory)
+        model_data_url = container.get('ModelDataUrl', '')
+        model_data_source = container.get('ModelDataSource', {})
+        
+        print(f"Image URI: {image_uri}")
+        print(f"Model Data URL: {model_data_url}")
+        print(f"Model Data Source: {model_data_source}")
+        
+        # Build primary container config
+        primary_container = {
+            "Image": image_uri
+        }
+        
+        # Add model data - prefer ModelDataUrl if available
+        if model_data_url:
+            primary_container["ModelDataUrl"] = model_data_url
+        elif model_data_source:
+            primary_container["ModelDataSource"] = model_data_source
+        else:
+            raise Exception("No model data found in container specification")
+        
+        # Add environment variables if present (important for Meta models)
+        if 'Environment' in container:
+            primary_container["Environment"] = container['Environment']
+        
+        # Generate CloudFormation template
+        cfn_template = {
+            "AWSTemplateFormatVersion": "2010-09-09",
+            "Description": "SageMaker Endpoint for LLaMA fine-tuned model",
+            "Parameters": {
+                "SageMakerProjectName": {
+                    "Type": "String",
+                    "Description": "Name of the SageMaker project"
+                },
+                "SageMakerProjectId": {
+                    "Type": "String",
+                    "Description": "ID of the SageMaker project"
+                },
+                "ModelPackageArn": {
+                    "Type": "String",
+                    "Description": "ARN of the approved model package"
+                },
+                "ModelExecutionRoleArn": {
+                    "Type": "String",
+                    "Description": "Execution role for SageMaker"
+                },
+                "EndpointInstanceType": {
+                    "Type": "String",
+                    "Default": "ml.g5.2xlarge",
+                    "Description": "Instance type for endpoint"
+                },
+                "EndpointInstanceCount": {
+                    "Type": "Number",
+                    "Default": 1,
+                    "Description": "Number of instances"
+                },
+                "DeploymentTimestamp": {
+                    "Type": "String",
+                    "Description": "Timestamp for unique resource naming"
+                }
+            },
+            "Resources": {
+                "Model": {
+                    "Type": "AWS::SageMaker::Model",
+                    "Properties": {
+                        "ModelName": {
+                            "Fn::Sub": [
+                                "${TruncatedName}",
+                                {
+                                    "TruncatedName": truncate_name(f"{sagemaker_project_name}-{sagemaker_project_id}-model-{timestamp}")
+                                }
+                            ]
+                        },
+                        "PrimaryContainer": primary_container,
+                        "ExecutionRoleArn": {"Ref": "ModelExecutionRoleArn"},
+                        "Tags": [
+                            {"Key": "sagemaker:project-name", "Value": {"Ref": "SageMakerProjectName"}},
+                            {"Key": "sagemaker:project-id", "Value": {"Ref": "SageMakerProjectId"}},
+                            {"Key": "sagemaker:deployment-timestamp", "Value": {"Ref": "DeploymentTimestamp"}}
+                        ]
+                    }
+                },
+                "EndpointConfig": {
+                    "Type": "AWS::SageMaker::EndpointConfig",
+                    "Properties": {
+                        "EndpointConfigName": {
+                            "Fn::Sub": [
+                                "${TruncatedName}",
+                                {
+                                    "TruncatedName": truncate_name(f"{sagemaker_project_name}-{sagemaker_project_id}-config-{timestamp}")
+                                }
+                            ]
+                        },
+                        "ProductionVariants": [
+                            {
+                                "VariantName": "AllTraffic",
+                                "ModelName": {"Fn::GetAtt": ["Model", "ModelName"]},
+                                "InstanceType": {"Ref": "EndpointInstanceType"},
+                                "InitialInstanceCount": {"Ref": "EndpointInstanceCount"},
+                                "InitialVariantWeight": 1.0
+                            }
+                        ],
+                        "Tags": [
+                            {"Key": "sagemaker:project-name", "Value": {"Ref": "SageMakerProjectName"}},
+                            {"Key": "sagemaker:project-id", "Value": {"Ref": "SageMakerProjectId"}},
+                            {"Key": "sagemaker:deployment-timestamp", "Value": {"Ref": "DeploymentTimestamp"}}
+                        ]
+                    }
+                },
+                "Endpoint": {
+                    "Type": "AWS::SageMaker::Endpoint",
+                    "Properties": {
+                        "EndpointName": {
+                            "Fn::Sub": [
+                                "${TruncatedName}",
+                                {
+                                    "TruncatedName": truncate_name(f"{sagemaker_project_name}-{sagemaker_project_id}")
+                                }
+                            ]
+                        },
+                        "EndpointConfigName": {"Fn::GetAtt": ["EndpointConfig", "EndpointConfigName"]},
+                        "Tags": [
+                            {"Key": "sagemaker:project-name", "Value": {"Ref": "SageMakerProjectName"}},
+                            {"Key": "sagemaker:project-id", "Value": {"Ref": "SageMakerProjectId"}},
+                            {"Key": "sagemaker:deployment-timestamp", "Value": {"Ref": "DeploymentTimestamp"}}
+                        ]
+                    }
+                }
+            },
+            "Outputs": {
+                "EndpointName": {
+                    "Description": "Name of the SageMaker endpoint",
+                    "Value": {"Fn::GetAtt": ["Endpoint", "EndpointName"]}
+                },
+                "EndpointArn": {
+                    "Description": "ARN of the SageMaker endpoint",
+                    "Value": {"Ref": "Endpoint"}
+                }
+            }
+        }
+        
+        # Write CloudFormation template
+        with open(export_template_name, 'w') as f:
+            json.dump(cfn_template, f, indent=2)
+        print(f"✓ Generated {export_template_name}")
+        
+        # Generate production config
+        prod_config = {
+            "Parameters": {
+                "SageMakerProjectName": sagemaker_project_name,
+                "SageMakerProjectId": sagemaker_project_id,
+                "ModelPackageArn": model_package_arn,
+                "ModelExecutionRoleArn": model_execution_role,
+                "EndpointInstanceType": "ml.g5.2xlarge",
+                "EndpointInstanceCount": "1",
+                "DeploymentTimestamp": timestamp
+            },
+            "Tags": {
+                "sagemaker:project-name": sagemaker_project_name,
+                "sagemaker:project-id": sagemaker_project_id,
+                "sagemaker:deployment-stage": "prod"
+            }
+        }
+        
+        with open(export_prod_config, 'w') as f:
+            json.dump(prod_config, f, indent=2)
+        print(f"✓ Generated {export_prod_config}")
+        
+        print("✓ Build completed successfully")
+        EOF
+
+artifacts:
+  files:
+    - template-export.yml
+    - prod-config-export.json
