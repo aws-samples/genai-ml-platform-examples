@@ -1,0 +1,239 @@
+# This workflow will build the model and register to model registry.
+# Note: This gihub actions job executes only for changes to specific paths. 
+# Change the paths as you see fit for your use-cases.
+
+name: Sagemaker Pipeline build SMUS project
+run-name: ${{ github.actor }} is building in SMUS
+
+on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+          - info
+          - warning
+          - debug
+  push:
+    branches: [ main ]
+    paths:
+      - 'ml_pipelines/**'
+      - 'source_scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ml_pipelines/**'
+      - 'source_scripts/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      pipeline_enabled: ${{ steps.check.outputs.pipeline_enabled }}
+    steps:
+    - name: Check Pipeline Execution Trigger
+      id: check
+      run: |
+        TRIGGER_EXECUTION="${{ vars.TRIGGER_PIPELINE_EXECUTION }}"
+        echo "Pipeline execution trigger status: ${TRIGGER_EXECUTION}"
+        
+        if [ "$TRIGGER_EXECUTION" != "true" ]; then
+          echo "Pipeline execution is disabled."
+          echo "To enable pipeline execution:"
+          echo "   1. Update Glue database and table names in GitHub secrets"
+          echo "   2. Go to Settings → Secrets and variables → Actions → Variables tab"
+          echo "   3. Set TRIGGER_PIPELINE_EXECUTION variable to 'true'"
+          echo "   4. Re-run this workflow or push new changes"
+          echo ""
+          echo "This prevents pipeline failures due to missing Glue configuration."
+          echo "pipeline_enabled=false" >> $GITHUB_OUTPUT
+        else
+          echo "Pipeline execution is enabled. Proceeding with build..."
+          echo "pipeline_enabled=true" >> $GITHUB_OUTPUT
+        fi
+
+  GitHub-Actions-SMUS-Build:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.pipeline_enabled == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+    - run: echo "The job was automatically triggered by a ${{ github.event_name }} event."
+    - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+    - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+    - run: echo "The commit message for the event -\n ${{ github.event.head_commit.message }}"
+    - uses: actions/checkout@v4
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - name: Configure Dev Account AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+          role-to-assume: ${{secrets.OIDC_ROLE_GITHUB_WORKFLOW}}
+          aws-region: ${{secrets.REGION}}
+    - name: Install pip dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r ./ml_pipelines/requirements.txt
+
+    - name: Create Requirements Directory
+      run: |
+        mkdir -p source_scripts/preprocessing/prepare_abalone_data/requirements
+        echo "awswrangler==2.16.1" > source_scripts/preprocessing/prepare_abalone_data/requirements/requirements.txt
+        echo "pymysql" >> source_scripts/preprocessing/prepare_abalone_data/requirements/requirements.txt
+        echo "pandas==1.1.3" >> source_scripts/preprocessing/prepare_abalone_data/requirements/requirements.txt
+    - name: Upload Files to S3
+      run: |
+        # Upload dataset
+        python ./ml_pipelines/data/upload_s3_util.py --s3_bucket ${{secrets.ARTIFACT_BUCKET}}
+        
+        # Upload requirements and code
+        aws s3 cp source_scripts/preprocessing/prepare_abalone_data/main.py s3://${{secrets.ARTIFACT_BUCKET}}/SMUSMLOPS/requirements-preprocess/input/code/main.py
+        aws s3 cp --recursive source_scripts/preprocessing/prepare_abalone_data/requirements s3://${{secrets.ARTIFACT_BUCKET}}/SMUSMLOPS/requirements-preprocess/input/dependencies/
+    - name: List files in the repository
+      run: |
+        ls ${{ github.workspace }}
+    - name: Run Sagemaker Pipeline
+      env:
+        REGION: ${{ secrets.REGION }}
+        SAGEMAKER_PROJECT_NAME: ${{ secrets.SAGEMAKER_PROJECT_NAME }}
+        SAGEMAKER_PROJECT_ID: ${{ secrets.SAGEMAKER_PROJECT_ID }}
+        AMAZON_DATAZONE_DOMAIN: ${{ secrets.AMAZON_DATAZONE_DOMAIN }}
+        AMAZON_DATAZONE_SCOPENAME: ${{ secrets.AMAZON_DATAZONE_SCOPENAME }}
+        SAGEMAKER_DOMAIN_ARN: ${{ secrets.SAGEMAKER_DOMAIN_ARN }}
+        SAGEMAKER_SPACE_ARN: ${{ secrets.SAGEMAKER_SPACE_ARN }}
+        AMAZON_DATAZONE_PROJECT: ${{ secrets.AMAZON_DATAZONE_PROJECT }}
+        MODEL_PACKAGE_GROUP_NAME: ${{ secrets.MODEL_PACKAGE_GROUP_NAME }}
+        ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+        SAGEMAKER_PIPELINE_ROLE_ARN: ${{ secrets.SAGEMAKER_PIPELINE_ROLE_ARN }}
+        GLUE_DATABASE: ${{ secrets.GLUE_DATABASE }}
+        GLUE_TABLE: ${{ secrets.GLUE_TABLE }}
+      run: |
+        export PYTHONUNBUFFERED=TRUE
+        export SAGEMAKER_PROJECT_NAME_ID="${SAGEMAKER_PROJECT_NAME}-${SAGEMAKER_PROJECT_ID}"
+        export PIPELINE_NAME="githubactions-${SAGEMAKER_PROJECT_ID}"
+        
+        echo "=== Starting Glue Catalog Pipeline ==="
+        python ./ml_pipelines/run_pipeline.py \
+          --module-name training.pipeline \
+          --role-arn "${SAGEMAKER_PIPELINE_ROLE_ARN}" \
+          --tags '[{"Key":"sagemaker:project-name", "Value":"'"${SAGEMAKER_PROJECT_NAME}"'"}, {"Key":"sagemaker:project-id", "Value":"'"${SAGEMAKER_PROJECT_ID}"'"}, {"Key":"AmazonDataZoneDomain", "Value":"'"${AMAZON_DATAZONE_DOMAIN}"'"}, {"Key":"AmazonDataZoneScopeName", "Value":"'"${AMAZON_DATAZONE_SCOPENAME}"'"}, {"Key":"sagemaker:domain-arn", "Value":"'"${SAGEMAKER_DOMAIN_ARN}"'"}, {"Key":"sagemaker:space-arn", "Value":"'"${SAGEMAKER_SPACE_ARN}"'"}, {"Key":"AmazonDataZoneProject", "Value":"'"${AMAZON_DATAZONE_PROJECT}"'"}]' \
+          --kwargs '{"region":"'"${REGION}"'","role":"'"${SAGEMAKER_PIPELINE_ROLE_ARN}"'","default_bucket":"'"${ARTIFACT_BUCKET}"'","pipeline_name":"'"${PIPELINE_NAME}"'","model_package_group_name":"'"${MODEL_PACKAGE_GROUP_NAME}"'","base_job_prefix":"SMUSMLOPS","glue_database_name":"'"${GLUE_DATABASE}"'","glue_table_name":"'"${GLUE_TABLE}"'"}'
+        
+        echo "Pipeline started successfully. Pipeline name: ${PIPELINE_NAME}"
+        
+    - name: Monitor Pipeline Execution
+      env:
+        REGION: ${{ secrets.REGION }}
+        SAGEMAKER_PROJECT_ID: ${{ secrets.SAGEMAKER_PROJECT_ID }}
+      run: |
+        export PIPELINE_NAME="githubactions-${SAGEMAKER_PROJECT_ID}"
+        
+        echo "=== Monitoring Pipeline Execution ==="
+        echo "Pipeline Name: ${PIPELINE_NAME}"
+        
+        # Get the latest execution ARN
+        EXECUTION_ARN=$(aws sagemaker list-pipeline-executions \
+          --pipeline-name "${PIPELINE_NAME}" \
+          --region "${REGION}" \
+          --max-items 1 \
+          --query 'PipelineExecutionSummaries[0].PipelineExecutionArn' \
+          --output text)
+        
+        if [ "$EXECUTION_ARN" = "None" ] || [ -z "$EXECUTION_ARN" ]; then
+          echo "Error: Could not find pipeline execution"
+          exit 1
+        fi
+        
+        # Clean the ARN (remove any trailing whitespace or None)
+        EXECUTION_ARN=$(echo "$EXECUTION_ARN" | tr -d '\n' | sed 's/None$//')
+        
+        echo "Monitoring execution: ${EXECUTION_ARN}"
+        
+        # Validate ARN format
+        if [[ ! "$EXECUTION_ARN" =~ ^arn:aws[a-z\-]*:sagemaker:[a-z0-9\-]*:[0-9]{12}:pipeline/.*/execution/.* ]]; then
+          echo "Error: Invalid execution ARN format: ${EXECUTION_ARN}"
+          exit 1
+        fi
+        
+        # Monitor pipeline execution status
+        MAX_WAIT_TIME=3600  # 1 hour timeout
+        WAIT_INTERVAL=30    # Check every 30 seconds
+        ELAPSED_TIME=0
+        
+        while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
+          STATUS=$(aws sagemaker describe-pipeline-execution \
+            --pipeline-execution-arn "${EXECUTION_ARN}" \
+            --region "${REGION}" \
+            --query 'PipelineExecutionStatus' \
+            --output text)
+          
+          echo "Pipeline Status: ${STATUS} (Elapsed: ${ELAPSED_TIME}s)"
+          
+          case $STATUS in
+            "Succeeded")
+              echo "Pipeline execution completed successfully!"
+              
+              # Get execution details for summary
+              aws sagemaker describe-pipeline-execution \
+                --pipeline-execution-arn "${EXECUTION_ARN}" \
+                --region "${REGION}" \
+                --query '{Status: PipelineExecutionStatus, StartTime: CreationTime, EndTime: LastModifiedTime}' \
+                --output table
+              
+              echo "Success: Glue Catalog Pipeline execution completed successfully."
+              exit 0
+              ;;
+            "Failed"|"Stopped")
+              echo "Pipeline execution failed with status: ${STATUS}"
+              
+              # Get failure reason
+              FAILURE_REASON=$(aws sagemaker describe-pipeline-execution \
+                --pipeline-execution-arn "${EXECUTION_ARN}" \
+                --region "${REGION}" \
+                --query 'FailureReason' \
+                --output text)
+              
+              if [ "$FAILURE_REASON" != "None" ] && [ -n "$FAILURE_REASON" ]; then
+                echo "Failure Reason: ${FAILURE_REASON}"
+              fi
+              
+              # List failed steps for debugging
+              echo "=== Failed Pipeline Steps ==="
+              aws sagemaker list-pipeline-execution-steps \
+                --pipeline-execution-arn "${EXECUTION_ARN}" \
+                --region "${REGION}" \
+                --query 'PipelineExecutionSteps[?StepStatus==`Failed`].{StepName: StepName, Status: StepStatus, FailureReason: FailureReason}' \
+                --output table
+              
+              exit 1
+              ;;
+            "Executing"|"Stopping")
+              # Continue monitoring
+              sleep $WAIT_INTERVAL
+              ELAPSED_TIME=$((ELAPSED_TIME + WAIT_INTERVAL))
+              ;;
+            *)
+              echo "Unknown pipeline status: ${STATUS}"
+              sleep $WAIT_INTERVAL
+              ELAPSED_TIME=$((ELAPSED_TIME + WAIT_INTERVAL))
+              ;;
+          esac
+        done
+        
+        # Timeout reached
+        echo "Timeout: Pipeline execution exceeded maximum wait time of ${MAX_WAIT_TIME} seconds"
+        echo "Current status: ${STATUS}"
+        exit 1
+        
+    - run: echo "This github action job's status is ${{ job.status }}."
