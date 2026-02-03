@@ -26,3 +26,10 @@ Thumbs.db
 *.log
 *.sqlite
 CLAUDE.md
+
+
+cdk.out/
+.cdk.staging/
+*.swp
+.DS_Store
+

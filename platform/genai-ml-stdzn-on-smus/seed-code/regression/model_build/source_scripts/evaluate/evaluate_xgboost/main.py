@@ -15,7 +15,7 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-"""Evaluation script for measuring mean squared error."""
+"""Evaluation script for measuring classification metrics."""
 import json
 import logging
 import pathlib
@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import xgboost
 
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -68,21 +68,30 @@ if __name__ == "__main__":
     X_test = xgboost.DMatrix(df.values)
 
     logger.info("Performing predictions against test data.")
-    predictions = model.predict(X_test)
+    predictions_prob = model.predict(X_test)
+    predictions = (predictions_prob > 0.5).astype(int)
 
-    logger.debug("Calculating mean squared error.")
-    mse = mean_squared_error(y_test, predictions)
-    std = np.std(y_test - predictions)
+    logger.debug("Calculating classification metrics.")
+    accuracy = accuracy_score(y_test, predictions)
+    precision = precision_score(y_test, predictions)
+    recall = recall_score(y_test, predictions)
+    f1 = f1_score(y_test, predictions)
+    auc = roc_auc_score(y_test, predictions_prob)
+    
     report_dict = {
-        "regression_metrics": {
-            "mse": {"value": mse, "standard_deviation": std},
+        "classification_metrics": {
+            "accuracy": {"value": accuracy},
+            "precision": {"value": precision},
+            "recall": {"value": recall},
+            "f1_score": {"value": f1},
+            "auc": {"value": auc},
         },
     }
 
     output_dir = "/opt/ml/processing/evaluation"
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    logger.info("Writing out evaluation report with mse: %f", mse)
+    logger.info("Writing out evaluation report with accuracy: %f", accuracy)
     evaluation_path = f"{output_dir}/evaluation.json"
     with open(evaluation_path, "w") as f:
         f.write(json.dumps(report_dict))

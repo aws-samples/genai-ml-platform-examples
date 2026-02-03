@@ -2,15 +2,15 @@ def get_pipeline(
     region,
     role=None,
     default_bucket=None,
-    model_package_group_name="AbalonePackageGroup",
-    pipeline_name="AbalonePipeline",
-    base_job_prefix="Abalone",
+    model_package_group_name="BankMarketingPackageGroup",
+    pipeline_name="BankMarketingPipeline",
+    base_job_prefix="BankMarketing",
     bucket_kms_id=None,
     sagemaker_session=None,
     glue_database_name=None,
     glue_table_name=None,
 ):
-    """Gets a SageMaker ML Pipeline instance working with on abalone data.
+    """Gets a SageMaker ML Pipeline instance working with bank marketing data.
 
     Args:
         region: AWS region to create and run the pipeline.
@@ -95,7 +95,7 @@ def get_pipeline(
     
     # Processing step using AWS Data Wrangler with requirements.txt
     step_process = ProcessingStep(
-        name="PreprocessAbaloneData",
+        name="PreprocessBankMarketingData",
         processor=script_processor,
         inputs=[
             # Add requirements.txt as an input
@@ -110,7 +110,7 @@ def get_pipeline(
             ProcessingOutput(output_name="validation", source="/opt/ml/processing/validation"),
             ProcessingOutput(output_name="test", source="/opt/ml/processing/test"),
         ],
-        code="source_scripts/preprocessing/prepare_abalone_data/main.py",
+        code="source_scripts/preprocessing/prepare_bank_data/main.py",
         job_arguments=[
             "--database-name", glue_database,
             "--table-name", glue_table
@@ -118,7 +118,7 @@ def get_pipeline(
     )
 
     # training step for generating model artifacts
-    model_path = f"s3://{default_bucket}/{base_job_prefix}/AbaloneTrain"
+    model_path = f"s3://{default_bucket}/{base_job_prefix}/BankMarketingTrain"
 
     image_uri = sagemaker.image_uris.retrieve(
         framework="xgboost",
@@ -133,23 +133,23 @@ def get_pipeline(
         instance_type=training_instance_type,
         instance_count=1,
         output_path=model_path,
-        base_job_name=f"{base_job_prefix}/abalone-train",
+        base_job_name=f"{base_job_prefix}/bank-marketing-train",
         sagemaker_session=sagemaker_session,
         role=role,
         output_kms_key=bucket_kms_id,
     )
     xgb_train.set_hyperparameters(
-        objective="reg:linear",
-        num_round=50,
+        objective="binary:logistic",
+        num_round=100,
         max_depth=5,
         eta=0.2,
         gamma=4,
         min_child_weight=6,
-        subsample=0.7,
+        subsample=0.8,
         silent=0,
     )
     step_train = TrainingStep(
-        name="TrainAbaloneModel",
+        name="TrainBankMarketingModel",
         estimator=xgb_train,
         inputs={
             "train": TrainingInput(
@@ -169,18 +169,18 @@ def get_pipeline(
         command=["python3"],
         instance_type=processing_instance_type,
         instance_count=1,
-        base_job_name=f"{base_job_prefix}/script-abalone-eval",
+        base_job_name=f"{base_job_prefix}/script-bank-marketing-eval",
         sagemaker_session=sagemaker_session,
         role=role,
         output_kms_key=bucket_kms_id,
     )
     evaluation_report = PropertyFile(
-        name="AbaloneEvaluationReport",
+        name="BankMarketingEvaluationReport",
         output_name="evaluation",
         path="evaluation.json",
     )
     step_eval = ProcessingStep(
-        name="EvaluateAbaloneModel",
+        name="EvaluateBankMarketingModel",
         processor=script_eval,
         inputs=[
             ProcessingInput(
@@ -210,7 +210,7 @@ def get_pipeline(
     )
 
     step_register = RegisterModel(
-        name="RegisterAbaloneModel",
+        name="RegisterBankMarketingModel",
         estimator=xgb_train,
         model_data=step_train.properties.ModelArtifacts.S3ModelArtifacts,
         content_types=["text/csv"],
@@ -223,15 +223,17 @@ def get_pipeline(
     )
 
     # condition step for evaluating model quality and branching execution
-    cond_lte = ConditionLessThanOrEqualTo(
+    from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
+    
+    cond_gte = ConditionGreaterThanOrEqualTo(
         left=JsonGet(
-            step_name=step_eval.name, property_file=evaluation_report, json_path="regression_metrics.mse.value"
+            step_name=step_eval.name, property_file=evaluation_report, json_path="classification_metrics.accuracy.value"
         ),
-        right=6.0,
+        right=0.7,
     )
     step_cond = ConditionStep(
-        name="CheckMSEAbaloneEvaluation",
-        conditions=[cond_lte],
+        name="CheckAccuracyBankMarketingEvaluation",
+        conditions=[cond_gte],
         if_steps=[step_register],
         else_steps=[],
     )

@@ -232,7 +232,7 @@ class DeployEndpointStack(Stack):
             data_capture_config=sagemaker.CfnEndpointConfig.DataCaptureConfigProperty(
                 enable_capture=True,
                 initial_sampling_percentage=100,
-                destination_s3_uri=f"s3://sagemaker-model-monitor-{DEPLOY_ACCOUNT}-{DEFAULT_DEPLOYMENT_REGION}-{self.environment_name}/data-capture",
+                destination_s3_uri=f"s3://sagemaker-model-monitor-{DEPLOY_ACCOUNT}-{self.region}-{self.environment_name}/data-capture",
                 capture_options=[
                     sagemaker.CfnEndpointConfig.CaptureOptionProperty(capture_mode="Input"),
                     sagemaker.CfnEndpointConfig.CaptureOptionProperty(capture_mode="Output")

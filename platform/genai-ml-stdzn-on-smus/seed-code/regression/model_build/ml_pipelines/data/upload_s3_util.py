@@ -3,7 +3,7 @@
 import argparse
 import boto3
 
-LOCAL_PATH = "ml_pipelines/data/abalone-dataset.csv"
+LOCAL_PATH = "ml_pipelines/data/bank-marketing-dataset.csv"
 
 def main():
     parser = argparse.ArgumentParser(
