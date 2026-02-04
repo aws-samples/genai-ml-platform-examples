@@ -256,11 +256,11 @@ When reporting issues, include:
 - Environment details (Python version, OS)
 - AWS region and model access status
 
-## 📈 Future Enhancements
+### Usage Examples
 
-Planned features:
-- **Multi-user Support**: Session isolation for concurrent users
-- **Advanced Visualizations**: Interactive architecture diagrams
-- **Export Formats**: PDF, Word document generation
-- **Integration APIs**: REST endpoints for programmatic access
-- **Custom Agents**: User-defined analysis agents
+**Use Case Description :**
+Customer is running pytorch distributed training workload  on 2 nodes of p5.48xlarge. Their pain points are related to: 1.Experiment tracking 2. Automation 3. Model governance 4. Cost. 
+
+
+**Source System Architecture Diagram:**
+Upload the source system architecutre diagram using the streamlit app:  ![on-prem-data-science-arch](rocket-mortgage-legacy-ds-arch.png)

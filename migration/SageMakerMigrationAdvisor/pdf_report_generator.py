@@ -449,21 +449,183 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.2 * inch))
     
     def _add_tco_analysis(self, story: List, styles: Dict):
-        """Add TCO analysis section"""
-        from reportlab.platypus import Paragraph, Spacer, PageBreak
+        """Add TCO analysis section with properly formatted tables"""
+        from reportlab.platypus import Paragraph, Spacer, PageBreak, Table, TableStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        import re
         
         story.append(Paragraph("5. Total Cost of Ownership Analysis", styles['heading']))
         
         tco_response = self.workflow_state['agent_responses'].get('tco', {})
-        if tco_response:
-            story.append(Paragraph("5.1 Cost Analysis", styles['subheading']))
-            
-            tco_text = str(tco_response.get('output', 'No TCO analysis available.')).replace('\n', '<br/>')
-            story.append(Paragraph(tco_text, styles['body']))
-        else:
+        if not tco_response:
             story.append(Paragraph("No TCO analysis data available.", styles['body']))
+            story.append(PageBreak())
+            return
+        
+        story.append(Paragraph("5.1 Cost Analysis", styles['subheading']))
+        
+        tco_text = str(tco_response.get('output', 'No TCO analysis available.'))
+        
+        # Parse and format the TCO content
+        self._parse_and_format_tco_content(tco_text, story, styles)
         
         story.append(PageBreak())
+    
+    def _parse_and_format_tco_content(self, content: str, story: List, styles: Dict):
+        """Parse TCO content and format tables properly"""
+        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        import re
+        
+        lines = content.split('\n')
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Check if this is a markdown table (contains |)
+            if '|' in line and i + 1 < len(lines) and '|' in lines[i + 1]:
+                # Extract the table
+                table_lines = []
+                j = i
+                while j < len(lines) and '|' in lines[j]:
+                    table_lines.append(lines[j])
+                    j += 1
+                
+                # Parse and add the table
+                if len(table_lines) >= 2:  # At least header and separator
+                    self._add_formatted_table(table_lines, story, styles)
+                    story.append(Spacer(1, 0.2*inch))
+                
+                i = j
+            elif line.startswith('###'):
+                # Subheading
+                heading_text = line.replace('###', '').strip()
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['subheading']))
+                story.append(Spacer(1, 0.1*inch))
+                i += 1
+            elif line.startswith('##'):
+                # Section heading
+                heading_text = line.replace('##', '').strip()
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['heading']))
+                story.append(Spacer(1, 0.15*inch))
+                i += 1
+            elif line.startswith('**') and line.endswith('**'):
+                # Bold text
+                bold_text = line.replace('**', '')
+                story.append(Paragraph(f"<b>{bold_text}</b>", styles['body']))
+                i += 1
+            elif line.startswith('•') or line.startswith('-'):
+                # Bullet point
+                bullet_text = line[1:].strip()
+                story.append(Paragraph(f"• {bullet_text}", styles['body']))
+                i += 1
+            elif line:
+                # Regular paragraph
+                story.append(Paragraph(line, styles['body']))
+                i += 1
+            else:
+                # Empty line
+                i += 1
+    
+    def _add_formatted_table(self, table_lines: List[str], story: List, styles: Dict):
+        """Convert markdown table to ReportLab table with proper formatting"""
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        
+        # Parse table data
+        table_data = []
+        separator_idx = -1
+        
+        for idx, line in enumerate(table_lines):
+            # Split by | and clean up
+            cells = [cell.strip() for cell in line.split('|')]
+            # Remove empty first/last cells from markdown format
+            cells = [c for c in cells if c]
+            
+            # Check if this is the separator line
+            if all(c.replace('-', '').replace(':', '').strip() == '' for c in cells):
+                separator_idx = idx
+                continue
+            
+            if cells:
+                table_data.append(cells)
+        
+        if not table_data or len(table_data) < 2:
+            return
+        
+        # Determine column widths based on content
+        num_cols = len(table_data[0])
+        
+        # Calculate appropriate column widths
+        if num_cols == 5:  # Standard TCO table with 5 columns
+            col_widths = [1.8*inch, 1.5*inch, 1.5*inch, 1.2*inch, 1.5*inch]
+        elif num_cols == 4:
+            col_widths = [2*inch, 1.8*inch, 1.8*inch, 2*inch]
+        elif num_cols == 3:
+            col_widths = [2.5*inch, 2*inch, 2*inch]
+        elif num_cols == 2:
+            col_widths = [3*inch, 3.5*inch]
+        else:
+            # Equal width for other cases
+            available_width = 6.5 * inch
+            col_widths = [available_width / num_cols] * num_cols
+        
+        # Create table
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        
+        # Apply styling
+        table_style = [
+            # Header row styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            
+            # Data rows styling
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # First column left-aligned
+            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),  # Other columns right-aligned
+            
+            # Grid and borders
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#2E86AB')),
+            
+            # Padding
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]
+        
+        # Highlight subtotal/total rows
+        for row_idx, row in enumerate(table_data):
+            if row and any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total', '**']):
+                table_style.extend([
+                    ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#F0F0F0')),
+                    ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'),
+                    ('LINEABOVE', (0, row_idx), (-1, row_idx), 1.5, colors.HexColor('#2E86AB')),
+                ])
+        
+        # Alternate row colors for better readability (skip header and special rows)
+        for row_idx in range(1, len(table_data)):
+            row = table_data[row_idx]
+            if not any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total', '**']):
+                if row_idx % 2 == 0:
+                    table_style.append(
+                        ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#F8F9FA'))
+                    )
+        
+        table.setStyle(TableStyle(table_style))
+        story.append(table)
     
     def _add_migration_roadmap(self, story: List, styles: Dict):
         """Add migration roadmap section"""
