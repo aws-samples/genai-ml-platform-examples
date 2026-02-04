@@ -23,7 +23,7 @@ from mcp import stdio_client, StdioServerParameters
 from logger_config import logger
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 
-from prompts import (
+from prompts_lite import (
     architecture_description_system_prompt,
     QUESTION_SYSTEM_PROMPT,
     SAGEMAKER_SYSTEM_PROMPT,
@@ -42,7 +42,7 @@ from prompts import (
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="SageMaker Migration Advisor Regular",
+    page_title="SageMaker Migration Advisor Lite",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -675,7 +675,7 @@ Focus on areas like:
 - Timeline and resource constraints
 - Current pain points and challenges
 
-Ask only ONE focused question. Make it specific and actionable.
+Ask only ONE focused question. Make it specific and actionable. Restrict total number of questions to less than 3. However, attempt to collect multiple data points in each question.
 If you believe sufficient information has been gathered after {qa_session.get('questions_asked', 0)} questions, respond with "SUFFICIENT_INFO_GATHERED".
 """
             
@@ -1419,7 +1419,7 @@ Format your response with clear step headers and detailed descriptions for each 
     def run(self):
         """Main application runner"""
         # Header
-        st.markdown('<div class="main-header">🚀 SageMaker Migration Advisor Regular</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">🚀 SageMaker Migration Advisor Lite</div>', unsafe_allow_html=True)
         
         # Sidebar
         self.display_sidebar()
@@ -1434,7 +1434,8 @@ Format your response with clear step headers and detailed descriptions for each 
         elif current_step == 'sagemaker':
             self.handle_sagemaker_step()
         elif current_step == 'diagram':
-            self.handle_diagram_step()
+            print('skipping diagram step for lite version..')
+            #self.handle_diagram_step()
         elif current_step == 'tco':
             self.handle_tco_step()
         elif current_step == 'navigator':
