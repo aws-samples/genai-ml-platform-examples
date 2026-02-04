@@ -1,26 +1,26 @@
 defaults:
   s3:
-    default_bucket: sagemigrator-project-sagemaker-bucket-624178040188-us-east-1
+    default_bucket: sagemaker-us-west-2-716664005094
     input_prefix: input/
     output_prefix: output/
     model_prefix: models/
   iam:
-    execution_role: arn:aws:iam::624178040188:role/sagemigrator-project-SageMaker-ExecutionRole-dev
+    execution_role: arn:aws:iam::716664005094:role/service-role/AmazonSageMaker-ExecutionRole-20251106T123495
   compute:
     processing_instance_type: ml.m5.large
     training_instance_type: ml.m5.xlarge
     processing_instance_count: 1
     training_instance_count: 1
   networking:
-    vpc_id: vpc-0e7fc8a3519d0d898
+    vpc_id: vpc-0e6bc35a47325c93e
     security_group_ids:
-    - sg-00b8a0cfbe9fe0e1f
+    - sg-05039bb7ddd07bc3b
     subnets:
-    - subnet-0b8f35f4e2f5717b9
+    - subnet-0db6fd10c0e431706
   feature_store:
-    offline_store_s3_uri: s3://sagemigrator-project-sagemaker-bucket-624178040188-us-east-1/feature-store/
+    offline_store_s3_uri: s3://sagemaker-us-west-2-716664005094/feature-store/
     enable_online_store: false
   kms:
-    key_id: 3521c71b-77ba-4c91-8e53-c85300f451c0
+    key_id: 0bf8a5e6-a713-4d33-8e3e-58fe4aa64780
 
 

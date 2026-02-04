@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include pyproject.toml
+recursive-include mlp_sdk *.py
+recursive-include examples *.py *.ipynb *.md
+recursive-include docs *.md
+recursive-exclude tests *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
