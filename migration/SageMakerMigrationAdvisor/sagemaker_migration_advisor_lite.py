@@ -3,8 +3,16 @@ Streamlit Application for SageMaker Migration Advisor
 Interactive web interface for architecture migration workflow with state management and error recovery
 """
 
-import streamlit as st
+import sys
 import os
+
+# Fix Windows encoding issues - set UTF-8 as default encoding
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+import streamlit as st
 import json
 import datetime
 import traceback
@@ -233,7 +241,7 @@ OUTPUT:
 
 """
         
-        with open(output_file, "a") as f:
+        with open(output_file, "a", encoding="utf-8") as f:
             f.write(formatted_interaction)
     
     def display_sidebar(self):
@@ -498,7 +506,27 @@ OUTPUT:
             if arch_description and st.button("🔍 Analyze Description"):
                 try:
                     with st.spinner("Analyzing architecture description..."):
-                        response = st.session_state.agents['architecture'](arch_description)
+                        # Create a clear prompt for text-based architecture description
+                        analysis_prompt = f"""
+I am providing a TEXT DESCRIPTION of an existing ML/GenAI architecture (not a diagram).
+
+Please analyze this architecture description and provide a comprehensive analysis following the required output structure:
+
+ARCHITECTURE DESCRIPTION:
+{arch_description}
+
+Please provide:
+1. List of all components mentioned
+2. Purpose of each component
+3. Interactions and data flow
+4. Architecture patterns identified
+5. Security and scalability considerations
+6. Opportunity Qualification (MRR and ARR estimates)
+
+Ensure the analysis is thorough and includes all required sections.
+"""
+                        
+                        response = st.session_state.agents['architecture'](analysis_prompt)
                         
                         self.save_interaction('Architecture Agent', arch_description, str(response), 'description')
                         st.session_state.workflow_state['user_inputs']['description'] = arch_description
@@ -843,127 +871,157 @@ This information provides a solid foundation for designing the SageMaker migrati
             
             st.markdown("---")
             
-            if st.button("🏗️ Generate SageMaker Architecture", help="Generate modernized SageMaker architecture design"):
-                try:
-                    # Create containers for real-time display
-                    progress_container = st.container()
-                    output_container = st.container()
-                    
-                    with progress_container:
-                        progress_text = st.empty()
-                        progress_text.info("🔄 Preparing SageMaker architecture design request...")
-                    
-                    sagemaker_input = str(qa_response.get('output', '')) + "\n" + SAGEMAKER_USER_PROMPT
-                    
-                    with progress_container:
-                        progress_text.info("🤖 AI is analyzing requirements and designing architecture...")
-                    
-                    # Create a placeholder for streaming output
-                    with output_container:
-                        st.markdown("### 🔄 Generating Architecture Design...")
-                        output_placeholder = st.empty()
-                        output_placeholder.info("Waiting for AI response...")
-                    
-                    # Call the agent with output capture
-                    import sys
-                    from io import StringIO
-                    
-                    # Capture stdout to catch any console output
-                    old_stdout = sys.stdout
-                    captured_output = StringIO()
-                    
+            # Add option to skip SageMaker design
+            st.info("💡 **SageMaker Architecture Design** - Generate a modernized architecture using AWS SageMaker services.")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🏗️ Generate SageMaker Architecture", help="Generate modernized SageMaker architecture design", use_container_width=True):
                     try:
-                        # Redirect stdout to capture console output
-                        sys.stdout = captured_output
+                        # Create containers for real-time display
+                        progress_container = st.container()
+                        output_container = st.container()
                         
-                        # Call the agent
-                        response = st.session_state.agents['sagemaker'](sagemaker_input)
+                        with progress_container:
+                            progress_text = st.empty()
+                            progress_text.info("🔄 Preparing SageMaker architecture design request...")
                         
-                        # Get any captured console output
-                        console_output = captured_output.getvalue()
+                        sagemaker_input = str(qa_response.get('output', '')) + "\n" + SAGEMAKER_USER_PROMPT
                         
-                    finally:
-                        # Restore stdout
-                        sys.stdout = old_stdout
-                    
-                    # If there was console output, show it
-                    if console_output.strip():
+                        with progress_container:
+                            progress_text.info("🤖 AI is analyzing requirements and designing architecture...")
+                        
+                        # Create a placeholder for streaming output
                         with output_container:
-                            st.markdown("**Console Output:**")
-                            st.code(console_output, language="text")
+                            st.markdown("### 🔄 Generating Architecture Design...")
+                            output_placeholder = st.empty()
+                            output_placeholder.info("Waiting for AI response...")
+                        
+                        # Call the agent with output capture
+                        import sys
+                        from io import StringIO
+                        
+                        # Capture stdout to catch any console output
+                        old_stdout = sys.stdout
+                        captured_output = StringIO()
+                        
+                        try:
+                            # Redirect stdout to capture console output
+                            sys.stdout = captured_output
+                            
+                            # Call the agent
+                            response = st.session_state.agents['sagemaker'](sagemaker_input)
+                            
+                            # Get any captured console output
+                            console_output = captured_output.getvalue()
+                            
+                        finally:
+                            # Restore stdout
+                            sys.stdout = old_stdout
+                        
+                        # If there was console output, show it
+                        if console_output.strip():
+                            with output_container:
+                                st.markdown("**Console Output:**")
+                                st.code(console_output, language="text")
+                        
+                        # Convert response to string and ensure it's captured
+                        # Handle different response types (string, object with content, etc.)
+                        if hasattr(response, 'content'):
+                            response_str = str(response.content).strip()
+                        elif hasattr(response, 'text'):
+                            response_str = str(response.text).strip()
+                        elif hasattr(response, 'output'):
+                            response_str = str(response.output).strip()
+                        else:
+                            response_str = str(response).strip()
+                        
+                        # Log for debugging
+                        logger.info(f"SageMaker response type: {type(response)}")
+                        logger.info(f"SageMaker response length: {len(response_str)} characters")
+                        logger.info(f"SageMaker response preview: {response_str[:200]}...")
+                        
+                        if not response_str or response_str == "None":
+                            st.error("⚠️ Received empty response from SageMaker agent")
+                            logger.error(f"Empty response - Original response: {response}")
+                            response_str = "Error: Empty response received from agent"
+                        
+                        # Show the response immediately in the output container
+                        with output_container:
+                            output_placeholder.empty()
+                            st.markdown("### 🎯 Generated SageMaker Architecture")
+                            st.markdown('<div class="agent-response">', unsafe_allow_html=True)
+                            st.markdown("**SageMaker Architecture Design:**")
+                            st.markdown(response_str)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        with progress_container:
+                            progress_text.info("💾 Saving architecture design...")
+                        
+                        # Save the interaction
+                        self.save_interaction('SageMaker Agent', sagemaker_input, response_str, 'sagemaker')
+                        
+                        # Verify it was saved
+                        saved_response = st.session_state.workflow_state['agent_responses'].get('sagemaker', {})
+                        logger.info(f"Saved response verification: {bool(saved_response)}")
+                        logger.info(f"Saved response keys: {saved_response.keys() if saved_response else 'None'}")
+                        logger.info(f"Saved response output length: {len(str(saved_response.get('output', ''))) if saved_response else 0}")
+                        
+                        # Mark step as complete
+                        if 'sagemaker' not in st.session_state.workflow_state['completed_steps']:
+                            st.session_state.workflow_state['completed_steps'].append('sagemaker')
+                        st.session_state.workflow_state['current_step'] = 'diagram'
+                        
+                        # Clear progress and show success
+                        with progress_container:
+                            progress_text.empty()
+                            st.success("✅ SageMaker architecture design completed!")
+                        
+                        # Add download button
+                        with output_container:
+                            st.download_button(
+                                label="📥 Download Architecture Design",
+                                data=response_str,
+                                file_name=f"sagemaker_architecture_design_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                mime="text/plain",
+                                help="Download the SageMaker architecture design as a text file"
+                            )
+                        
+                        # Small delay to show success message
+                        import time
+                        time.sleep(2)
+                        
+                        # Force rerun to display the result properly
+                        st.rerun()
                     
-                    # Convert response to string and ensure it's captured
-                    # Handle different response types (string, object with content, etc.)
-                    if hasattr(response, 'content'):
-                        response_str = str(response.content).strip()
-                    elif hasattr(response, 'text'):
-                        response_str = str(response.text).strip()
-                    elif hasattr(response, 'output'):
-                        response_str = str(response.output).strip()
-                    else:
-                        response_str = str(response).strip()
+                    except Exception as e:
+                        st.error(f"❌ Error generating SageMaker architecture: {str(e)}")
+                        st.session_state.workflow_state['errors']['sagemaker'] = str(e)
+            
+            with col2:
+                if st.button("⏭️ Skip SageMaker Design", help="Skip architecture design and proceed to TCO analysis", use_container_width=True):
+                    st.info("Skipping SageMaker architecture design. Proceeding directly to TCO analysis.")
                     
-                    # Log for debugging
-                    logger.info(f"SageMaker response type: {type(response)}")
-                    logger.info(f"SageMaker response length: {len(response_str)} characters")
-                    logger.info(f"SageMaker response preview: {response_str[:200]}...")
-                    
-                    if not response_str or response_str == "None":
-                        st.error("⚠️ Received empty response from SageMaker agent")
-                        logger.error(f"Empty response - Original response: {response}")
-                        response_str = "Error: Empty response received from agent"
-                    
-                    # Show the response immediately in the output container
-                    with output_container:
-                        output_placeholder.empty()
-                        st.markdown("### 🎯 Generated SageMaker Architecture")
-                        st.markdown('<div class="agent-response">', unsafe_allow_html=True)
-                        st.markdown("**SageMaker Architecture Design:**")
-                        st.markdown(response_str)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    with progress_container:
-                        progress_text.info("💾 Saving architecture design...")
-                    
-                    # Save the interaction
-                    self.save_interaction('SageMaker Agent', sagemaker_input, response_str, 'sagemaker')
-                    
-                    # Verify it was saved
-                    saved_response = st.session_state.workflow_state['agent_responses'].get('sagemaker', {})
-                    logger.info(f"Saved response verification: {bool(saved_response)}")
-                    logger.info(f"Saved response keys: {saved_response.keys() if saved_response else 'None'}")
-                    logger.info(f"Saved response output length: {len(str(saved_response.get('output', ''))) if saved_response else 0}")
+                    # Save a note that this was skipped
+                    skip_note = "SageMaker architecture design was skipped by user. Proceeding with TCO analysis based on current architecture."
+                    self.save_interaction('SageMaker Agent', "User skipped SageMaker design", skip_note, 'sagemaker')
                     
                     # Mark step as complete
                     if 'sagemaker' not in st.session_state.workflow_state['completed_steps']:
                         st.session_state.workflow_state['completed_steps'].append('sagemaker')
-                    st.session_state.workflow_state['current_step'] = 'diagram'
                     
-                    # Clear progress and show success
-                    with progress_container:
-                        progress_text.empty()
-                        st.success("✅ SageMaker architecture design completed!")
+                    # Skip diagram and go to TCO
+                    if 'diagram' not in st.session_state.workflow_state['completed_steps']:
+                        st.session_state.workflow_state['completed_steps'].append('diagram')
                     
-                    # Add download button
-                    with output_container:
-                        st.download_button(
-                            label="📥 Download Architecture Design",
-                            data=response_str,
-                            file_name=f"sagemaker_architecture_design_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                            mime="text/plain",
-                            help="Download the SageMaker architecture design as a text file"
-                        )
+                    st.session_state.workflow_state['current_step'] = 'tco'
                     
-                    # Small delay to show success message
+                    # Small delay to show message
                     import time
-                    time.sleep(2)
+                    time.sleep(1)
                     
-                    # Force rerun to display the result properly
                     st.rerun()
-                
-                except Exception as e:
-                    st.error(f"❌ Error generating SageMaker architecture: {str(e)}")
-                    st.session_state.workflow_state['errors']['sagemaker'] = str(e)
                     logger.error(f"SageMaker generation error: {e}", exc_info=True)
         
         # Display SageMaker response if available (for page refreshes or navigation back)
@@ -1434,8 +1492,11 @@ Format your response with clear step headers and detailed descriptions for each 
         elif current_step == 'sagemaker':
             self.handle_sagemaker_step()
         elif current_step == 'diagram':
-            print('skipping diagram step for lite version..')
-            #self.handle_diagram_step()
+            # Skip diagram generation in lite version and go directly to TCO
+            if 'diagram' not in st.session_state.workflow_state['completed_steps']:
+                st.session_state.workflow_state['completed_steps'].append('diagram')
+            st.session_state.workflow_state['current_step'] = 'tco'
+            st.rerun()
         elif current_step == 'tco':
             self.handle_tco_step()
         elif current_step == 'navigator':

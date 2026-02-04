@@ -154,6 +154,68 @@ sudo yum install python3-tkinter  # CentOS/RHEL
 # Reinstall Python from python.org if needed
 ```
 
+### Submit Button Not Launching
+
+If clicking Submit doesn't launch the advisor:
+
+1. **Check console output**: Run the launcher from terminal/command prompt to see debug messages
+   ```bash
+   python run_sagemaker_migration_advisor_main.py
+   ```
+
+2. **Verify Streamlit is installed**:
+   ```bash
+   streamlit --version
+   ```
+   If not installed:
+   ```bash
+   pip install streamlit
+   ```
+
+3. **Check PATH**: Ensure Streamlit is in your system PATH
+   ```bash
+   # macOS/Linux
+   which streamlit
+   
+   # Windows
+   where streamlit
+   ```
+
+4. **Try the simple launcher**: Use the alternative launcher without GUI complexity
+   ```bash
+   python launch_advisor.py
+   ```
+
+5. **Run directly**: If launcher issues persist, run the advisor directly
+   ```bash
+   streamlit run sagemaker_migration_advisor_lite.py
+   # or
+   streamlit run sagemaker_migration_advisor.py
+   ```
+
+### Streamlit Not Found
+
+If you get "Streamlit command not found":
+
+```bash
+# Install Streamlit
+pip install streamlit
+
+# Verify installation
+streamlit --version
+
+# If still not found, try with full path
+python -m streamlit run sagemaker_migration_advisor_lite.py
+```
+
+### Process Starts But Browser Doesn't Open
+
+1. **Manual browser access**: If Streamlit starts but browser doesn't open, look for the URL in console output (usually `http://localhost:8501`)
+
+2. **Port already in use**: If port 8501 is busy, Streamlit will use another port. Check console for the actual URL.
+
+3. **Firewall issues**: Ensure your firewall allows localhost connections
+
 ### Script Not Found Error
 
 Ensure both advisor scripts exist:
@@ -166,6 +228,15 @@ Make the launcher executable:
 ```bash
 chmod +x run_sagemaker_migration_advisor_main.py
 ```
+
+### Debug Mode
+
+To see detailed debug output, check the console where you launched the GUI. The updated launcher prints:
+- Streamlit path detection
+- Command being executed
+- Working directory
+- Process ID
+- Any errors that occur
 
 ## Advanced Usage
 

@@ -70,7 +70,7 @@ OUTPUT:
 """
     
     mode = "a" if append_to_file and os.path.exists(output_file) else "w"
-    with open(output_file, mode) as f:
+    with open(output_file, mode, encoding="utf-8") as f:
         f.write(formatted_interaction)
     
     print(f"✓ {agent_name} input/output saved to {output_file}")
@@ -89,7 +89,7 @@ def write_user_prompt(prompt_type, user_input_text, append_to_file=True):
 """
     
     mode = "a" if append_to_file and os.path.exists(output_file) else "w"
-    with open(output_file, mode) as f:
+    with open(output_file, mode, encoding="utf-8") as f:
         f.write(formatted_prompt)
     
     print(f"✓ User {prompt_type} saved to {output_file}")
@@ -274,7 +274,7 @@ cloudformation_agent = Agent(
 cloudformation_input = str(sagemaker_description)+ "\n"+CLOUDFORMATION_USER_PROMPT
 cloudformation_template = cloudformation_agent(cloudformation_input)
 write_agent_interaction("CloudFormation Agent", cloudformation_input, cloudformation_template)
-with open("generated_template.yaml", "w") as f:
+with open("generated_template.yaml", "w", encoding="utf-8") as f:
     f.write(str(cloudformation_template))
 print("CloudFormation template generated and saved to 'generated_template.yaml")
 logger.info("CloudFormation template generated and saved to 'generated_template.yaml'.")

@@ -18,6 +18,13 @@ A comprehensive web interface for the SageMaker Migration Advisor that provides 
 - **Image Support**: Upload and analyze architecture diagrams
 - **Error Handling**: Graceful error recovery with retry mechanisms
 
+## 📚 Documentation
+
+- **[LAUNCHER_OPTIONS.md](LAUNCHER_OPTIONS.md)** - Quick reference for all launch methods
+- **[LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md)** - Detailed launcher documentation
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
+- **[README_CLI.md](README_CLI.md)** - CLI version documentation (if available)
+
 ## 📋 Prerequisites
 
 ### Required Software
@@ -53,13 +60,76 @@ export AWS_DEFAULT_REGION=us-west-2
 ```
 
 
-## 🚀 3. Launch SageMaker Migration Advisor app
+## 🚀 Quick Start
+
+### Option 1: Unified Launcher (Recommended)
+
+The easiest way to launch either version:
 
 ```bash
-python run_sagemaker_migration_advisor.py
+# GUI launcher with dropdown selection
+python run_sagemaker_migration_advisor_main.py
+
+# Or CLI mode
+python run_sagemaker_migration_advisor_main.py --cli
 ```
 
-The application will open in your default web browser at `http://localhost:8501`
+See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for detailed launcher documentation.
+
+### Option 2: Simple Python Launcher
+
+```bash
+# Interactive CLI launcher
+python launch_advisor.py
+```
+
+### Option 3: Direct Shell Scripts
+
+**macOS/Linux:**
+```bash
+# Launch Lite version
+./launch_lite.sh
+
+# Launch Regular version
+./launch_regular.sh
+```
+
+**Windows:**
+```cmd
+REM Launch Lite version
+launch_lite.bat
+
+REM Launch Regular version
+launch_regular.bat
+```
+
+### Option 4: Direct Streamlit Execution
+
+```bash
+# Run Lite version directly
+streamlit run sagemaker_migration_advisor_lite.py
+
+# Run Regular version directly
+streamlit run sagemaker_migration_advisor.py
+```
+
+## 📦 Two Versions Available
+
+### Migration Advisor Lite
+- **Best for**: Quick assessments, POCs, straightforward migrations
+- **Duration**: 5-10 minutes
+- **Features**: Core analysis, basic TCO, simplified roadmap
+- **File**: `sagemaker_migration_advisor_lite.py`
+
+### Migration Advisor Regular
+- **Best for**: Complex migrations, enterprise deployments, detailed planning
+- **Duration**: 15-30 minutes
+- **Features**: Full analysis, Q&A, diagrams, comprehensive TCO
+- **File**: `sagemaker_migration_advisor.py`
+
+## 🚀 3. Launch SageMaker Migration Advisor app
+
+Choose any of the launch methods above. The application will open in your default web browser at `http://localhost:8501`
 
 ## 📖 User Guide
 
