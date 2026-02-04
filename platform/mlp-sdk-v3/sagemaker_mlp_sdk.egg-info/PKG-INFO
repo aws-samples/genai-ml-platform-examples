@@ -1,13 +1,13 @@
 Metadata-Version: 2.4
-Name: mlp_sdk
+Name: sagemaker-mlp-sdk
 Version: 0.1.0
 Summary: A Python wrapper library for SageMaker SDK v3 with configuration-driven defaults
-Author-email: Visa SDK Team <visa-sdk@example.com>
+Author-email: Ram Vittal <rvvittal@amazon.com>
 License: MIT
-Project-URL: Homepage, https://github.com/example/mlp_sdk
-Project-URL: Documentation, https://visa-sdk.readthedocs.io/
-Project-URL: Repository, https://github.com/example/mlp_sdk
-Project-URL: Bug Tracker, https://github.com/example/mlp_sdk/issues
+Project-URL: Homepage, https://github.com/aws-samples/genai-ml-platform-examples/tree/main/platform/mlp-sdk-v3
+Project-URL: Documentation, https://github.com/aws-samples/genai-ml-platform-examples/blob/main/platform/mlp-sdk-v3/docs/
+Project-URL: Repository, https://github.com/aws-samples/genai-ml-platform-examples/tree/main/platform/mlp-sdk-v3
+Project-URL: Bug Tracker, https://github.com/aws-samples/genai-ml-platform-examples/issues
 Keywords: sagemaker,aws,machine-learning,ml,sdk
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
@@ -21,6 +21,7 @@ Classifier: Topic :: Software Development :: Libraries :: Python Modules
 Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: sagemaker>=3.0.0
 Requires-Dist: boto3>=1.26.0
 Requires-Dist: botocore>=1.29.0
@@ -45,7 +46,11 @@ Requires-Dist: pytest-hypothesis>=6.0.0; extra == "test"
 Requires-Dist: pytest-mock>=3.10.0; extra == "test"
 Requires-Dist: pytest-cov>=4.0.0; extra == "test"
 Requires-Dist: moto[sagemaker]>=4.2.0; extra == "test"
+Dynamic: license-file
 
+> [!WARNING]
+> This mlp_sdk_v3 example demonstrates how to develop an ML Platform SDK wrapper library, providing a way to simplify infrastructure configuration management and standardize ML workflows across teams. It is intended as a reference guide for customers to help them create their own customized SDK wrappers. Note: This library is provided for illustrative purposes only and should not be used directly in production environments.
+> 
 # mlp_sdk_v3
 
 A Python wrapper library for SageMaker SDK v3 with configuration-driven defaults.

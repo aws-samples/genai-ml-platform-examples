@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlp_sdk"
+name = "sagemaker-mlp-sdk"
 version = "0.1.0"
 description = "A Python wrapper library for SageMaker SDK v3 with configuration-driven defaults"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Visa SDK Team", email = "visa-sdk@example.com"}
+    {name = "Ram Vittal", email = "rvvittal@amazon.com"}
 ]
 keywords = ["sagemaker", "aws", "machine-learning", "ml", "sdk"]
 classifiers = [
@@ -59,10 +59,10 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/mlp_sdk"
-Documentation = "https://visa-sdk.readthedocs.io/"
-Repository = "https://github.com/example/mlp_sdk"
-"Bug Tracker" = "https://github.com/example/mlp_sdk/issues"
+Homepage = "https://github.com/aws-samples/genai-ml-platform-examples/tree/main/platform/mlp-sdk-v3"
+Documentation = "https://github.com/aws-samples/genai-ml-platform-examples/blob/main/platform/mlp-sdk-v3/docs/"
+Repository = "https://github.com/aws-samples/genai-ml-platform-examples/tree/main/platform/mlp-sdk-v3"
+"Bug Tracker" = "https://github.com/aws-samples/genai-ml-platform-examples/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
