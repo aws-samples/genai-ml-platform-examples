@@ -3,8 +3,16 @@ Streamlit Application for SageMaker Migration Advisor
 Interactive web interface for architecture migration workflow with state management and error recovery
 """
 
-import streamlit as st
+import sys
 import os
+
+# Fix Windows encoding issues - set UTF-8 as default encoding
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+import streamlit as st
 import json
 import datetime
 import traceback
@@ -233,7 +241,7 @@ OUTPUT:
 
 """
         
-        with open(output_file, "a") as f:
+        with open(output_file, "a", encoding="utf-8") as f:
             f.write(formatted_interaction)
     
     def display_sidebar(self):
@@ -498,7 +506,27 @@ OUTPUT:
             if arch_description and st.button("🔍 Analyze Description"):
                 try:
                     with st.spinner("Analyzing architecture description..."):
-                        response = st.session_state.agents['architecture'](arch_description)
+                        # Create a clear prompt for text-based architecture description
+                        analysis_prompt = f"""
+I am providing a TEXT DESCRIPTION of an existing ML/GenAI architecture (not a diagram).
+
+Please analyze this architecture description and provide a comprehensive analysis following the required output structure:
+
+ARCHITECTURE DESCRIPTION:
+{arch_description}
+
+Please provide:
+1. List of all components mentioned
+2. Purpose of each component
+3. Interactions and data flow
+4. Architecture patterns identified
+5. Security and scalability considerations
+6. Opportunity Qualification (MRR and ARR estimates)
+
+Ensure the analysis is thorough and includes all required sections.
+"""
+                        
+                        response = st.session_state.agents['architecture'](analysis_prompt)
                         
                         self.save_interaction('Architecture Agent', arch_description, str(response), 'description')
                         st.session_state.workflow_state['user_inputs']['description'] = arch_description

@@ -253,13 +253,40 @@ class MigrationAdvisorLauncher:
             )
             return
         
+        # Check if streamlit is installed
+        try:
+            import shutil
+            if not shutil.which("streamlit"):
+                messagebox.showerror(
+                    "Streamlit Not Found",
+                    "Streamlit is not installed or not in PATH.\n\n"
+                    "Please install it with:\n"
+                    "  pip install streamlit\n\n"
+                    "Then restart this launcher."
+                )
+                return
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to check for Streamlit: {e}"
+            )
+            return
+        
         # Disable launch button to prevent multiple launches
         if self.launch_button:
             self.launch_button.config(state='disabled', text='Running...')
         
         # Update status
-        self.status_var.set(f"🚀 Launching {display_name}... Please wait, this may take several minutes...")
+        self.status_var.set(f"🚀 Launching {display_name}... Opening browser...")
         self.root.update()
+        
+        # Show info message
+        messagebox.showinfo(
+            "Launching Advisor",
+            f"{display_name} is starting...\n\n"
+            "A browser window will open shortly.\n"
+            "You can close this launcher or keep it open to monitor status."
+        )
         
         # Run in separate thread to keep GUI responsive
         thread = threading.Thread(
@@ -272,28 +299,104 @@ class MigrationAdvisorLauncher:
     def _run_advisor_thread(self, script_path: Path, display_name: str):
         """Run the advisor in a separate thread"""
         try:
+            # Check if streamlit is available
+            import shutil
+            streamlit_path = shutil.which("streamlit")
+            
+            print(f"\n{'='*60}")
+            print(f"DEBUG: Checking for Streamlit...")
+            print(f"DEBUG: Streamlit path: {streamlit_path}")
+            print(f"{'='*60}\n")
+            
+            if not streamlit_path:
+                error_msg = (
+                    "Streamlit command not found in PATH.\n\n"
+                    "Please ensure Streamlit is installed:\n"
+                    "  pip install streamlit\n\n"
+                    "And that it's accessible from your command line."
+                )
+                self.root.after(0, self._on_advisor_error, error_msg, display_name)
+                return
+            
             # Launch the selected advisor with Streamlit
-            result = subprocess.run(
-                ["streamlit", "run", str(script_path)],
-                cwd=script_path.parent,
-                check=False,
-                capture_output=False  # Let output go to console
+            print(f"\n{'='*60}")
+            print(f"DEBUG: Launching {display_name}")
+            print(f"DEBUG: Command: streamlit run {script_path}")
+            print(f"DEBUG: Working directory: {script_path.parent}")
+            print(f"DEBUG: Script exists: {script_path.exists()}")
+            print(f"{'='*60}\n")
+            
+            # Use Popen for better control and non-blocking execution
+            process = subprocess.Popen(
+                [streamlit_path, "run", str(script_path)],
+                cwd=str(script_path.parent),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
             )
             
-            # Schedule GUI update in main thread
-            self.root.after(0, self._on_advisor_complete, result.returncode, display_name)
+            print(f"DEBUG: Process started with PID: {process.pid}")
+            print(f"DEBUG: Waiting for Streamlit to initialize...")
+            
+            # Wait a moment for Streamlit to start
+            import time
+            time.sleep(2)
+            
+            # Check if process is still running
+            poll_result = process.poll()
+            if poll_result is not None:
+                # Process already exited - something went wrong
+                stdout, stderr = process.communicate()
+                error_msg = f"Streamlit exited immediately.\n\nStdout:\n{stdout}\n\nStderr:\n{stderr}"
+                print(f"DEBUG: Process exited with code {poll_result}")
+                print(f"DEBUG: Stdout: {stdout}")
+                print(f"DEBUG: Stderr: {stderr}")
+                self.root.after(0, self._on_advisor_error, error_msg, display_name)
+                return
+            
+            print(f"DEBUG: Streamlit appears to be running (PID: {process.pid})")
+            print(f"DEBUG: Browser should open automatically")
+            print(f"DEBUG: You can close this launcher window now\n")
+            
+            # Schedule success message in main thread
+            self.root.after(0, self._on_advisor_started, display_name, process.pid)
+            
+            # Don't wait for process to complete - let it run independently
+            # The user can close the launcher or keep it open
         
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             # Streamlit not found
             error_msg = (
-                "Streamlit is not installed or not in PATH.\n\n"
+                f"Streamlit is not installed or not in PATH.\n\n"
+                f"Error: {e}\n\n"
                 "Please install it with:\n"
                 "pip install streamlit"
             )
+            print(f"DEBUG: FileNotFoundError: {e}")
             self.root.after(0, self._on_advisor_error, error_msg, display_name)
         except Exception as e:
             # Schedule error handling in main thread
+            print(f"DEBUG: Exception occurred: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             self.root.after(0, self._on_advisor_error, str(e), display_name)
+    
+    def _on_advisor_started(self, display_name: str, pid: int):
+        """Handle advisor successful start (runs in main thread)"""
+        # Re-enable submit button
+        if self.launch_button:
+            self.launch_button.config(state='normal', text='Submit')
+        
+        self.status_var.set(f"✅ {display_name} is running (PID: {pid})")
+        messagebox.showinfo(
+            "Advisor Started",
+            f"{display_name} is now running!\n\n"
+            f"Process ID: {pid}\n\n"
+            "A browser window should have opened.\n"
+            "You can close this launcher window now."
+        )
     
     def _on_advisor_complete(self, return_code: int, display_name: str):
         """Handle advisor completion (runs in main thread)"""
