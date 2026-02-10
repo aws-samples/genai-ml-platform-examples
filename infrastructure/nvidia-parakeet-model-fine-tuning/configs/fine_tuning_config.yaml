@@ -1,0 +1,293 @@
+# Main configuration name for this fine-tuning experiment
+name: "French_ASR_Parakeet_Finetuning"
+train_manifest: "/home/ubuntu/dataset/fleurs_french/train_manifest.jsonl"
+validation_manifest: "/home/ubuntu/dataset/fleurs_french/validation_manifest.jsonl"
+test_manifest: "/home/ubuntu/dataset/fleurs_french/test_manifest.jsonl"
+
+# Initial model settings - use only one of these
+init_from_nemo_model: null # Path to existing .nemo model file to continue training from
+init_from_pretrained_model: nvidia/parakeet-tdt-0.6b-v2 #'nvidia/parakeet-tdt-0.6b-v2'  # Name of pretrained NeMo model (e.g., `parakeet-tdt-0.6b-v2`) to initialize from
+
+model:
+  sample_rate: 16000  # Audio sample rate in Hz, must match your dataset
+
+  # Text preprocessing settings
+  normalize_text: true  # Whether to convert all text to lowercase and clean special characters
+  symbols_to_keep: ["'"]  # Symbols that should be preserved during text cleaning
+  model_defaults:
+    enc_hidden: ${model.encoder.d_model}  # Hidden size of encoder, references the d_model value
+    joint_hidden: 640  # Hidden size for joint network in RNN-T/TDT architecture
+
+    # Time Dependent Transducer (TDT) configuration
+    tdt_durations: [0, 1, 2, 3, 4]  # Supported duration values for token emission
+    num_tdt_durations: 5  # Number of distinct duration values
+
+  train_ds:
+    manifest_filepath: ${train_manifest}  # JSON Lines file with training audio file paths and transcriptions
+    normalize_text: ${model.normalize_text}  # Inherit text normalization setting from above
+    symbols_to_keep: ${model.symbols_to_keep}  # Inherit symbols to keep from above
+    max_duration: 102  # Maximum duration of audio files in seconds to include
+    sample_rate: ${model.sample_rate}  # Audio sample rate, inherited from top level
+    batch_size: 3  # Number of samples per batch - increase if memory allows
+    shuffle: true  # Whether to shuffle training data
+    shuffle_n: 2048  # Buffer size for shuffling
+    num_workers: 24  # Number of parallel data loader workers
+    pin_memory: true  # Pin memory for faster data transfer to GPU
+    use_start_end_token: false  # Whether to add start/end tokens to transcriptions
+    augmentor:
+      speed:  # Audio speed perturbation configuration
+        prob: 0.4  # Probability of applying the augmentation
+        sr: 16000  # Sample rate for speed augmentation
+        min_speed_rate: 0.9  # Minimum speed factor
+        max_speed_rate: 1.1  # Maximum speed factor
+        resample_type: 'kaiser_fast'  # Algorithm for resampling
+      # noise: #Perturbation that adds noise to input audio
+      #   prob: 0.4
+      #   manifest_path: Path to a noise manifest
+      #   min_snr_db: 10
+      #   max_snr_db: 30
+      #   rng: null
+      #   orig_sr: 16000
+      # shift: # Perturbs audio by shifting the audio in time by a random amount between min_shift_ms and max_shift_ms.
+      #   prob: 0.5
+      #   min_shift_ms: -5.0
+      #   max_shift_ms: 5.0
+      # white_noise: #Perturbation that adds white noise to an audio file in the training dataset
+      #     prob: 1.0
+      #     min_level: -90
+      #     max_level: -46
+
+
+    #bucketing_strategy: "fully_randomized"  # Commented out bucketing strategy
+
+
+  validation_ds:
+    manifest_filepath: ${validation_manifest}  # JSON Lines file with validation data
+    normalize_text: ${model.normalize_text}  # Inherit text normalization setting
+    symbols_to_keep: ${model.symbols_to_keep}  # Inherit symbols to keep
+    sample_rate: ${model.sample_rate}  # Audio sample rate
+    batch_size: 3  # Number of samples per validation batch
+    shuffle: false  # Don't shuffle validation data
+    shuffle_n: 2048  # Buffer size for shuffling (unused when shuffle is false)
+    num_workers: 24  # Number of parallel data loader workers
+    pin_memory: true  # Pin memory for faster data transfer
+    use_start_end_token: false  # Don't use start/end tokens
+
+  test_ds:
+    manifest_filepath: ${test_manifest}  # JSON Lines file with test data
+    normalize_text: ${model.normalize_text}  # Inherit text normalization
+    symbols_to_keep: ${model.symbols_to_keep}  # Inherit symbols to keep
+    
+    sample_rate: ${model.sample_rate}  # Audio sample rate
+    batch_size: 3  # Test batch size
+    shuffle: false  # Don't shuffle test data
+    shuffle_n: 2048  # Buffer size for shuffling (unused)
+    num_workers: 24  # Parallel data loader workers
+    pin_memory: true  # Pin memory
+    use_start_end_token: false  # Don't use start/end tokens
+
+  char_labels: # Character-based tokenizer configuration (not used when using BPE/WPE tokenizer)
+    update_labels: false  # Whether to update the character vocabulary
+    labels: null # Example would be: $$' ', 'a', 'b', 'c'$$ - list of character tokens
+
+  tokenizer: # Tokenizer configuration for subword models
+    update_tokenizer: false  # Whether to update the tokenizer from the specified directory
+    dir: null  # Path to directory containing tokenizer files (tokenizer.model for BPE, vocab.txt for WPE)
+    type: bpe  # Type of tokenizer: 'bpe' for SentencePiece or 'wpe' for WordPiece
+
+  preprocessor:
+    _target_: nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor  # Module that converts audio to mel spectrograms
+    sample_rate: ${model.sample_rate}  # Audio sample rate
+    normalize: "per_feature"  # Normalization method
+    window_size: 0.025  # Window size in seconds for FFT
+    window_stride: 0.01  # Window stride in seconds for FFT
+    window: "hann"  # Window function type
+    features: 128  # Number of mel features to extract
+    n_fft: 512  # FFT size
+    frame_splicing: 1  # Number of frames to splice together
+    dither: 0.00001  # Amount of dithering noise
+    pad_to: 0  # Padding to ensure consistent output size (0 = disabled)
+
+  spec_augment:
+    _target_: nemo.collections.asr.modules.SpectrogramAugmentation  # Module for frequency and time masking
+    freq_masks: 2  # Number of frequency masks to apply (0 to disable)
+    time_masks: 10  # Number of time masks to apply (0 to disable)
+    freq_width: 27  # Maximum width of frequency masks
+    time_width: 0.05  # Maximum width of time masks as a fraction of sequence length
+
+  # Speed augmentation commented out as it's already defined in train_ds.augmentor
+  # speed_augment:
+  #   _target_: nemo.collections.asr.parts.preprocessing.perturb.SpeedPerturbation
+  #   min_speed_rate: .9 
+  #   max_speed_rate: 1.1 
+
+  
+  encoder:
+    _target_: nemo.collections.asr.modules.ConformerEncoder  # Conformer encoder architecture
+    feat_in: ${model.preprocessor.features}  # Input feature dimensions from preprocessor
+    feat_out: -1  # Output feature dimensions (-1 means same as d_model)
+    n_layers: 17  # Number of conformer blocks
+    d_model: 512  # Model dimension for conformer blocks
+
+    # Sub-sampling parameters to reduce sequence length
+    subsampling: dw_striding  # Method: vggnet, striding, stacking, stacking_norm, or dw_striding
+    subsampling_factor: 8  # Factor to reduce sequence length by (must be power of 2 for some methods)
+    subsampling_conv_channels: 256  # Number of channels in subsampling convolution (-1 = d_model)
+    causal_downsampling: false  # Whether to use causal convolutions for downsampling (for streaming)
+
+    # Additional reduction parameters for further sequence length reduction
+    reduction: null  # Method: pooling, striding, or null (no additional reduction)
+    reduction_position: null  # Position to apply reduction (block index, -1 for end of encoder)
+    reduction_factor: 1  # Factor to reduce sequence length by
+
+    # Feed forward module configuration
+    ff_expansion_factor: 4  # Expansion factor for feed forward blocks
+
+    # Attention module configuration
+    self_attention_model: rel_pos  # Attention type: relative positional (rel_pos) or absolute positional (abs_pos)
+    n_heads: 8  # Number of attention heads
+    att_context_size: [-1, -1]  # Left and right context size for attention, -1 means unlimited
+    att_context_style: regular  # Context style: regular or chunked_limited
+    xscaling: true  # Scale input embeddings by sqrt(d_model)
+    untie_biases: true  # Use separate biases for each layer
+    pos_emb_max_len: 5000  # Maximum sequence length for positional embeddings
+
+    # Convolution module configuration
+    conv_kernel_size: 9  # Kernel size for convolution module
+    conv_norm_type: 'batch_norm'  # Normalization type: batch_norm, layer_norm, or groupnormN
+    conv_context_size: null  # Context size for convolution, null means symmetric
+
+    # Regularization parameters
+    dropout: 0.1  # General dropout rate
+    dropout_pre_encoder: 0.1  # Dropout before encoder
+    dropout_emb: 0.0  # Embedding dropout
+    dropout_att: 0.1  # Attention dropout
+
+    # Stochastic depth for regularization
+    stochastic_depth_drop_prob: 0.0  # Probability of dropping layers (0 = disabled)
+    stochastic_depth_mode: linear  # Drop probability distribution: linear or uniform
+    stochastic_depth_start_layer: 1  # First layer to apply stochastic depth
+
+  decoder:
+    _target_: nemo.collections.asr.modules.RNNTDecoder  # RNN-Transducer decoder
+    normalization_mode: null  # Normalization method (null for export compatibility)
+    random_state_sampling: false  # Whether to use random state sampling for improved robustness
+    blank_as_pad: true  # Treat blank as padding (needed for efficient inference and export)
+
+  decoding:
+    strategy: "greedy_batch"  # Decoding algorithm: greedy, greedy_batch, beam, tsd, alsd
+    model_type: "tdt"  # Model type: "tdt" for Time Dependent Transducer
+
+    # TDT-specific duration values
+    durations: ${model.model_defaults.tdt_durations}  # Reference to durations defined above
+
+    # Greedy decoding configuration
+    greedy:
+      max_symbols: 10  # Maximum number of symbols per frame
+
+    # Beam search configuration
+    beam:
+      beam_size: 2  # Number of beams to maintain
+      return_best_hypothesis: False  # Whether to return only the best hypothesis or all
+      score_norm: true  # Whether to normalize scores by length
+      tsd_max_sym_exp: 50  # Maximum symbol expansions for Time Synchronous Decoding
+      alsd_max_target_len: 2.0  # Maximum target length ratio for Alignment-Length Synchronous Decoding
+
+
+  loss:
+    # TDT loss function (main difference between TDT and conventional RNNT)
+    loss_name: "French_ASR_Parakeet_Finetuning"  # Type of loss to use
+
+    tdt_kwargs:
+      # FastEmit parameters for reducing model latency
+      fastemit_lambda: 0.0  # FastEmit regularization weight (0.0 = disabled, try 0.001)
+      clamp: -1.0  # Gradient clamping threshold (-1.0 = disabled)
+
+      # TDT-specific parameters from "Predicting Token Duration for Time-Dependent Transducer ASR" paper
+      durations: ${model.model_defaults.tdt_durations}  # Reference to duration values
+      sigma: 0.02  # Hyper-parameter for under-normalization
+      omega: 0.1  # Weight for regular RNN-T loss component
+
+  optim:
+    name: adamw  # Optimizer name: Adam with weight decay
+    lr: 1e-4  # Learning rate
+    betas: [0.9, 0.98]  # Adam beta parameters
+    weight_decay: 1e-3  # L2 regularization factor
+
+    # Learning rate scheduler
+    sched:
+      name: CosineAnnealing  # Scheduler type
+      warmup_steps: 5000  # Number of warmup steps for learning rate
+      warmup_ratio: null  # Alternative to warmup_steps (null means use steps instead)
+      min_lr: 5e-6  # Minimum learning rate at the end of training
+
+  # Metrics configuration for the model
+  multitask_metrics_config:
+    log_prediction: true  # Whether to log example predictions
+    metrics:
+      wer:
+        _target_: nemo.collections.asr.metrics.wer.WER  # Word Error Rate metric
+
+
+trainer:
+  devices: 4  # Number of GPUs to use (-1 would use all available)
+  num_nodes: 4  # Number of compute nodes (servers) for distributed training
+  max_epochs: 40  # Maximum number of training epochs
+  max_steps: -1  # Maximum number of training steps (-1 means compute from epochs)
+  val_check_interval: 1.0  # Validation frequency: 1.0 = once per epoch, 0.25 = 4 times per epoch
+  accelerator: auto  # Hardware accelerator: auto, gpu, cpu
+  strategy:
+    _target_: "lightning.pytorch.strategies.DeepSpeedStrategy" # "lightning.pytorch.strategies.DeepSpeedStrategy" or "lightning.pytorch.strategies.DDPStrategy"  # Distributed training strategy
+    stage: 2
+    offload_optimizer: true  # Offload optimizer states to CPU to save GPU memory
+    offload_parameters: false  # Don't offload model parameters to CPU
+    partition_activations: true  # Partition activations across GPUs to save memory
+    gradient_as_bucket_view: true  # Use bucket view for gradients to save memory
+    cpu_checkpointing: true  # Store activations on CPU during backward pass
+    contiguous_gradients: true  # Ensure contiguous memory for gradients
+    overlap_comm: true  # Overlap communication and computation
+    allgather_bucket_size: 2e8  # Bucket size for all-gather operations
+    reduce_bucket_size: 2e8  # Bucket size for reduce operations
+    zero_force_ds_cpu_optimizer: false  # Don't force CPU optimizer with ZeRO
+
+  accumulate_grad_batches: 1  # Number of batches to accumulate before optimizer step
+  gradient_clip_val: 0.0  # Maximum gradient norm (0.0 = no clipping)
+  precision: bf16  # Numeric precision: 16, 32, or bf16 (bfloat16)
+  log_every_n_steps: 50  # How often to log metrics during training
+  enable_progress_bar: True  # Show progress bar during training
+  num_sanity_val_steps: 0  # Number of validation batches to run before training (0 = disable)
+  check_val_every_n_epoch: 1  # Validation frequency in epochs
+  sync_batchnorm: true  # Synchronize batch normalization across devices
+  enable_checkpointing: True  # Save model checkpoints (managed by exp_manager)
+  logger: false  # Don't use PyTorch Lightning's logger (exp_manager provides one)
+  benchmark: false  # Don't use cudnn benchmark (needed for variable-length inputs)
+
+trainer_strategy:
+  strategy: deepspeed
+
+exp_manager:
+  exp_dir: null  # Experiment output directory (null = auto-generate)
+  name: ${name}  # Experiment name, inherited from top level
+  create_tensorboard_logger: true  # Enable TensorBoard logging
+  create_checkpoint_callback: true  # Enable model checkpointing
+  checkpoint_callback_params:
+    monitor: "val_wer"  # Metric to monitor for best model saving
+    mode: "min"  # Save model when metric is minimized (lower WER is better)
+    save_top_k: 10  # Keep top 10 best models
+    always_save_nemo: True  # Save checkpoints as .nemo files too
+
+  resume_if_exists: false  # Don't continue training from existing checkpoint
+  resume_ignore_no_checkpoint: false  # Fail if resuming but no checkpoint exists
+  
+  # Weights & Biases logger configuration
+  create_wandb_logger: false  # Don't use W&B logging
+  wandb_logger_kwargs:
+    name: null  # W&B experiment name
+    project: null  # W&B project name
+
+  # MLflow logger configuration
+  create_mlflow_logger: true  # Enable MLflow logging
+  mlflow_logger_kwargs: {"tracking_uri" : mlruns }  # MLflow tracking URI
+  
+  # Checkpoint loading for resuming training
+  resume_from_checkpoint: null  # Path to checkpoint to resume from (null = don't resume)
