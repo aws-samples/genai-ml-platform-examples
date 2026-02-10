@@ -1,0 +1,62 @@
+FROM amazonlinux:2023
+
+# Install Python and essential tools
+RUN dnf update -y && \
+    dnf install -y shadow-utils python3.11 python3.11-pip python3.11-devel gcc gcc-c++ wget tar gzip xz && \
+    dnf clean all && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    ln -sf /usr/bin/pip3.11 /usr/bin/pip
+
+    # Install ffmpeg from static build (recommended for AL2023)
+RUN wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
+    tar -xf ffmpeg-release-amd64-static.tar.xz && \
+    mv ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ && \
+    mv ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ && \
+    rm -rf ffmpeg-* && \
+    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+
+# 1. Create the non-root user that will run the application
+RUN useradd -m appuser
+
+# 2. Create a virtual environment
+RUN python -m venv /opt/venv
+
+# 3. Change the ownership of the virtual environment to the appuser.
+#    This is a key step to ensure the user has full control over their environment.
+RUN chown -R appuser:appuser /opt/venv
+
+# 4. Activate the virtual environment for all subsequent RUN, CMD, and ENTRYPOINT instructions.
+#    This ENV instruction affects all users, including the upcoming switch to appuser.
+ENV PATH="/opt/venv/bin:$PATH"
+
+# tritonclient[all]
+RUN pip install --no-cache-dir --upgrade pip && \    
+    pip install --no-cache-dir fastapi uvicorn python-multipart soundfile uvloop prometheus-fastapi-instrumentator
+
+
+RUN pip install -v --no-cache-dir nemo_toolkit[asr] torch cuda-python>=12.3
+
+# Install Python packages for your use case
+# RUN pip install --no-cache-dir --upgrade pip && \
+#     pip install --no-cache-dir \
+#         torch torchvision --index-url https://download.pytorch.org/whl/cu121 \
+#         langchain-openai openai langchain-core langfuse langgraph \
+#         numpy requests
+
+ENV NEMO_CACHE_DIR=/opt/nemo_cache
+
+# 6. Create the cache directory.
+RUN mkdir -p $NEMO_CACHE_DIR
+
+# 7. Copy and run the preloading script.
+COPY preload_model.py .
+RUN python preload_model.py && rm preload_model.py
+
+# 8. Give the appuser ownership of the venv and the model cache.
+RUN chown -R appuser:appuser /opt/venv $NEMO_CACHE_DIR
+
+USER appuser
+WORKDIR /home/appuser
+
+COPY --chown=appuser:appuser nemo-parakeet-optimised.py .
+CMD ["python", "nemo-parakeet-optimised.py"]
