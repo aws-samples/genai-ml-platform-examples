@@ -6,6 +6,7 @@ LABEL maintainer="Combined NIM Team"
 LABEL description="NVIDIA NIM ASR (CTC EN-US) for SageMaker - unified HTTP+gRPC adapter"
 LABEL com.amazonaws.sagemaker.capabilities.accept-bind-to-port=true
 LABEL com.amazonaws.sagemaker.inference.cuda.verified_versions=12.2
+LABEL com.amazonaws.sagemaker.capabilities.bidirectional-streaming=true
 
 # Environment configuration
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,8 +16,9 @@ ENV NIM_HOST=127.0.0.1
 ENV NIM_HTTP_PORT=9000
 ENV RIVA_GRPC_PORT=50051
 # Proven working model settings (offline mode). Diarization optional via gRPC only
-ENV NIM_TAGS_SELECTOR=name=parakeet-1-1b-ctc-en-us,mode=ofl,vad=silero,diarizer=sortformer
+ENV NIM_TAGS_SELECTOR=name=parakeet-1-1b-ctc-en-us,mode=all,vad=silero,diarizer=sortformer
 
+ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/:/usr/local/cuda-13.0/lib64:/opt/tritonserver/backends/pytorch:/opt/tritonserver/lib:/opt/riva/lib:/usr/local/cuda/compat/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 # System deps and Python packages
 RUN apt-get update && apt-get install -y \
     curl \
@@ -26,10 +28,12 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip3 install --no-cache-dir --index-url https://pypi.org/simple/ \
     aiohttp==3.9.5 \
-    nvidia-riva-client==2.22.0 \
+    nvidia-riva-client \
     grpcio==1.67.1 \
     protobuf==5.29.5 \
     python-multipart==0.0.6
+
+RUN pip3 install --upgrade onnxruntime onnxruntime-gpu --index-url https://pypi.org/simple/
 
 # Copy inference server
 WORKDIR /opt/ml/code
