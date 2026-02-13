@@ -9,6 +9,7 @@ Endpoints:
 - POST /invocations/grpc     (force gRPC to NIM)
 """
 
+import time
 import asyncio
 import base64
 import io
@@ -22,8 +23,8 @@ import wave
 from typing import Tuple
 
 import riva.client
-from aiohttp import web, ClientSession, FormData
-
+from aiohttp import web, ClientSession, FormData, WSMsgType
+from riva.client.realtime import RealtimeClientASR
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class NimClient:
         self.grpc_host = host_grpc
         self.grpc_port = port_grpc
         self._grpc_asr = None
+        self._realtime_asr = None
 
     async def wait_ready(self):
         url = f"http://{self.http_host}:{self.http_port}/v1/health/ready"
@@ -135,6 +137,49 @@ class NimClient:
                 "channel_tag": result.channel_tag
             })
         return {"predictions": [{"results": results, "model_version": "parakeet-1-1b-ctc-en-us"}]}
+    
+    def realtime_transcribe(self, audio_bytes: bytes, language: str = 'en-US', enable_diarization: bool = False, max_speakers: int = 10) -> dict:
+        # Ensure audio_bytes is bytes (not bytearray) for gRPC compatibility
+        if isinstance(audio_bytes, bytearray):
+            audio_bytes = bytes(audio_bytes)
+
+        sample_rate = detect_wav_sample_rate(audio_bytes)
+        config = riva.client.StreamingRecognitionConfig(
+            config=riva.client.RecognitionConfig(
+                encoding=riva.client.AudioEncoding.LINEAR_PCM,
+                sample_rate_hertz=sample_rate,
+                language_code=language,
+                enable_automatic_punctuation=True,
+                enable_word_time_offsets=enable_diarization,  # Required for speaker diarization
+                verbatim_transcripts=False,
+                max_alternatives=1,
+            ),
+            interim_results=True
+        )
+        
+        # Add speaker diarization configuration if requested
+        if enable_diarization:
+            riva.client.add_speaker_diarization_to_config(config, True, max_speakers)
+
+        resp_generator = self._grpc_asr_service().streaming_response_generator([audio_bytes], config)
+        return resp_generator
+
+    async def websocket_transcribe(self, audio_bytes: bytes):
+        # client = RealtimeClientASR()
+        client = self._realtime_asr_service()
+
+        await client.connect()
+        client.send_audio_chunks(audio_bytes)
+        client.receive_reponses()
+    
+    def _realtime_asr_service(self) -> RealtimeClientASR:
+        if self._realtime_asr is None:
+            # auth = riva.client.Auth(uri=f"{self.http_host}:{self.http_port}")
+            args = {
+                "server": "localhost:9000"
+            }
+            self._realtime_asr = RealtimeClientASR(args)
+        return self._realtime_asr
 
     def _grpc_asr_service(self) -> riva.client.ASRService:
         if self._grpc_asr is None:
@@ -166,6 +211,7 @@ class App:
         nim_host = os.getenv("NIM_HOST", "127.0.0.1")
         http_port = int(os.getenv("NIM_HTTP_PORT", os.getenv("RIVA_HTTP_PORT", "9000")))
         grpc_port = int(os.getenv("RIVA_GRPC_PORT", "50051"))
+
         self.nim = NimClient(nim_host, http_port, nim_host, grpc_port)
 
     async def ping(self, request: web.Request) -> web.Response:
@@ -256,6 +302,91 @@ class App:
     async def handle_invocations_grpc(self, request: web.Request) -> web.Response:
         request._rel_url = request.rel_url.with_query({**request.rel_url.query, "transport": "grpc"})
         return await self.handle_invocations(request)
+    
+    async def handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        additional_info = 'no'
+        show_intermediate = True
+        word_time_offsets = False
+        speaker_diarization = False
+
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT or msg.type == WSMsgType.BINARY :
+                generator = self.nim.realtime_transcribe(msg.data)
+                num_chars_printed = 0
+                for response in generator:
+                    if not response.results:
+                        continue
+                    partial_transcript = ""
+                    start_time = time.time()
+                    for result in response.results:
+                        if result.pipeline_states and len(result.pipeline_states.vad_probabilities) > 0:
+                            vad_prob_logs = "VAD States: "
+                            for vad_state in result.pipeline_states.vad_probabilities:
+                                    vad_prob_logs += str(vad_state) + " "
+                        if not result.alternatives:
+                            continue
+                        transcript = result.alternatives[0].transcript
+                        if additional_info == 'no':
+                            if result.is_final:
+                                if show_intermediate:
+                                    overwrite_chars = ' ' * (num_chars_printed - len(transcript))
+                                    await ws.send_str(json.dumps({'predictions': {'results': '' + transcript + overwrite_chars}}))
+                                    num_chars_printed = 0
+                                else:
+                                    alternatives = []
+                                    for i, alternative in enumerate(result.alternatives):
+                                        alternatives.append(alternative.transcript)
+                                    await ws.send_str(json.dumps({'predictions': {'alternatives': alternatives}}))
+                            else:
+                                partial_transcript += transcript
+                        elif additional_info == 'time':
+                            if result.is_final:
+                                alternatives = []
+                                for i, alternative in enumerate(result.alternatives):
+                                    alternatives.append({"transcript":alternative.transcript, "time": time.time() - start_time})
+                                
+                                await ws.send_str(json.dumps({'predictions': {'alternatives': alternatives}}))
+
+                                # if word_time_offsets:
+                                #     for f in output_file:
+                                #         f.write("Timestamps:\n")
+                                #         temp = '{: <40s}{: <16s}{: <16s}'
+                                #         value = ['Word', 'Start (ms)', 'End (ms)']
+                                #         if speaker_diarization:
+                                #             temp += '{: <16s}'
+                                #             value.append('Speaker')
+                                #         temp += '\n'
+                                #         f.write(temp.format(*value))
+                                #         for word_info in result.alternatives[0].words:
+                                #             f.write(
+                                #                 f'{word_info.word: <40s}{word_info.start_time: <16.0f}'
+                                #                 f'{word_info.end_time: <16.0f}'
+                                #             )
+                                #             if speaker_diarization:
+                                #                 f.write(f'{word_info.speaker_tag: <16d}')
+                                #                 words.append(word_info)
+                                #             f.write('\n')
+                            else:
+                                partial_transcript += transcript
+                        else:  # additional_info == 'confidence'
+                            if result.is_final:
+                                await ws.send_str(json.dumps({'predictions': {'results': transcript, 'confidence': result.alternatives[0].confidence}}))
+                            else:
+                                await ws.send_str(json.dumps({'predictions': {'results': transcript, 'stability': result.stability}}))
+                    if additional_info == 'no':
+                        if show_intermediate and partial_transcript != '':
+                            overwrite_chars = ' ' * (num_chars_printed - len(partial_transcript))
+                            await ws.send_str(json.dumps({'predictions': {'results': partial_transcript}}))
+                            num_chars_printed = len(partial_transcript) + 3
+                    elif additional_info == 'time':
+                        if partial_transcript:
+                            await ws.send_str(json.dumps({'predictions': {'results': partial_transcript, "time": time.time() - start_time}}))
+            elif msg.type == WSMsgType.ERROR:
+                logger.error(f"WebSocket error: {ws.exception()}")
+        return ws
 
     async def run(self):
         logger.info("Starting NIM services...")
@@ -269,6 +400,7 @@ class App:
         app.router.add_post('/invocations', self.handle_invocations)
         app.router.add_post('/invocations/http', self.handle_invocations_http)
         app.router.add_post('/invocations/grpc', self.handle_invocations_grpc)
+        app.router.add_get('/invocations-bidirectional-stream', self.handle_websocket)
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -290,5 +422,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
 
