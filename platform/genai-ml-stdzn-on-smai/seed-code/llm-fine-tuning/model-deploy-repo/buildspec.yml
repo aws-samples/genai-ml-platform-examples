@@ -23,11 +23,14 @@ phases:
         print(f"Deployment timestamp: {timestamp}")
         
         # Helper function to truncate names to 63 characters (SageMaker limit)
+        # Ensures name ends with alphanumeric character (not hyphen)
         def truncate_name(name, max_length=63):
             if len(name) <= max_length:
                 return name
             truncated = name[:max_length]
-            print(f"Truncated name from {len(name)} to {max_length} chars: {truncated}")
+            # Remove trailing hyphens to satisfy SageMaker naming constraints
+            truncated = truncated.rstrip('-')
+            print(f"Truncated name from {len(name)} to {len(truncated)} chars: {truncated}")
             return truncated
         
         # Get environment variables
