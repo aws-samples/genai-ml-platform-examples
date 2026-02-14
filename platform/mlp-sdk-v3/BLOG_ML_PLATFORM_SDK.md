@@ -243,9 +243,9 @@ mlp_sdk provides specialized wrappers for each major SageMaker operation categor
 │                      MLP_Session                            │
 │  (Central orchestrator and configuration manager)          │
 └──────────────┬──────────────────────────────────────────────┘
-               │
-       ┌───────┴───────┐
-       │               │
+               │                              
+       ┌───────┴───────┐                  
+       │               │.      
    ┌───▼────┐     ┌───▼────┐     ┌──────────┐     ┌──────────┐
    │Training│     │Process-│     │Feature   │     │Pipeline  │
    │Wrapper │     │ing     │     │Store     │     │Wrapper   │
