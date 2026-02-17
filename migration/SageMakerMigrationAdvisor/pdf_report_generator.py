@@ -238,7 +238,7 @@ class PDFReportGenerator:
         story.append(PageBreak())
     
     def _add_architecture_analysis(self, story: List, styles: Dict):
-        """Add current architecture analysis section"""
+        """Add current architecture analysis section with proper markdown cleaning"""
         from reportlab.platypus import Paragraph, Spacer, PageBreak
         
         story.append(Paragraph("2. Current Architecture Analysis", styles['heading']))
@@ -248,16 +248,19 @@ class PDFReportGenerator:
             story.append(Paragraph("2.1 Architecture Overview", styles['subheading']))
             
             analysis_text = str(arch_response.get('output', 'No architecture analysis available.'))
-            analysis_text = analysis_text.replace('\n', '<br/>')
             
-            story.append(Paragraph(analysis_text, styles['body']))
+            # Clean markdown artifacts
+            analysis_text = self._clean_markdown_for_pdf(analysis_text)
+            
+            # Parse and format the content properly
+            self._parse_and_format_content(analysis_text, story, styles)
         else:
             story.append(Paragraph("No architecture analysis data available.", styles['body']))
         
         story.append(PageBreak())
     
     def _add_qa_section(self, story: List, styles: Dict):
-        """Add Q&A section to PDF"""
+        """Add Q&A section to PDF with proper markdown cleaning"""
         from reportlab.platypus import Paragraph, Spacer, PageBreak
         from reportlab.lib.units import inch
         
@@ -271,29 +274,33 @@ class PDFReportGenerator:
             
             for i, exchange in enumerate(qa_session['conversation']):
                 story.append(Paragraph(f"<b>Question {i+1}:</b>", styles['subheading']))
-                question_text = exchange.get('question', '').replace('\n', '<br/>')
-                story.append(Paragraph(question_text, styles['body']))
+                question_text = exchange.get('question', '')
+                question_text = self._clean_markdown_for_pdf(question_text)
+                self._parse_and_format_content(question_text, story, styles)
                 
                 story.append(Paragraph(f"<b>Answer {i+1}:</b>", styles['subheading']))
-                answer_text = exchange.get('answer', 'No answer provided').replace('\n', '<br/>')
-                story.append(Paragraph(answer_text, styles['body']))
+                answer_text = exchange.get('answer', 'No answer provided')
+                answer_text = self._clean_markdown_for_pdf(answer_text)
+                self._parse_and_format_content(answer_text, story, styles)
                 
                 if exchange.get('synthesis'):
                     story.append(Paragraph(f"<b>AI Understanding:</b>", styles['subheading']))
-                    synthesis_text = exchange.get('synthesis', '').replace('\n', '<br/>')
+                    synthesis_text = exchange.get('synthesis', '')
+                    synthesis_text = self._clean_markdown_for_pdf(synthesis_text)
                     story.append(Paragraph(f"✓ {synthesis_text}", styles['body']))
                 
                 story.append(Spacer(1, 0.2*inch))
         
         if qa_response:
             story.append(Paragraph("3.2 Comprehensive Analysis", styles['subheading']))
-            final_analysis = str(qa_response.get('output', '')).replace('\n', '<br/>')
-            story.append(Paragraph(final_analysis, styles['body']))
+            final_analysis = str(qa_response.get('output', ''))
+            final_analysis = self._clean_markdown_for_pdf(final_analysis)
+            self._parse_and_format_content(final_analysis, story, styles)
         
         story.append(PageBreak())
     
     def _add_sagemaker_design(self, story: List, styles: Dict):
-        """Add SageMaker design section"""
+        """Add SageMaker design section with proper markdown cleaning"""
         from reportlab.platypus import Paragraph, Spacer, PageBreak
         
         story.append(Paragraph("4. Proposed SageMaker Architecture", styles['heading']))
@@ -302,8 +309,13 @@ class PDFReportGenerator:
         if sagemaker_response:
             story.append(Paragraph("4.1 Architecture Design", styles['subheading']))
             
-            design_text = str(sagemaker_response.get('output', 'No SageMaker design available.')).replace('\n', '<br/>')
-            story.append(Paragraph(design_text, styles['body']))
+            design_text = str(sagemaker_response.get('output', 'No SageMaker design available.'))
+            
+            # Clean markdown artifacts before converting to PDF
+            design_text = self._clean_markdown_for_pdf(design_text)
+            
+            # Parse and format the content properly
+            self._parse_and_format_content(design_text, story, styles)
         else:
             story.append(Paragraph("No SageMaker architecture design available.", styles['body']))
         
@@ -472,11 +484,141 @@ class PDFReportGenerator:
         
         story.append(PageBreak())
     
-    def _parse_and_format_tco_content(self, content: str, story: List, styles: Dict):
-        """Parse TCO content and format tables properly"""
+    def _clean_markdown_for_pdf(self, text: str) -> str:
+        """Clean markdown artifacts and normalize text for PDF generation"""
+        import re
+        
+        # DON'T remove code block markers - we'll handle them in parsing
+        # Code blocks will be detected and formatted specially
+        
+        # Remove emojis - these render as ■ in PDFs
+        # This is a comprehensive emoji removal that handles:
+        # - Basic emojis (U+1F300-U+1F9FF)
+        # - Miscellaneous Symbols (U+2600-U+26FF) including ✅ ❌
+        # - Dingbats (U+2700-U+27BF)
+        # - Variation selectors (U+FE00-U+FE0F) that modify emojis
+        # - Emoji modifiers and components
+        text = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\uFE00-\uFE0F\U0001F1E0-\U0001F1FF\U0001FA70-\U0001FAFF]+', '', text)
+        
+        # Remove ALL box drawing characters, bullets, and special symbols
+        # Including Unicode ranges for box drawing (U+2500-U+257F) and geometric shapes (U+25A0-U+25FF)
+        text = re.sub(r'[\u2500-\u257F\u25A0-\u25FF\u2190-\u21FF]', '', text)
+        
+        # Also remove specific problematic characters
+        text = re.sub(r'[■□▪▫●○◆◇★☆✓✗✘]', '', text)
+        
+        # DO NOT remove markdown table separator lines here!
+        # The _add_formatted_table method needs them to identify headers correctly
+        # text = re.sub(r'^\|[\s\-:]+\|[\s\-:|]+$', '', text, flags=re.MULTILINE)
+        
+        # Remove lines that are just dashes or equals (markdown separators)
+        # But NOT table separators (which contain |)
+        text = re.sub(r'^[-=]{3,}$', '', text, flags=re.MULTILINE)
+        
+        # Remove HTML-style comments
+        text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+        
+        # Remove bracket notation like [Data Scientists] that are part of diagrams
+        text = re.sub(r'\[([^\]]+)\]\s*\n', r'\1\n', text)
+        
+        # Keep # for headings but remove from other places
+        # Process line by line to preserve heading markers
+        lines = text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # If line starts with # and space/another #, it's a heading - keep it
+            if stripped.startswith('#') and len(stripped) > 1 and (stripped[1] == ' ' or stripped[1] == '#'):
+                cleaned_lines.append(line)
+            else:
+                # Remove # from non-heading lines
+                cleaned_lines.append(line.replace('#', ''))
+        text = '\n'.join(cleaned_lines)
+        
+        # Fix hard line breaks within paragraphs
+        # Split into lines and process
+        lines = text.split('\n')
+        cleaned_lines = []
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i].rstrip()
+            
+            # Skip empty lines - preserve them
+            if not line:
+                cleaned_lines.append('')
+                i += 1
+                continue
+            
+            # Identify lines that should NOT be joined:
+            # 1. Headers (start with #)
+            # 2. Bullet points (start with •, -, *)
+            # 3. Table rows (contain |)
+            # 4. Lines ending with punctuation or special markers
+            is_header = line.startswith('#')
+            is_bullet = line.lstrip().startswith(('•', '- ', '* '))
+            is_table = '|' in line
+            ends_properly = line.endswith(('.', '!', '?', ')', '"', '**', ':', ','))
+            
+            if is_header or is_bullet or is_table:
+                cleaned_lines.append(line)
+                i += 1
+                continue
+            
+            # For regular text lines, join with next line if it's a continuation
+            if not ends_properly and i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                # Check if next line is a continuation (not a header, bullet, or table)
+                if next_line and not next_line.startswith(('#', '•', '-', '*', '|')):
+                    # Join lines
+                    combined = line + ' ' + next_line
+                    i += 2
+                    
+                    # Keep joining while we have continuations
+                    while i < len(lines):
+                        current = lines[i].strip()
+                        if not current:
+                            break
+                        if current.startswith(('#', '•', '-', '*', '|')):
+                            break
+                        if combined.endswith(('.', '!', '?', ')', '"', '**', ':')):
+                            break
+                        combined = combined + ' ' + current
+                        i += 1
+                    
+                    cleaned_lines.append(combined)
+                else:
+                    cleaned_lines.append(line)
+                    i += 1
+            else:
+                cleaned_lines.append(line)
+                i += 1
+        
+        text = '\n'.join(cleaned_lines)
+        
+        # Remove excessive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Clean up multiple spaces
+        text = re.sub(r' {2,}', ' ', text)
+        
+        # Remove empty lines with only whitespace
+        text = re.sub(r'^\s+$', '', text, flags=re.MULTILINE)
+        
+        # Remove trailing spaces
+        text = re.sub(r' +$', '', text, flags=re.MULTILINE)
+        
+        # Final pass: ensure no more than 2 consecutive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        return text.strip()
+    
+    def _parse_and_format_content(self, content: str, story: List, styles: Dict):
+        """Parse and format markdown content for PDF with proper structure"""
         from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
-        from reportlab.lib import colors
         from reportlab.lib.units import inch
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib import colors
         import re
         
         lines = content.split('\n')
@@ -484,6 +626,170 @@ class PDFReportGenerator:
         
         while i < len(lines):
             line = lines[i].strip()
+            
+            # Skip empty lines but add spacing
+            if not line:
+                story.append(Spacer(1, 0.1*inch))
+                i += 1
+                continue
+            
+            # Check for code blocks (```)
+            if line.startswith('```'):
+                # Extract code block
+                code_lines = []
+                language = line[3:].strip()  # Get language if specified
+                i += 1  # Skip opening ```
+                
+                while i < len(lines) and not lines[i].strip().startswith('```'):
+                    code_lines.append(lines[i])
+                    i += 1
+                
+                if i < len(lines):
+                    i += 1  # Skip closing ```
+                
+                # Add code block to PDF using a table with gray background
+                if code_lines:
+                    # Create a custom style for code with better wrapping
+                    code_para_style = ParagraphStyle(
+                        'CodeBlock',
+                        fontName='Courier',
+                        fontSize=7.5,  # Slightly smaller for better fit
+                        leading=9,
+                        leftIndent=0,
+                        rightIndent=0,
+                        wordWrap='CJK',  # Enable word wrapping
+                        splitLongWords=True,  # Allow breaking long words
+                        spaceBefore=0,
+                        spaceAfter=0
+                    )
+                    
+                    # Process each line
+                    code_paras = []
+                    for code_line in code_lines:
+                        # Escape HTML characters
+                        escaped_line = code_line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        
+                        # Handle leading spaces for indentation
+                        # Count leading spaces
+                        leading_spaces = len(code_line) - len(code_line.lstrip())
+                        indent_text = '&nbsp;' * leading_spaces
+                        content_text = escaped_line.lstrip()
+                        
+                        # Create paragraph with proper indentation
+                        if content_text:
+                            para_text = f'{indent_text}{content_text}'
+                        else:
+                            para_text = '&nbsp;'  # Empty line
+                        
+                        code_paras.append(Paragraph(para_text, code_para_style))
+                    
+                    # Create table with gray background for code block
+                    # Use slightly wider column to accommodate more text
+                    code_table = Table([[para] for para in code_paras], colWidths=[6.3*inch])
+                    code_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F5F5F5')),
+                        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#CCCCCC')),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                        ('TOPPADDING', (0, 0), (-1, -1), 10),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ]))
+                    
+                    story.append(Spacer(1, 0.15*inch))
+                    story.append(code_table)
+                    story.append(Spacer(1, 0.15*inch))
+                continue
+            
+            # Check for tables first (before headings, as tables can contain #)
+            if '|' in line and i + 1 < len(lines) and '|' in lines[i + 1]:
+                # Extract the table
+                table_lines = []
+                j = i
+                while j < len(lines) and '|' in lines[j]:
+                    table_lines.append(lines[j])
+                    j += 1
+                
+                # Parse and add the table
+                if len(table_lines) >= 1:  # At least one row
+                    self._add_formatted_table(table_lines, story, styles)
+                    story.append(Spacer(1, 0.2*inch))
+                
+                i = j
+            # Check for headings
+            elif line.startswith('###'):
+                heading_text = line.replace('###', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.15*inch))
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['subheading']))
+                story.append(Spacer(1, 0.1*inch))
+                i += 1
+            elif line.startswith('##'):
+                heading_text = line.replace('##', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.2*inch))
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['heading']))
+                story.append(Spacer(1, 0.15*inch))
+                i += 1
+            elif line.startswith('#'):
+                heading_text = line.replace('#', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.2*inch))
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['heading']))
+                story.append(Spacer(1, 0.15*inch))
+                i += 1
+            # Check for bold text
+            elif line.startswith('**') and line.endswith('**'):
+                bold_text = line.replace('**', '').strip()
+                story.append(Paragraph(f"<b>{bold_text}</b>", styles['body']))
+                story.append(Spacer(1, 0.08*inch))
+                i += 1
+            # Check for bullet points
+            elif line.startswith('•') or line.startswith('- ') or line.startswith('* '):
+                bullet_text = re.sub(r'^[•\-\*]\s*', '', line).strip()
+                # Remove any remaining ** markers from bullet text
+                bullet_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', bullet_text)
+                # Handle inline code in bullets
+                bullet_text = re.sub(r'`([^`]+)`', r'<font name="Courier" size="9">\1</font>', bullet_text)
+                story.append(Paragraph(f"• {bullet_text}", styles['body']))
+                story.append(Spacer(1, 0.05*inch))
+                i += 1
+            # Regular paragraph
+            else:
+                # Handle inline bold text - convert ** to HTML bold tags
+                line = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
+                # Remove any remaining standalone ** markers
+                line = line.replace('**', '')
+                # Handle inline code (backticks)
+                line = re.sub(r'`([^`]+)`', r'<font name="Courier" size="9">\1</font>', line)
+                story.append(Paragraph(line, styles['body']))
+                story.append(Spacer(1, 0.08*inch))
+                i += 1
+    
+    def _parse_and_format_tco_content(self, content: str, story: List, styles: Dict):
+        """Parse TCO content and format tables properly with markdown cleaning"""
+        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        import re
+        
+        # Clean markdown artifacts first
+        content = self._clean_markdown_for_pdf(content)
+        
+        lines = content.split('\n')
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines but add spacing
+            if not line:
+                story.append(Spacer(1, 0.1*inch))
+                i += 1
+                continue
             
             # Check if this is a markdown table (contains |)
             if '|' in line and i + 1 < len(lines) and '|' in lines[i + 1]:
@@ -503,42 +809,90 @@ class PDFReportGenerator:
             elif line.startswith('###'):
                 # Subheading
                 heading_text = line.replace('###', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.15*inch))
                 story.append(Paragraph(f"<b>{heading_text}</b>", styles['subheading']))
                 story.append(Spacer(1, 0.1*inch))
                 i += 1
             elif line.startswith('##'):
                 # Section heading
                 heading_text = line.replace('##', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.2*inch))
+                story.append(Paragraph(f"<b>{heading_text}</b>", styles['heading']))
+                story.append(Spacer(1, 0.15*inch))
+                i += 1
+            elif line.startswith('#'):
+                # Main heading
+                heading_text = line.replace('#', '').strip()
+                # Remove ** markers from headings
+                heading_text = heading_text.replace('**', '')
+                story.append(Spacer(1, 0.2*inch))
                 story.append(Paragraph(f"<b>{heading_text}</b>", styles['heading']))
                 story.append(Spacer(1, 0.15*inch))
                 i += 1
             elif line.startswith('**') and line.endswith('**'):
                 # Bold text
-                bold_text = line.replace('**', '')
+                bold_text = line.replace('**', '').strip()
                 story.append(Paragraph(f"<b>{bold_text}</b>", styles['body']))
+                story.append(Spacer(1, 0.08*inch))
                 i += 1
-            elif line.startswith('•') or line.startswith('-'):
+            elif line.startswith('•') or line.startswith('- ') or line.startswith('* '):
                 # Bullet point
-                bullet_text = line[1:].strip()
+                bullet_text = re.sub(r'^[•\-\*]\s*', '', line).strip()
+                # Remove any remaining ** markers from bullet text
+                bullet_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', bullet_text)
                 story.append(Paragraph(f"• {bullet_text}", styles['body']))
-                i += 1
-            elif line:
-                # Regular paragraph
-                story.append(Paragraph(line, styles['body']))
+                story.append(Spacer(1, 0.05*inch))
                 i += 1
             else:
-                # Empty line
+                # Regular paragraph - handle inline bold
+                line = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
+                # Remove any remaining standalone ** markers
+                line = line.replace('**', '')
+                story.append(Paragraph(line, styles['body']))
+                story.append(Spacer(1, 0.08*inch))
                 i += 1
     
     def _add_formatted_table(self, table_lines: List[str], story: List, styles: Dict):
         """Convert markdown table to ReportLab table with proper formatting"""
-        from reportlab.platypus import Table, TableStyle
+        from reportlab.platypus import Table, TableStyle, Paragraph
         from reportlab.lib import colors
         from reportlab.lib.units import inch
+        from reportlab.lib.styles import ParagraphStyle
+        import re
         
-        # Parse table data
+        # Create a style for table cells with text wrapping
+        cell_style = ParagraphStyle(
+            'TableCell',
+            fontSize=9,
+            leading=11,
+            wordWrap='CJK',
+            alignment=0  # Left align
+        )
+        
+        cell_style_right = ParagraphStyle(
+            'TableCellRight',
+            fontSize=9,
+            leading=11,
+            wordWrap='CJK',
+            alignment=2  # Right align
+        )
+        
+        header_style = ParagraphStyle(
+            'TableHeader',
+            fontSize=10,
+            leading=12,
+            wordWrap='CJK',
+            alignment=1,  # Center align
+            textColor=colors.whitesmoke
+        )
+        
+        # Parse table data and track where separator was in original lines
         table_data = []
-        separator_idx = -1
+        separator_line_idx = None
         
         for idx, line in enumerate(table_lines):
             # Split by | and clean up
@@ -546,25 +900,68 @@ class PDFReportGenerator:
             # Remove empty first/last cells from markdown format
             cells = [c for c in cells if c]
             
-            # Check if this is the separator line
-            if all(c.replace('-', '').replace(':', '').strip() == '' for c in cells):
-                separator_idx = idx
+            # Skip empty rows
+            if not cells or all(not c.strip() for c in cells):
                 continue
             
-            if cells:
-                table_data.append(cells)
+            # Check if this is the separator line (|---|---|)
+            if all(c.replace('-', '').replace(':', '').replace(' ', '').strip() == '' for c in cells):
+                # Record where the separator was in the original table_lines
+                separator_line_idx = idx
+                continue  # Skip adding separator to table_data
+            
+            # Clean each cell of markdown artifacts and special characters
+            cleaned_cells = []
+            for cell in cells:
+                # Remove box drawing characters
+                cell = re.sub(r'[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬■□▪▫●○◆◇★☆✓✗✘]', '', cell)
+                # Remove excessive spaces
+                cell = re.sub(r' {2,}', ' ', cell)
+                # Remove markdown bold markers but keep the text
+                cell = re.sub(r'\*\*(.*?)\*\*', r'\1', cell)
+                # Remove # from table cells
+                cell = cell.replace('#', '')
+                # Remove emoji symbols
+                cell = re.sub(r'[🟡❌✅]', '', cell)
+                cleaned_cells.append(cell.strip())
+            
+            if cleaned_cells and any(c.strip() for c in cleaned_cells):
+                table_data.append(cleaned_cells)
         
-        if not table_data or len(table_data) < 2:
+        if not table_data or len(table_data) < 1:
             return
         
-        # Determine column widths based on content
-        num_cols = len(table_data[0])
+        # Determine header row based on separator position in original lines
+        # Standard markdown format: Header is BEFORE the separator line
+        # So if separator was at line 1, header is the first row (index 0) in table_data
+        header_row_idx = 0  # Default to first row
         
-        # Calculate appropriate column widths
-        if num_cols == 5:  # Standard TCO table with 5 columns
-            col_widths = [1.8*inch, 1.5*inch, 1.5*inch, 1.2*inch, 1.5*inch]
+        if separator_line_idx is not None:
+            # The header is the row that came before the separator in the original lines
+            # Since we skipped the separator, the first row in table_data is the header
+            # if the separator was at position 1 (after the first data line)
+            if separator_line_idx == 1:
+                header_row_idx = 0
+            elif separator_line_idx > 1:
+                # If separator was later, we need to count how many data rows came before it
+                # But in standard markdown, separator is always right after header (position 1)
+                # So this shouldn't happen in well-formed tables
+                header_row_idx = 0
+        
+        # Ensure all rows have the same number of columns
+        max_cols = max(len(row) for row in table_data)
+        for row in table_data:
+            while len(row) < max_cols:
+                row.append('')
+        
+        # Determine column widths based on content
+        num_cols = max_cols
+        
+        # Calculate appropriate column widths with more space
+        if num_cols == 5:
+            col_widths = [1.6*inch, 1.4*inch, 1.4*inch, 1.3*inch, 1.3*inch]
         elif num_cols == 4:
-            col_widths = [2*inch, 1.8*inch, 1.8*inch, 2*inch]
+            col_widths = [2.2*inch, 1.6*inch, 1.6*inch, 1.6*inch]
         elif num_cols == 3:
             col_widths = [2.5*inch, 2*inch, 2*inch]
         elif num_cols == 2:
@@ -574,41 +971,55 @@ class PDFReportGenerator:
             available_width = 6.5 * inch
             col_widths = [available_width / num_cols] * num_cols
         
-        # Create table
-        table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        # Header is always the first row in standard markdown tables
+        # No need to reorder since we correctly identified it as row 0
+        
+        # Convert text to Paragraph objects for proper wrapping
+        formatted_data = []
+        for row_idx, row in enumerate(table_data):
+            formatted_row = []
+            for col_idx, cell in enumerate(row):
+                if row_idx == header_row_idx:
+                    # Header row
+                    formatted_row.append(Paragraph(f"<b>{cell}</b>", header_style))
+                else:
+                    # Data rows - right align numeric columns (except first column)
+                    if col_idx == 0:
+                        formatted_row.append(Paragraph(cell, cell_style))
+                    else:
+                        formatted_row.append(Paragraph(cell, cell_style_right))
+            formatted_data.append(formatted_row)
+        
+        # Create table with formatted data
+        table = Table(formatted_data, colWidths=col_widths, repeatRows=1)
         
         # Apply styling
         table_style = [
-            # Header row styling
+            # Header row styling (always row 0 now after reordering)
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             
             # Data rows styling
             ('BACKGROUND', (0, 1), (-1, -1), colors.white),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # First column left-aligned
-            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),  # Other columns right-aligned
             
             # Grid and borders
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#2E86AB')),
             
-            # Padding
-            ('LEFTPADDING', (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            # Padding - increased for better spacing
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]
         
         # Highlight subtotal/total rows
         for row_idx, row in enumerate(table_data):
-            if row and any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total', '**']):
+            if row and any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total']):
                 table_style.extend([
                     ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#F0F0F0')),
                     ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'),
@@ -618,7 +1029,7 @@ class PDFReportGenerator:
         # Alternate row colors for better readability (skip header and special rows)
         for row_idx in range(1, len(table_data)):
             row = table_data[row_idx]
-            if not any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total', '**']):
+            if not any(keyword in str(row[0]).lower() for keyword in ['subtotal', 'total']):
                 if row_idx % 2 == 0:
                     table_style.append(
                         ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#F8F9FA'))
@@ -628,7 +1039,7 @@ class PDFReportGenerator:
         story.append(table)
     
     def _add_migration_roadmap(self, story: List, styles: Dict):
-        """Add migration roadmap section"""
+        """Add migration roadmap section with proper markdown cleaning"""
         from reportlab.platypus import Paragraph, Spacer, PageBreak
         
         story.append(Paragraph("6. Migration Roadmap", styles['heading']))
@@ -637,8 +1048,13 @@ class PDFReportGenerator:
         if navigator_response:
             story.append(Paragraph("6.1 Implementation Steps", styles['subheading']))
             
-            roadmap_text = str(navigator_response.get('output', 'No migration roadmap available.')).replace('\n', '<br/>')
-            story.append(Paragraph(roadmap_text, styles['body']))
+            roadmap_text = str(navigator_response.get('output', 'No migration roadmap available.'))
+            
+            # Clean markdown artifacts
+            roadmap_text = self._clean_markdown_for_pdf(roadmap_text)
+            
+            # Parse and format the content properly
+            self._parse_and_format_content(roadmap_text, story, styles)
         else:
             story.append(Paragraph("No migration roadmap data available.", styles['body']))
         

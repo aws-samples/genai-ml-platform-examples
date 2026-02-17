@@ -1,336 +1,220 @@
-# SageMaker Migration Advisor - Streamlit Application
+# SageMaker Migration Advisor
 
-A comprehensive web interface for the SageMaker Migration Advisor that provides interactive architecture analysis, conversational state management, and error recovery capabilities.
+AI-powered tool to migrate ML workloads to AWS SageMaker with automated architecture analysis, TCO estimation, and migration recommendations.
 
-## 🚀 Features
+## 🎯 Overview
 
-### Core Functionality
-- **Interactive Architecture Analysis**: Upload diagrams or provide text descriptions
-- **Conversational State Management**: Maintains context throughout the workflow
-- **Error Recovery**: Resume from any failed step after fixing issues
-- **Real-time Progress Tracking**: Visual workflow progress in sidebar
-- **Multi-Agent Orchestration**: Seamless integration of all advisor agents
+Streamlit web application using AWS Bedrock (Claude Sonnet) to analyze ML infrastructure and provide:
 
-### User Experience
-- **Responsive Web Interface**: Clean, professional Streamlit UI
-- **Step-by-Step Guidance**: Clear workflow progression with visual indicators
-- **Download Results**: Export complete analysis as JSON
-- **Image Support**: Upload and analyze architecture diagrams
-- **Error Handling**: Graceful error recovery with retry mechanisms
+- Architecture analysis and migration recommendations
+- TCO comparison between current and SageMaker setup
+- Professional PDF reports with architecture diagrams
+- Two analysis modes: **Lite** (5-10 min) and **Regular** (15-30 min)
 
-## 📚 Documentation
+## ✨ Features
 
-- **[LAUNCHER_OPTIONS.md](LAUNCHER_OPTIONS.md)** - Quick reference for all launch methods
-- **[LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md)** - Detailed launcher documentation
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[README_CLI.md](README_CLI.md)** - CLI version documentation (if available)
-
-## 📋 Prerequisites
-
-### Required Software
-- Python 3.8 or higher
-- AWS CLI configured with appropriate credentials
-- Access to AWS Bedrock (Claude models)
-
-### AWS Permissions
-Your AWS credentials need access to:
-- Amazon Bedrock (Claude models)
-- Amazon S3 (for data storage)
-- SageMaker (for the analysis)
-
-## 🛠️ Installation
-
-### 1. Install Dependencies
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Configure AWS Credentials
-```bash
-# Option 1: Configure your profile with SSO wizard 
-# https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#cli-configure-sso-prereqs
-aws configure sso
-
-# Option 2: Environment Variables
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export AWS_DEFAULT_REGION=us-west-2
-```
-
+- 🔐 Cognito authentication and secure user management
+- 🤖 AI-powered analysis using AWS Bedrock (Claude Sonnet)
+- 📊 Architecture diagrams using AWS Diagram MCP Server
+- 💰 Detailed TCO estimation and cost comparison
+- 📄 Professional PDF reports
+- 🐳 Containerized deployment (ECS Fargate with CloudFront)
+- 📈 CloudWatch logging and monitoring
 
 ## 🚀 Quick Start
 
-### Option 1: Unified Launcher (Recommended)
-
-The easiest way to launch either version:
+**Prerequisites:** AWS Account, AWS CLI, Python 3.11+
 
 ```bash
-# GUI launcher with dropdown selection
-python run_sagemaker_migration_advisor_main.py
+# 1. Clone and setup
+cd SageMakerMigrationAdvisor
 
-# Or CLI mode
-python run_sagemaker_migration_advisor_main.py --cli
+# 2. Install dependencies
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your AWS credentials
+
+# 4. Run locally
+streamlit run app.py
 ```
 
-See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for detailed launcher documentation.
+Access at: http://localhost:8501
 
-### Option 2: Simple Python Launcher
+See [Quick Start Guide](docs/user-guides/QUICKSTART.md) for detailed instructions.
+
+## 🌐 Production Deployment
+
+**Current Deployment:** ECS Fargate with CloudFront CDN
+
+- **CloudFront URL:** https://YOUR_CLOUDFRONT_DIST_ID.cloudfront.net
+- **Architecture:** CloudFront → ALB → ECS Fargate
+- **Region:** us-east-1
 
 ```bash
-# Interactive CLI launcher
-python launch_advisor.py
+# Deploy to ECS Fargate
+cd deploy && ./deploy-ecs.sh
 ```
 
-### Option 3: Direct Shell Scripts
+See [Deployment Guide](docs/deployment/DEPLOYMENT_GUIDE.md) for complete instructions.
 
-**macOS/Linux:**
-```bash
-# Launch Lite version
-./launch_lite.sh
-
-# Launch Regular version
-./launch_regular.sh
-```
-
-**Windows:**
-```cmd
-REM Launch Lite version
-launch_lite.bat
-
-REM Launch Regular version
-launch_regular.bat
-```
-
-### Option 4: Direct Streamlit Execution
+## 👥 User Management
 
 ```bash
-# Run Lite version directly
-streamlit run sagemaker_migration_advisor_lite.py
+cd deploy
 
-# Run Regular version directly
-streamlit run sagemaker_migration_advisor.py
+# Create user
+./create-user.sh email@example.com "Name" "Password123!" "Admins"
+
+# List users
+./list-users.sh
+
+# Reset password
+./reset-password.sh email@example.com "NewPassword123!"
 ```
 
-## 📦 Two Versions Available
+## 📊 Mode Comparison
 
-### Migration Advisor Lite
-- **Best for**: Quick assessments, POCs, straightforward migrations
-- **Duration**: 5-10 minutes
-- **Features**: Core analysis, basic TCO, simplified roadmap
-- **File**: `sagemaker_migration_advisor_lite.py`
+| Feature | Lite Mode | Regular Mode |
+|---------|-----------|--------------|
+| Duration | 5-10 min | 15-30 min |
+| Architecture Analysis | Basic | Detailed with Q&A |
+| TCO Analysis | Basic | Comprehensive |
+| Diagram Generation | ❌ | ✅ |
+| Migration Roadmap | Simplified | Detailed |
+| PDF Report | ✅ | ✅ |
+| Best For | Quick assessments | Complex migrations |
 
-### Migration Advisor Regular
-- **Best for**: Complex migrations, enterprise deployments, detailed planning
-- **Duration**: 15-30 minutes
-- **Features**: Full analysis, Q&A, diagrams, comprehensive TCO
-- **File**: `sagemaker_migration_advisor.py`
+**Example Output:** See [SageMaker_Migration_Report_Example.pdf](SageMaker_Migration_Report_Example.pdf)
 
-## 🚀 3. Launch SageMaker Migration Advisor app
+## 📚 Documentation
 
-Choose any of the launch methods above. The application will open in your default web browser at `http://localhost:8501`
+- **[Quick Start Guide](docs/user-guides/QUICKSTART.md)** - Get started in 5 minutes
+- **[Deployment Guide](docs/deployment/DEPLOYMENT_GUIDE.md)** - Production deployment
+- **[Project Overview](docs/technical/PROJECT_OVERVIEW.md)** - Technical architecture
+- **[Troubleshooting](docs/technical/TROUBLESHOOTING.md)** - Common issues
+- **[Security Considerations](docs/technical/SECURITY_CONSIDERATIONS.md)** - Security best practices
+- **[Deployment Scripts](deploy/README.md)** - Deployment automation
 
-## 📖 User Guide
 
-### Workflow Steps
+## 📁 Project Structure
 
-#### 1. **Architecture Input** 📋
-- Choose between uploading a diagram or providing text description
-- **With Diagram**: Upload PNG/JPG files, system analyzes visual architecture
-- **Text Description**: Provide detailed description of your current architecture
+```
+SageMakerMigrationAdvisor/
+├── app.py                              # Main entry point with Cognito auth
+├── sagemaker_migration_advisor.py      # Regular mode (comprehensive)
+├── sagemaker_migration_advisor_lite.py # Lite mode (quick assessment)
+├── prompts.py / prompts_lite.py        # AI prompts for each mode
+├── pdf_report_generator.py             # PDF generation with diagrams
+├── diagram_generator.py                # Architecture diagram generation
+├── advisor_config.py                   # Configuration settings
+├── logger_config.py                    # Logging configuration
+├── requirements.txt                    # Python dependencies
+├── Dockerfile                          # Container image
+├── .env.example                        # Environment template
+│
+├── docs/                               # Documentation
+│   ├── deployment/                     # Deployment guides
+│   ├── user-guides/                    # User documentation
+│   ├── technical/                      # Technical docs
+│   └── diagrams/                       # Diagram documentation
+│
+├── deploy/                             # Deployment automation
+│   ├── terraform/                      # Infrastructure as Code
+│   │   ├── main.tf                     # Core resources (Cognito, ECR, S3)
+│   │   ├── ecs-fargate.tf              # ECS Fargate configuration
+│   │   └── cloudfront.tf               # CloudFront CDN
+│   ├── deploy-ecs.sh                   # ECS deployment script
+│   ├── update-ecs-deployment.sh        # Update running deployment
+│   ├── create-user.sh                  # User management scripts
+│   └── README.md                       # Deployment documentation
+│
+├── generated-diagrams/                 # Generated diagram output
+└── logs/                               # Application logs
+```
 
-#### 2. **Clarification Q&A** ❓
-- System generates clarifying questions based on your input
-- Helps resolve ambiguities and gather additional context
-- Ensures comprehensive understanding of your architecture
+## 🔧 Configuration
 
-#### 3. **SageMaker Design** 🚀
-- Generates modernized SageMaker architecture
-- Provides detailed component mapping and recommendations
-- Explains migration benefits and considerations
+Environment variables in `.env`:
 
-#### 4. **Diagram Generation** 📊
-- Creates visual diagrams of the proposed SageMaker architecture
-- Generates multiple diagram types (detailed, workflow, complete)
-- Saves diagrams to `generated-diagrams/` folder
-
-#### 5. **TCO Analysis** 💰
-- Comprehensive Total Cost of Ownership analysis
-- Compares current vs. SageMaker costs
-- Includes operational and infrastructure considerations
-
-#### 6. **Migration Roadmap** 🗺️
-- Step-by-step migration plan
-- Prioritized implementation phases
-- Risk mitigation strategies
-
-### Navigation Features
-
-#### Sidebar Controls
-- **Progress Tracking**: Visual indicators for each workflow step
-- **Reset Workflow**: Start over with a clean slate
-- **Download Results**: Export complete analysis
-- **Error Recovery**: Retry failed steps
-
-#### Error Recovery
-- **Automatic Detection**: System identifies and logs errors
-- **Retry Mechanism**: Resume from failed step after fixing issues
-- **State Preservation**: Maintains all previous progress
-- **Error Details**: Clear error messages with troubleshooting hints
-
-## 🔧 Advanced Configuration
-
-### Model Selection
-The application automatically tries multiple Claude models in order of preference:
-1. Claude 4.5 Sonnet (latest)
-2. Claude 4 Sonnet
-3. Claude 3.7 Sonnet
-
-### Custom Configuration
-Edit `sagemaker_migration_advisor.py` to customize:
-- Model selection logic
-- Workflow steps
-- UI styling
-- Error handling behavior
-
-### Environment Variables
 ```bash
-# AWS Configuration
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_DEFAULT_REGION=us-west-2
-
-# Optional: Custom model preferences
-BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+AWS_REGION=us-east-1
+COGNITO_USER_POOL_ID=us-east-1_xxxxxxxxx
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxx
+COGNITO_CLIENT_SECRET=xxxxxxxxxxxxxxxxxx
+S3_BUCKET=sagemaker-migration-advisor-artifacts-xxxxxxxxxxxx
 ```
 
-## 📁 File Structure
+## 💰 Estimated Monthly Costs
+
+| Component | Cost |
+|-----------|------|
+| ECS Fargate (1 task, 1 vCPU, 2GB) | ~$30 |
+| Application Load Balancer | ~$16 |
+| CloudFront CDN | ~$1 |
+| AWS Bedrock (Claude Sonnet) | ~$15 |
+| **Total** | **~$62/mo** |
+
+*Cognito (100 users), S3 storage, and CloudWatch logs are minimal/free tier*
+
+## 🏗️ Architecture
 
 ```
-├── sagemaker_migration_advisor.py    # Main Streamlit application
-├── run_sagemaker_migration_advisor.py # Launcher script
-├── requirements.txt                  # Python dependencies
-├── README.md                         # This documentation
-├── README_CLI.md                     # CLI version documentation
-├── prompts.py                       # Agent prompts (required)
-├── logger_config.py                 # Logging configuration (required)
-├── tools/                           # Agent tools (required)
-│   ├── __init__.py
-│   └── user_prompt.py
-├── generated-diagrams/              # Generated architecture diagrams
-└── advisor_agent_interactions.txt   # Interaction logs
+User Browser
+     ↓
+CloudFront CDN (Global)
+     ↓
+Application Load Balancer
+     ↓
+ECS Fargate (Streamlit App)
+├─ Cognito Authentication
+├─ Mode Selection (Lite/Regular)
+├─ AI Analysis (Bedrock)
+├─ Diagram Generation (MCP Server)
+└─ PDF Report Generation
+     ↓
+AWS Services: Cognito, Bedrock, S3, CloudWatch
 ```
+
+## 🔒 Security
+
+- Cognito authentication with password policies
+- IAM roles with least privilege (no credentials in containers)
+- CloudFront with ALB origin for secure global access
+- Data encrypted at rest (S3) and in transit (HTTPS)
+- Security groups and VPC isolation
+- CloudWatch audit logging
 
 ## 🐛 Troubleshooting
 
-### Common Issues
-
-#### 1. **AWS Authentication Errors**
-```
-Error: Unable to locate credentials
-```
-**Solution**: Configure AWS credentials using `aws configure` or environment variables
-
-#### 2. **Bedrock Model Access**
-```
-Error: Access denied to Bedrock model
-```
-**Solution**: Ensure your AWS account has Bedrock access and model permissions
-
-#### 3. **Missing Dependencies**
-```
-ModuleNotFoundError: No module named 'streamlit'
-```
-**Solution**: Install requirements with `pip install -r requirements.txt`
-
-#### 4. **Port Already in Use**
-```
-Error: Port 8501 is already in use
-```
-**Solution**: Use a different port: `streamlit run sagemaker_migration_advisor.py --server.port 8502`
-
-### Debug Mode
-Enable debug logging by setting:
 ```bash
-export STREAMLIT_LOGGER_LEVEL=debug
+# Check logs locally
+tail -f logs/app.log
+
+# Check ECS logs
+aws logs tail /ecs/sagemaker-migration-advisor --follow
+
+# Verify environment
+source .env && echo $COGNITO_USER_POOL_ID
+
+# Reset user password
+cd deploy && ./reset-password.sh email@example.com "NewPass123!"
 ```
 
-### Log Files
-- **Application Logs**: Check `logs/app.log`
-- **Interaction Logs**: Check `advisor_agent_interactions.txt`
-- **Streamlit Logs**: Displayed in terminal
+See [Troubleshooting Guide](docs/technical/TROUBLESHOOTING.md) for more solutions.
 
-## 🔄 State Management
+## 📊 Monitoring
 
-### Session State
-The application maintains state across browser sessions using Streamlit's session state:
-- **Workflow Progress**: Current and completed steps
-- **Agent Responses**: All generated content
-- **User Inputs**: Architecture descriptions and uploads
-- **Error States**: Failed steps and error messages
+- **CloudWatch Logs:** `/ecs/sagemaker-migration-advisor`
+- **Metrics:** Request count, error rate, Bedrock token usage
+- **Health Checks:** ALB health checks on `/_stcore/health`
+- **CloudFront Metrics:** Cache hit rate, origin latency
 
-### Persistence
-- **Interaction Logs**: Saved to `advisor_agent_interactions.txt`
-- **Generated Diagrams**: Saved to `generated-diagrams/` folder
-- **Results Export**: JSON format with complete workflow data
+---
 
-### Recovery Mechanisms
-- **Step Retry**: Resume from any failed step
-- **State Reset**: Clear all data and start fresh
-- **Partial Recovery**: Continue from last successful step
-
-## 🎨 Customization
-
-### UI Styling
-Modify the CSS in `sagemaker_migration_advisor.py`:
-```python
-st.markdown("""
-<style>
-    .main-header { color: #your-color; }
-    .step-header { font-size: your-size; }
-</style>
-""", unsafe_allow_html=True)
-```
-
-### Workflow Modification
-Add or modify steps by:
-1. Adding new agent setup in `setup_agents()`
-2. Creating new step handler method
-3. Adding step to workflow progression logic
-
-## 📊 Performance Considerations
-
-### Resource Usage
-- **Memory**: ~500MB for base application
-- **CPU**: Moderate during agent processing
-- **Network**: Depends on Bedrock API calls
-
-### Optimization Tips
-- Use smaller images for diagram uploads
-- Clear browser cache if experiencing slowdowns
-- Monitor AWS Bedrock usage and costs
-
-## 🤝 Support
-
-### Getting Help
-1. Check this README for common solutions
-2. Review log files for detailed error information
-3. Ensure all prerequisites are met
-4. Verify AWS credentials and permissions
-
-### Reporting Issues
-When reporting issues, include:
-- Error messages from logs
-- Steps to reproduce
-- Environment details (Python version, OS)
-- AWS region and model access status
-
-### Usage Examples
-
-**Use Case Description :**
-Customer is running pytorch distributed training workload  on 2 nodes of p5.48xlarge. Their pain points are related to: 1.Experiment tracking 2. Automation 3. Model governance 4. Cost. 
-
-
-**Source System Architecture Diagram:**
-Upload the source system architecutre diagram using the streamlit app:  ![on-prem-data-science-arch](rocket-mortgage-legacy-ds-arch.png)
+**Version:** 1.0.0  
+**Last Updated:** February 2026  
+**Deployment:** ECS Fargate with CloudFront  
+**Status:** ✅ Production Ready
