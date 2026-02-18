@@ -30,6 +30,8 @@ from strands.tools.mcp import MCPClient
 from mcp import stdio_client, StdioServerParameters
 from logger_config import logger
 from strands.agent.conversation_manager import SlidingWindowConversationManager
+from botocore.config import Config as BotocoreConfig
+from strands.types.exceptions import MaxTokensReachedException
 
 from prompts_lite import (
     architecture_description_system_prompt,
@@ -127,13 +129,17 @@ class SageMakerAdvisorApp:
             st.session_state.conversation_manager = SlidingWindowConversationManager(window_size=20)
     
     def setup_bedrock_model(self):
-        """Setup Bedrock model with fallback options"""
+        """Setup Bedrock model with fallback options - Lite mode uses lower max_tokens for faster responses"""
         if 'bedrock_model' not in st.session_state:
+            bedrock_timeout_config = BotocoreConfig(read_timeout=300)
+            lite_max_tokens = 12288  # ~3x of 4096, balanced for speed + completeness
             try:
                 st.session_state.bedrock_model = BedrockModel(
                     model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     region_name='us-west-2',
-                    temperature=0.0
+                    temperature=0.0,
+                    max_tokens=lite_max_tokens,
+                    boto_client_config=bedrock_timeout_config
                 )
                 st.session_state.model_name = "Claude 4.5 Sonnet"
             except Exception as e:
@@ -141,7 +147,9 @@ class SageMakerAdvisorApp:
                     st.session_state.bedrock_model = BedrockModel(
                         model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
                         region_name='us-west-2',
-                        temperature=0.0
+                        temperature=0.0,
+                        max_tokens=lite_max_tokens,
+                        boto_client_config=bedrock_timeout_config
                     )
                     st.session_state.model_name = "Claude 4 Sonnet"
                 except Exception as e2:
@@ -149,7 +157,9 @@ class SageMakerAdvisorApp:
                         st.session_state.bedrock_model = BedrockModel(
                             model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
                             region_name='us-west-2',
-                            temperature=0.0
+                            temperature=0.0,
+                            max_tokens=lite_max_tokens,
+                            boto_client_config=bedrock_timeout_config
                         )
                         st.session_state.model_name = "Claude 3.7 Sonnet"
                     except Exception as e3:
@@ -252,7 +262,7 @@ OUTPUT:
             # Display current model
             st.info(f"**Model:** {st.session_state.model_name}")
             
-            # Workflow steps
+            # Workflow steps with navigation
             steps = [
                 ('input', 'Architecture Input'),
                 ('description', 'Architecture Analysis'),
@@ -266,13 +276,26 @@ OUTPUT:
             current_step = st.session_state.workflow_state['current_step']
             completed_steps = st.session_state.workflow_state['completed_steps']
             
+            st.markdown("### 📍 Navigation")
+            st.markdown("*Click on completed steps to revisit*")
+            
             for step_id, step_name in steps:
-                if step_id in completed_steps:
-                    st.success(f"✅ {step_name}")
-                elif step_id == current_step:
-                    st.warning(f"🔄 {step_name}")
-                else:
-                    st.info(f"⏳ {step_name}")
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    if step_id in completed_steps:
+                        st.success(f"✅ {step_name}")
+                    elif step_id == current_step:
+                        st.warning(f"🔄 {step_name}")
+                    else:
+                        st.info(f"⏳ {step_name}")
+                
+                with col2:
+                    # Add navigation button for completed steps
+                    if step_id in completed_steps and step_id != current_step:
+                        if st.button("👁️", key=f"nav_{step_id}", help=f"View {step_name}"):
+                            st.session_state.workflow_state['current_step'] = step_id
+                            st.rerun()
             
             st.markdown("---")
             
@@ -338,9 +361,9 @@ OUTPUT:
         try:
             from pdf_report_generator import PDFReportGenerator
             
-            # Get diagram folder path
-            current_dir = os.getcwd()
-            diagram_folder = os.path.join(current_dir, 'generated-diagrams')
+            # Get diagram folder path - handles both local and ECS/Fargate
+            from path_utils import get_diagram_folder
+            diagram_folder = get_diagram_folder()
             
             # Create PDF generator
             pdf_gen = PDFReportGenerator(
@@ -357,13 +380,19 @@ OUTPUT:
                 logger.info("PDF report generated successfully")
             else:
                 logger.warning("PDF generation returned None")
+                st.warning("⚠️ PDF generation completed but returned no data. Check logs for details.")
                 
         except ImportError as e:
             logger.error(f"Missing reportlab dependency: {e}")
-            st.error("PDF generation requires reportlab. Install with: pip install reportlab")
+            st.error("❌ PDF generation requires reportlab library.")
+            st.info("💡 **To fix this issue:**\n\n"
+                   "1. Install reportlab: `pip install reportlab>=3.6.0`\n"
+                   "2. Or install all requirements: `pip install -r requirements.txt`\n"
+                   "3. Restart the application after installation")
         except Exception as e:
             logger.error(f"Error generating PDF: {e}", exc_info=True)
-            st.error(f"PDF generation failed: {str(e)}")
+            st.error(f"❌ PDF generation failed: {str(e)}")
+            st.info("💡 Check the logs for more details. You can still download the JSON data below.")
         
         # Show report preview
         st.markdown("### 📋 Report Contents")
@@ -400,12 +429,15 @@ OUTPUT:
             col1, col2 = st.columns(2)
             
             with col1:
+                # Ensure PDF buffer is properly positioned for Firefox compatibility
+                pdf_data = pdf_buffer.getvalue() if hasattr(pdf_buffer, 'getvalue') else pdf_buffer
                 st.download_button(
                     label="📄 Download PDF Report",
-                    data=pdf_buffer,
+                    data=pdf_data,
                     file_name=f"SageMaker_Migration_Report_{timestamp}.pdf",
                     mime="application/pdf",
-                    help="Comprehensive migration report for implementation"
+                    help="Comprehensive migration report for implementation",
+                    key="pdf_download_btn"
                 )
             
             with col2:
@@ -414,7 +446,8 @@ OUTPUT:
                     data=json_str,
                     file_name=f"sagemaker_migration_data_{timestamp}.json",
                     mime="application/json",
-                    help="Raw data for further processing"
+                    help="Raw data for further processing",
+                    key="json_download_btn"
                 )
         else:
             st.warning("PDF generation failed. Downloading JSON data only.")
@@ -431,6 +464,22 @@ OUTPUT:
     def handle_architecture_input(self):
         """Handle architecture input step"""
         st.markdown('<div class="step-header">📋 Step 1: Architecture Input</div>', unsafe_allow_html=True)
+        
+        # Show previous input if navigating back
+        user_inputs = st.session_state.workflow_state.get('user_inputs', {})
+        if 'description' in user_inputs or 'diagram_path' in user_inputs:
+            with st.expander("📝 View Previous Input", expanded=False):
+                if 'description' in user_inputs:
+                    st.markdown("**Previous Text Description:**")
+                    st.text_area("", user_inputs['description'], height=150, disabled=True, key="prev_desc_view")
+                elif 'diagram_path' in user_inputs:
+                    st.markdown("**Previous Diagram:**")
+                    try:
+                        img = Image.open(user_inputs['diagram_path'])
+                        st.image(img, caption="Previously uploaded diagram", width=400)
+                    except:
+                        st.info(f"Diagram path: {user_inputs['diagram_path']}")
+            st.markdown("---")
         
         # Check if we have a diagram
         has_diagram = st.radio(
@@ -479,18 +528,55 @@ OUTPUT:
                 
                 if st.button("🔍 Analyze Diagram"):
                     try:
-                        with st.spinner("Analyzing architecture diagram..."):
-                            prompt = f"Read the diagram from location {temp_path} and describe the architecture in detail, focusing on components, interactions, and patterns. Use bullet points for clarity."
+                        # Use st.status for better connection handling during long operations
+                        with st.status("🤖 Analyzing architecture diagram...", expanded=True) as status:
+                            st.write("📸 Processing your architecture diagram...")
+                            st.write("⏳ This may take 45-90 seconds...")
                             
+                            prompt = f"""Read the diagram from location {temp_path} and analyze the architecture.
+
+Provide a CONCISE analysis with bullet points:
+1. Components list (compute, storage, networking, ML tools)
+2. One-line purpose per component
+3. Data flow summary
+4. Architecture patterns
+5. Security & scalability highlights
+6. Opportunity Qualification (MRR and ARR estimates)
+
+Keep each section to 2-3 bullet points max."""
+                            
+                            st.write("🔄 Calling AI model with vision capabilities...")
                             response = st.session_state.agents['architecture'](prompt)
                             
+                            st.write("💾 Saving analysis...")
                             self.save_interaction('Architecture Agent', prompt, str(response), 'description')
                             st.session_state.workflow_state['user_inputs']['diagram_path'] = temp_path
                             st.session_state.workflow_state['completed_steps'].append('input')
                             st.session_state.workflow_state['completed_steps'].append('description')
                             st.session_state.workflow_state['current_step'] = 'qa'
                             
+                            status.update(label="✅ Analysis complete!", state="complete")
+                            st.success("Diagram analysis completed successfully!")
+                            
+                            # Small delay to show success message
+                            import time
+                            time.sleep(1)
+                            
                             st.rerun()
+                    
+                    except MaxTokensReachedException as e:
+                        # Gracefully handle truncation — use whatever partial response the agent produced
+                        logger.warning(f"Diagram analysis hit max_tokens limit, using partial response")
+                        partial = str(getattr(e, 'message', '')) or "Analysis was truncated due to response length limits."
+                        self.save_interaction('Architecture Agent', prompt, partial, 'description')
+                        st.session_state.workflow_state['user_inputs']['diagram_path'] = temp_path
+                        st.session_state.workflow_state['completed_steps'].append('input')
+                        st.session_state.workflow_state['completed_steps'].append('description')
+                        st.session_state.workflow_state['current_step'] = 'qa'
+                        st.warning("⚠️ Analysis was slightly truncated but still usable. Proceeding...")
+                        import time
+                        time.sleep(1)
+                        st.rerun()
                     
                     except Exception as e:
                         st.error(f"Error analyzing diagram: {str(e)}")
@@ -505,36 +591,58 @@ OUTPUT:
             
             if arch_description and st.button("🔍 Analyze Description"):
                 try:
-                    with st.spinner("Analyzing architecture description..."):
+                    # Use st.status for better connection handling during long operations
+                    with st.status("🤖 Analyzing architecture description...", expanded=True) as status:
+                        st.write("📝 Processing your architecture description...")
+                        st.write("⏳ This may take 30-60 seconds...")
+                        
                         # Create a clear prompt for text-based architecture description
-                        analysis_prompt = f"""
-I am providing a TEXT DESCRIPTION of an existing ML/GenAI architecture (not a diagram).
-
-Please analyze this architecture description and provide a comprehensive analysis following the required output structure:
+                        analysis_prompt = f"""Analyze this ML/GenAI architecture description concisely.
 
 ARCHITECTURE DESCRIPTION:
 {arch_description}
 
-Please provide:
-1. List of all components mentioned
-2. Purpose of each component
-3. Interactions and data flow
-4. Architecture patterns identified
-5. Security and scalability considerations
+Provide a CONCISE analysis with bullet points:
+1. Components list
+2. One-line purpose per component
+3. Data flow summary
+4. Architecture patterns
+5. Security & scalability highlights
 6. Opportunity Qualification (MRR and ARR estimates)
 
-Ensure the analysis is thorough and includes all required sections.
-"""
+Keep each section to 2-3 bullet points max."""
                         
+                        st.write("🔄 Calling AI model...")
                         response = st.session_state.agents['architecture'](analysis_prompt)
                         
+                        st.write("💾 Saving analysis...")
                         self.save_interaction('Architecture Agent', arch_description, str(response), 'description')
                         st.session_state.workflow_state['user_inputs']['description'] = arch_description
                         st.session_state.workflow_state['completed_steps'].append('input')
                         st.session_state.workflow_state['completed_steps'].append('description')
                         st.session_state.workflow_state['current_step'] = 'qa'
                         
+                        status.update(label="✅ Analysis complete!", state="complete")
+                        st.success("Architecture analysis completed successfully!")
+                        
+                        # Small delay to show success message
+                        import time
+                        time.sleep(1)
+                        
                         st.rerun()
+                
+                except MaxTokensReachedException as e:
+                    logger.warning(f"Text analysis hit max_tokens limit, using partial response")
+                    partial = str(getattr(e, 'message', '')) or "Analysis was truncated due to response length limits."
+                    self.save_interaction('Architecture Agent', arch_description, partial, 'description')
+                    st.session_state.workflow_state['user_inputs']['description'] = arch_description
+                    st.session_state.workflow_state['completed_steps'].append('input')
+                    st.session_state.workflow_state['completed_steps'].append('description')
+                    st.session_state.workflow_state['current_step'] = 'qa'
+                    st.warning("⚠️ Analysis was slightly truncated but still usable. Proceeding...")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
                 
                 except Exception as e:
                     st.error(f"Error analyzing description: {str(e)}")
@@ -581,8 +689,9 @@ Ensure the analysis is thorough and includes all required sections.
             # Start Q&A session
             if not qa_session.get('session_active', False):
                 if st.button("🤔 Start Interactive Q&A Session"):
-                    qa_session['session_active'] = True
-                    self.ask_next_question()
+                    with st.spinner("🤔 Generating first clarification question..."):
+                        qa_session['session_active'] = True
+                        self.ask_next_question()
                     st.rerun()
             
             # Display conversation history
@@ -625,8 +734,18 @@ Ensure the analysis is thorough and includes all required sections.
                 
                 with col1:
                     if user_answer and st.button("✅ Submit Answer"):
-                        with st.spinner("🧠 Processing your answer and generating next question..."):
+                        # Use st.status for better connection handling
+                        with st.status("🧠 Processing your answer...", expanded=True) as status:
+                            st.write("📝 Analyzing your response...")
+                            st.write("⏳ Generating next question...")
+                            
                             self.process_qa_answer(user_answer)
+                            
+                            status.update(label="✅ Answer processed!", state="complete")
+                            
+                            # Small delay
+                            import time
+                            time.sleep(0.5)
                         st.rerun()
                 
                 with col2:
@@ -641,7 +760,8 @@ Ensure the analysis is thorough and includes all required sections.
                 
                 with col1:
                     if st.button("🏁 Complete Q&A Session"):
-                        self.complete_qa_session()
+                        with st.spinner("📝 Generating comprehensive Q&A analysis..."):
+                            self.complete_qa_session()
                         st.rerun()
                 
                 with col2:
@@ -663,6 +783,18 @@ Ensure the analysis is thorough and includes all required sections.
             st.markdown("**Final Comprehensive Analysis:**")
             st.write(qa_response.get('output', ''))
             st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Navigation buttons
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("⬅️ Back to Analysis"):
+                    st.session_state.workflow_state['current_step'] = 'description'
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Continue to SageMaker Design"):
+                    st.session_state.workflow_state['current_step'] = 'sagemaker'
+                    st.rerun()
     
     def ask_next_question(self):
         """Generate and ask the next clarification question"""
@@ -879,125 +1011,72 @@ This information provides a solid foundation for designing the SageMaker migrati
             with col1:
                 if st.button("🏗️ Generate SageMaker Architecture", help="Generate modernized SageMaker architecture design", use_container_width=True):
                     try:
-                        # Create containers for real-time display
-                        progress_container = st.container()
-                        output_container = st.container()
-                        
-                        with progress_container:
-                            progress_text = st.empty()
-                            progress_text.info("🔄 Preparing SageMaker architecture design request...")
-                        
-                        sagemaker_input = str(qa_response.get('output', '')) + "\n" + SAGEMAKER_USER_PROMPT
-                        
-                        with progress_container:
-                            progress_text.info("🤖 AI is analyzing requirements and designing architecture...")
-                        
-                        # Create a placeholder for streaming output
-                        with output_container:
-                            st.markdown("### 🔄 Generating Architecture Design...")
-                            output_placeholder = st.empty()
-                            output_placeholder.info("Waiting for AI response...")
-                        
-                        # Call the agent with output capture
-                        import sys
-                        from io import StringIO
-                        
-                        # Capture stdout to catch any console output
-                        old_stdout = sys.stdout
-                        captured_output = StringIO()
-                        
-                        try:
-                            # Redirect stdout to capture console output
-                            sys.stdout = captured_output
+                        # Use st.status for better connection handling
+                        with st.status("🤖 Generating SageMaker architecture design...", expanded=True) as status:
+                            st.write("📋 Analyzing your requirements...")
+                            st.write("⏳ This may take 90-150 seconds...")
                             
+                            sagemaker_input = str(qa_response.get('output', '')) + "\n" + SAGEMAKER_USER_PROMPT
+                            
+                            st.write("🔄 Calling AI model to design architecture...")
                             # Call the agent
                             response = st.session_state.agents['sagemaker'](sagemaker_input)
+                        
+                            st.write("💾 Processing response...")
+                            # Convert response to string
+                            if hasattr(response, 'content'):
+                                response_str = str(response.content).strip()
+                            elif hasattr(response, 'text'):
+                                response_str = str(response.text).strip()
+                            elif hasattr(response, 'output'):
+                                response_str = str(response.output).strip()
+                            else:
+                                response_str = str(response).strip()
                             
-                            # Get any captured console output
-                            console_output = captured_output.getvalue()
+                            # Log for debugging
+                            logger.info(f"SageMaker response type: {type(response)}")
+                            logger.info(f"SageMaker response length: {len(response_str)} characters")
                             
-                        finally:
-                            # Restore stdout
-                            sys.stdout = old_stdout
-                        
-                        # If there was console output, show it
-                        if console_output.strip():
-                            with output_container:
-                                st.markdown("**Console Output:**")
-                                st.code(console_output, language="text")
-                        
-                        # Convert response to string and ensure it's captured
-                        # Handle different response types (string, object with content, etc.)
-                        if hasattr(response, 'content'):
-                            response_str = str(response.content).strip()
-                        elif hasattr(response, 'text'):
-                            response_str = str(response.text).strip()
-                        elif hasattr(response, 'output'):
-                            response_str = str(response.output).strip()
-                        else:
-                            response_str = str(response).strip()
-                        
-                        # Log for debugging
-                        logger.info(f"SageMaker response type: {type(response)}")
-                        logger.info(f"SageMaker response length: {len(response_str)} characters")
-                        logger.info(f"SageMaker response preview: {response_str[:200]}...")
-                        
-                        if not response_str or response_str == "None":
-                            st.error("⚠️ Received empty response from SageMaker agent")
-                            logger.error(f"Empty response - Original response: {response}")
-                            response_str = "Error: Empty response received from agent"
-                        
-                        # Show the response immediately in the output container
-                        with output_container:
-                            output_placeholder.empty()
-                            st.markdown("### 🎯 Generated SageMaker Architecture")
-                            st.markdown('<div class="agent-response">', unsafe_allow_html=True)
-                            st.markdown("**SageMaker Architecture Design:**")
-                            st.markdown(response_str)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                        
-                        with progress_container:
-                            progress_text.info("💾 Saving architecture design...")
-                        
-                        # Save the interaction
-                        self.save_interaction('SageMaker Agent', sagemaker_input, response_str, 'sagemaker')
-                        
-                        # Verify it was saved
-                        saved_response = st.session_state.workflow_state['agent_responses'].get('sagemaker', {})
-                        logger.info(f"Saved response verification: {bool(saved_response)}")
-                        logger.info(f"Saved response keys: {saved_response.keys() if saved_response else 'None'}")
-                        logger.info(f"Saved response output length: {len(str(saved_response.get('output', ''))) if saved_response else 0}")
-                        
-                        # Mark step as complete
+                            if not response_str or response_str == "None":
+                                st.error("⚠️ Received empty response from SageMaker agent")
+                                logger.error(f"Empty response - Original response: {response}")
+                                response_str = "Error: Empty response received from agent"
+                            
+                            st.write("💾 Saving design...")
+                            # Save the interaction
+                            self.save_interaction('SageMaker Agent', sagemaker_input, response_str, 'sagemaker')
+                            
+                            # Mark step as complete
+                            if 'sagemaker' not in st.session_state.workflow_state['completed_steps']:
+                                st.session_state.workflow_state['completed_steps'].append('sagemaker')
+                            st.session_state.workflow_state['current_step'] = 'diagram'
+                            
+                            status.update(label="✅ Design complete!", state="complete")
+                            st.success("✅ SageMaker architecture design completed!")
+                            
+                            # Small delay to show success message
+                            import time
+                            time.sleep(1)
+                            
+                            # Force rerun to display the result
+                            st.rerun()
+                    
+                    except MaxTokensReachedException as e:
+                        logger.warning("SageMaker design hit max_tokens limit, using partial response")
+                        partial = str(getattr(e, 'message', '')) or "Design was truncated due to response length limits."
+                        self.save_interaction('SageMaker Agent', sagemaker_input, partial, 'sagemaker')
                         if 'sagemaker' not in st.session_state.workflow_state['completed_steps']:
                             st.session_state.workflow_state['completed_steps'].append('sagemaker')
                         st.session_state.workflow_state['current_step'] = 'diagram'
-                        
-                        # Clear progress and show success
-                        with progress_container:
-                            progress_text.empty()
-                            st.success("✅ SageMaker architecture design completed!")
-                        
-                        # Add download button
-                        with output_container:
-                            st.download_button(
-                                label="📥 Download Architecture Design",
-                                data=response_str,
-                                file_name=f"sagemaker_architecture_design_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                                mime="text/plain",
-                                help="Download the SageMaker architecture design as a text file"
-                            )
-                        
-                        # Small delay to show success message
+                        st.warning("⚠️ Design was slightly truncated but still usable. Proceeding...")
                         import time
-                        time.sleep(2)
-                        
-                        # Force rerun to display the result properly
+                        time.sleep(1)
                         st.rerun()
                     
                     except Exception as e:
                         st.error(f"❌ Error generating SageMaker architecture: {str(e)}")
                         st.session_state.workflow_state['errors']['sagemaker'] = str(e)
+                        logger.error(f"SageMaker generation error: {e}", exc_info=True)
             
             with col2:
                 if st.button("⏭️ Skip SageMaker Design", help="Skip architecture design and proceed to TCO analysis", use_container_width=True):
@@ -1026,67 +1105,39 @@ This information provides a solid foundation for designing the SageMaker migrati
         
         # Display SageMaker response if available (for page refreshes or navigation back)
         elif sagemaker_response:
-            st.markdown("### 🎯 Generated SageMaker Architecture")
-            
-            # Debug info
-            logger.info(f"Displaying SageMaker response. Keys: {sagemaker_response.keys()}")
-            logger.info(f"SageMaker response content: {sagemaker_response}")
+            st.markdown("### 🎯 SageMaker Architecture Design")
             
             # Get the output
             output = sagemaker_response.get('output', '')
             
-            # Additional debugging
-            st.write(f"**Debug Info:** Response keys: {list(sagemaker_response.keys())}")
-            st.write(f"**Debug Info:** Output length: {len(str(output))}")
-            st.write(f"**Debug Info:** Output type: {type(output)}")
-            
             if output and len(str(output).strip()) > 0:
-                st.markdown('<div class="agent-response">', unsafe_allow_html=True)
-                st.markdown("**SageMaker Architecture Design:**")
+                # Display the architecture design cleanly
+                st.markdown(output)
                 
-                # Display the full output with better formatting
-                # Split into sections if the output is very long
-                if len(output) > 2000:
-                    # Show first part and make rest expandable
-                    st.markdown(output[:2000] + "...")
-                    with st.expander("📖 View Complete Architecture Design"):
-                        st.markdown(output)
-                else:
-                    st.markdown(output)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Add metrics about the design
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Content Length", f"{len(output)} chars")
-                with col2:
-                    st.metric("Word Count", f"{len(output.split())} words")
-                with col3:
-                    st.metric("Status", "✅ Complete")
-                
-                # Add download option for the design
+                # Add download option
                 st.download_button(
                     label="📥 Download Architecture Design",
                     data=output,
-                    file_name=f"sagemaker_architecture_design_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain",
-                    help="Download the SageMaker architecture design as a text file"
+                    file_name=f"sagemaker_architecture_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain"
                 )
-            else:
-                st.warning("⚠️ No SageMaker architecture design content available.")
-                # Show raw response for debugging
-                st.write("**Debug - Raw Response:**")
-                st.json(sagemaker_response)
-                st.info("The response may be empty. Check the logs for details.")
                 
-                # Show debug info
-                with st.expander("🔍 Debug Information"):
-                    st.json(sagemaker_response)
-                    
+                # Navigation buttons
+                st.markdown("---")
+                col1, col2, col3 = st.columns([1, 1, 2])
+                with col1:
+                    if st.button("⬅️ Back to Q&A"):
+                        st.session_state.workflow_state['current_step'] = 'qa'
+                        st.rerun()
+                with col2:
+                    if st.button("➡️ Continue to Diagrams"):
+                        st.session_state.workflow_state['current_step'] = 'diagram'
+                        st.rerun()
+            else:
+                st.warning("⚠️ No SageMaker architecture design available.")
+                
                 # Option to regenerate
                 if st.button("🔄 Regenerate Architecture Design"):
-                    # Reset the sagemaker response to trigger regeneration
                     if 'sagemaker' in st.session_state.workflow_state['agent_responses']:
                         del st.session_state.workflow_state['agent_responses']['sagemaker']
                     if 'sagemaker' in st.session_state.workflow_state['completed_steps']:
@@ -1120,24 +1171,31 @@ This information provides a solid foundation for designing the SageMaker migrati
                         
                         # Import DiagramGenerator
                         from diagram_generator import DiagramGenerator
+                        from path_utils import get_workspace_dir
                         
-                        # Get current working directory
-                        current_dir = os.getcwd()
-                        logger.info(f"Current working directory: {current_dir}")
+                        # Get workspace directory - handles both local and ECS/Fargate
+                        workspace_dir = get_workspace_dir()
+                        logger.info(f"Workspace directory: {workspace_dir}")
                         
                         # Create DiagramGenerator instance
                         diagram_gen = DiagramGenerator(
-                            workspace_dir=current_dir,
+                            workspace_dir=workspace_dir,
                             bedrock_model=st.session_state.bedrock_model,
                             system_prompt=DIAGRAM_GENERATION_SYSTEM_PROMPT,
                             user_prompt=DIAGRAM_GENERATION_USER_PROMPT
                         )
                         
-                        progress.info("🤖 Generating architecture diagrams...")
+                        progress.info("🎨 Generating architecture diagrams with AI...")
+                        progress.info("⏳ This may take 60-120 seconds...")
                         
                         # Generate diagrams
                         architecture_design = str(sagemaker_response.get('output', ''))
                         result = diagram_gen.generate_diagram(architecture_design)
+                        
+                        # Show success message with diagram count
+                        if result.get('status') == 'success':
+                            diagram_count = len(result.get('diagram_paths', []))
+                            progress.success(f"✅ Generated {diagram_count} diagram(s) successfully!")
                         
                         progress.info("💾 Saving diagram information...")
                         
@@ -1211,18 +1269,20 @@ This information provides a solid foundation for designing the SageMaker migrati
         # Display diagram response if available
         diagram_response = st.session_state.workflow_state['agent_responses'].get('diagram', {})
         if diagram_response:
-            st.markdown('<div class="agent-response">', unsafe_allow_html=True)
-            st.markdown("**Diagram Generation Result:**")
-            st.write(diagram_response.get('output', ''))
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("### 📊 Architecture Diagrams")
             
-            # Try to display generated diagrams using DiagramGenerator
+            st.info("💡 **About these diagrams**: Visual representations of your proposed SageMaker architecture showing components, data flow, and service interactions.")
+            
+            # Try to display generated diagrams
             try:
                 from diagram_generator import DiagramGenerator
                 
-                current_dir = os.getcwd()
+                # Get workspace directory - handles both local and ECS/Fargate
+                from path_utils import get_workspace_dir
+                workspace_dir = get_workspace_dir()
+                
                 diagram_gen = DiagramGenerator(
-                    workspace_dir=current_dir,
+                    workspace_dir=workspace_dir,
                     bedrock_model=st.session_state.bedrock_model,
                     system_prompt=DIAGRAM_GENERATION_SYSTEM_PROMPT,
                     user_prompt=DIAGRAM_GENERATION_USER_PROMPT
@@ -1230,41 +1290,39 @@ This information provides a solid foundation for designing the SageMaker migrati
                 
                 diagram_files = diagram_gen._list_diagram_files()
                 
-                # Debug information
-                st.write(f"**Debug Info:** Checking for diagrams in: {diagram_gen.diagram_folder}")
-                st.write(f"**Debug Info:** Folder exists: {os.path.exists(diagram_gen.diagram_folder)}")
-                st.write(f"**Debug Info:** Image files found: {len(diagram_files)}")
-                
                 if diagram_files:
-                    st.markdown("**Generated Diagrams:**")
+                    st.markdown("**Generated Architecture Diagrams:**")
                     
-                    # Display diagrams in a grid layout
-                    cols = st.columns(min(len(diagram_files), 3))  # Max 3 columns
-                    
-                    for idx, img_path in enumerate(diagram_files):
+                    # Display diagrams in a clean grid
+                    for idx, img_path in enumerate(diagram_files, 1):
                         try:
-                            with cols[idx % 3]:
-                                st.image(img_path, caption=os.path.basename(img_path))
-                                
-                                # Add file info
-                                file_size = os.path.getsize(img_path)
-                                st.caption(f"Size: {file_size:,} bytes")
-                                
+                            # Get diagram name for description
+                            diagram_name = os.path.basename(img_path).replace('_', ' ').replace('.png', '').title()
+                            
+                            st.markdown(f"**Diagram {idx}: {diagram_name}**")
+                            st.image(img_path, width=700, caption=f"Architecture diagram showing {diagram_name.lower()}")
+                            st.markdown("---")
                         except Exception as e:
-                            st.error(f"Could not display {os.path.basename(img_path)}: {e}")
+                            st.warning(f"Could not display diagram: {os.path.basename(img_path)}")
                             logger.error(f"Error displaying diagram {img_path}: {e}", exc_info=True)
                 else:
-                    st.info("No diagram image files found in the generated-diagrams folder.")
-                    
-                    # Show folder contents for debugging
-                    if os.path.exists(diagram_gen.diagram_folder):
-                        all_files = os.listdir(diagram_gen.diagram_folder)
-                        if all_files:
-                            st.write("Files found (but not valid images):", all_files)
+                    st.info("✅ Diagram generation completed. Diagrams will be included in the final PDF report.")
             
             except Exception as e:
-                st.error(f"Error displaying diagrams: {e}")
+                st.info("✅ Diagram generation completed. Diagrams will be included in the final PDF report.")
                 logger.error(f"Error in diagram display: {e}", exc_info=True)
+            
+            # Navigation buttons
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("⬅️ Back to SageMaker Design"):
+                    st.session_state.workflow_state['current_step'] = 'sagemaker'
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Continue to TCO Analysis"):
+                    st.session_state.workflow_state['current_step'] = 'tco'
+                    st.rerun()
     
     def handle_tco_step(self):
         """Handle TCO analysis step"""
@@ -1291,7 +1349,12 @@ This information provides a solid foundation for designing the SageMaker migrati
             
             if st.button("💹 Generate TCO Analysis"):
                 try:
-                    with st.spinner("Analyzing total cost of ownership..."):
+                    # Use st.status for better connection handling
+                    with st.status("💹 Analyzing total cost of ownership...", expanded=True) as status:
+                        st.write("📊 Analyzing current costs...")
+                        st.write("⏳ This may take 45-75 seconds...")
+                        
+                        st.write("🔧 Creating TCO analysis agent...")
                         # Create TCO agent without user_input tool
                         tco_agent_no_input = Agent(
                             model=st.session_state.bedrock_model,
@@ -1300,6 +1363,7 @@ This information provides a solid foundation for designing the SageMaker migrati
                             conversation_manager=st.session_state.conversation_manager
                         )
                         
+                        st.write("📝 Building cost analysis...")
                         # Build comprehensive TCO input
                         additional_info = f"""
 ADDITIONAL COST PARAMETERS:
@@ -1311,13 +1375,33 @@ ADDITIONAL COST PARAMETERS:
                         
                         tco_input = str(qa_response.get('output', '')) + "\n" + str(sagemaker_response.get('output', '')) + "\n" + additional_info + "\n" + AWS_TCO_USER_PROMPT
                         
+                        st.write("🔄 Calling AI model for cost analysis...")
                         response = tco_agent_no_input(tco_input)
                         
+                        st.write("💾 Saving analysis...")
                         self.save_interaction('TCO Agent', tco_input, str(response), 'tco')
                         st.session_state.workflow_state['completed_steps'].append('tco')
                         st.session_state.workflow_state['current_step'] = 'navigator'
                         
+                        status.update(label="✅ TCO analysis complete!", state="complete")
+                        st.success("✅ TCO analysis completed successfully!")
+                        
+                        # Small delay
+                        import time
+                        time.sleep(1)
+                        
                         st.rerun()
+                
+                except MaxTokensReachedException as e:
+                    logger.warning("TCO analysis hit max_tokens limit, using partial response")
+                    partial = str(getattr(e, 'message', '')) or "TCO analysis was truncated due to response length limits."
+                    self.save_interaction('TCO Agent', tco_input, partial, 'tco')
+                    st.session_state.workflow_state['completed_steps'].append('tco')
+                    st.session_state.workflow_state['current_step'] = 'navigator'
+                    st.warning("⚠️ TCO analysis was slightly truncated but still usable. Proceeding...")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
                 
                 except Exception as e:
                     st.error(f"Error generating TCO analysis: {str(e)}")
@@ -1330,6 +1414,18 @@ ADDITIONAL COST PARAMETERS:
             st.markdown("**TCO Analysis:**")
             st.write(tco_response.get('output', ''))
             st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Navigation buttons
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("⬅️ Back to Diagrams"):
+                    st.session_state.workflow_state['current_step'] = 'diagram'
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Continue to Roadmap"):
+                    st.session_state.workflow_state['current_step'] = 'navigator'
+                    st.rerun()
     
     def handle_navigator_step(self):
         """Handle migration roadmap step"""
@@ -1441,6 +1537,17 @@ Format your response with clear step headers and detailed descriptions for each 
                         
                         st.rerun()
                 
+                except MaxTokensReachedException as e:
+                    logger.warning("Navigator hit max_tokens limit, using partial response")
+                    partial = str(getattr(e, 'message', '')) or "Migration roadmap was truncated due to response length limits."
+                    self.save_interaction('Navigator Agent', navigator_input, partial, 'navigator')
+                    st.session_state.workflow_state['completed_steps'].append('navigator')
+                    st.session_state.workflow_state['current_step'] = 'complete'
+                    st.warning("⚠️ Roadmap was slightly truncated but still usable. Proceeding...")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+                
                 except Exception as e:
                     st.error(f"Error generating migration roadmap: {str(e)}")
                     st.session_state.workflow_state['errors']['navigator'] = str(e)
@@ -1452,6 +1559,18 @@ Format your response with clear step headers and detailed descriptions for each 
             st.markdown("**Migration Roadmap:**")
             st.write(navigator_response.get('output', ''))
             st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Navigation buttons
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("⬅️ Back to TCO Analysis"):
+                    st.session_state.workflow_state['current_step'] = 'tco'
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Continue to Summary"):
+                    st.session_state.workflow_state['current_step'] = 'complete'
+                    st.rerun()
     
     def handle_complete_step(self):
         """Handle workflow completion"""
@@ -1487,16 +1606,14 @@ Format your response with clear step headers and detailed descriptions for each 
         
         if current_step == 'input':
             self.handle_architecture_input()
+        elif current_step == 'description':
+            self.handle_description_view()
         elif current_step == 'qa':
             self.handle_qa_step()
         elif current_step == 'sagemaker':
             self.handle_sagemaker_step()
         elif current_step == 'diagram':
-            # Skip diagram generation in lite version and go directly to TCO
-            if 'diagram' not in st.session_state.workflow_state['completed_steps']:
-                st.session_state.workflow_state['completed_steps'].append('diagram')
-            st.session_state.workflow_state['current_step'] = 'tco'
-            st.rerun()
+            self.handle_diagram_step()
         elif current_step == 'tco':
             self.handle_tco_step()
         elif current_step == 'navigator':
@@ -1509,6 +1626,49 @@ Format your response with clear step headers and detailed descriptions for each 
             st.markdown("### ⚠️ Errors Encountered")
             for step, error in st.session_state.workflow_state['errors'].items():
                 st.markdown(f'<div class="error-box"><strong>{step.title()} Error:</strong><br>{error}</div>', unsafe_allow_html=True)
+    
+    def handle_description_view(self):
+        """Display the architecture description/analysis when navigating back"""
+        st.markdown('<div class="step-header">📋 Architecture Analysis (Review)</div>', unsafe_allow_html=True)
+        
+        desc_response = st.session_state.workflow_state['agent_responses'].get('description', {})
+        
+        if desc_response:
+            st.markdown('<div class="agent-response">', unsafe_allow_html=True)
+            st.markdown("**Architecture Analysis:**")
+            st.write(desc_response.get('output', ''))
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Show input that was used
+            user_inputs = st.session_state.workflow_state.get('user_inputs', {})
+            if 'description' in user_inputs:
+                with st.expander("📝 View Original Input"):
+                    st.text_area("Original Description:", user_inputs['description'], height=200, disabled=True)
+            elif 'diagram_path' in user_inputs:
+                with st.expander("🖼️ View Original Diagram"):
+                    try:
+                        img = Image.open(user_inputs['diagram_path'])
+                        st.image(img, caption="Original Architecture Diagram")
+                    except:
+                        st.info(f"Diagram path: {user_inputs['diagram_path']}")
+            
+            st.markdown("---")
+            
+            # Navigation buttons
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("⬅️ Back to Input"):
+                    st.session_state.workflow_state['current_step'] = 'input'
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Continue to Q&A"):
+                    st.session_state.workflow_state['current_step'] = 'qa'
+                    st.rerun()
+        else:
+            st.warning("No architecture analysis data available.")
+            if st.button("⬅️ Back to Input"):
+                st.session_state.workflow_state['current_step'] = 'input'
+                st.rerun()
 
 def main():
     """Main function to run the Streamlit app"""

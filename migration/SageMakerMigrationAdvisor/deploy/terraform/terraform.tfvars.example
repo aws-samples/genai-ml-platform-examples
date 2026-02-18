@@ -1,0 +1,56 @@
+# Example Terraform Variables Configuration
+# Copy this file to terraform.tfvars and update with your values
+
+# AWS Configuration
+aws_region = "us-east-1"
+app_name   = "sagemaker-migration-advisor"
+
+# Security: IP Whitelisting
+# Replace with your IP address in CIDR notation
+# Find your IP: curl ifconfig.me
+my_ip_address = "0.0.0.0/0"  # WARNING: Change this to your IP for security (e.g., "203.0.113.0/32")
+
+# ECS Task Configuration
+ecs_task_cpu      = "1024"  # 1 vCPU (256, 512, 1024, 2048, 4096)
+ecs_task_memory   = "2048"  # 2 GB (512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192)
+ecs_desired_count = 1       # Number of tasks to run
+
+# HTTPS Configuration (Optional)
+# Uncomment and set these to enable HTTPS
+
+# Option 1: CloudFront HTTPS (No custom domain needed) ⭐ RECOMMENDED
+# enable_cloudfront = true
+
+# Option 2: ALB HTTPS with Custom Domain (Requires domain ownership)
+# certificate_arn = "<YOUR_ACM_CERTIFICATE_ARN>"
+# domain_name     = "advisor.yourdomain.com"
+
+# Tags
+tags = {
+  Application = "SageMaker Migration Advisor"
+  ManagedBy   = "Terraform"
+  Deployment  = "ECS-Fargate"
+  Environment = "Production"
+}
+
+# ============================================
+# Configuration Examples
+# ============================================
+
+# Example 1: HTTP Only (Default)
+# - Just set aws_region, my_ip_address, and other basic settings
+# - Don't set certificate_arn
+# - Access via: http://your-alb-dns-name.region.elb.amazonaws.com
+
+# Example 2: HTTPS with ALB DNS Name
+# certificate_arn = "<YOUR_ACM_CERTIFICATE_ARN>"
+# - HTTP automatically redirects to HTTPS
+# - Access via: https://your-alb-dns-name.region.elb.amazonaws.com
+# - Certificate must be valid for ALB DNS or use wildcard
+
+# Example 3: HTTPS with Custom Domain
+# certificate_arn = "<YOUR_ACM_CERTIFICATE_ARN>"
+# domain_name     = "advisor.yourdomain.com"
+# - Requires Route53 hosted zone for the domain
+# - Creates DNS A record automatically
+# - Access via: https://advisor.yourdomain.com

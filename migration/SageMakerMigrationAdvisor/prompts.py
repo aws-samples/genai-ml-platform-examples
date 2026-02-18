@@ -621,9 +621,9 @@ Your task is to generate a **detailed TCO analysis** that compares the **new pro
 
 #### **Total Estimated Monthly Cost**
 
-- **Old Architecture**: \$XXX.XX  
-- **New AWS Architecture**: \$XXX.XX  
-- **Net Savings / Increase**: \$XXX.XX  
+- **Old Architecture**: $XXX.XX  
+- **New AWS Architecture**: $XXX.XX  
+- **Net Savings / Increase**: $XXX.XX  
 
 ---
 

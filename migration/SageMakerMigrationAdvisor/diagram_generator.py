@@ -25,11 +25,18 @@ class DiagramGenerator:
             system_prompt: System prompt for diagram generation agent
             user_prompt: User prompt template for diagram generation
         """
-        self.workspace_dir = workspace_dir
+        # Use /tmp for ECS/Fargate compatibility, fallback to workspace_dir
+        if os.path.exists('/tmp') and os.access('/tmp', os.W_OK):
+            self.workspace_dir = '/tmp'
+            logger.info("Using /tmp for diagram storage (ECS/Fargate compatible)")
+        else:
+            self.workspace_dir = workspace_dir
+            logger.info(f"Using workspace directory for diagram storage: {workspace_dir}")
+        
         self.bedrock_model = bedrock_model
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
-        self.diagram_folder = os.path.join(workspace_dir, 'generated-diagrams')
+        self.diagram_folder = os.path.join(self.workspace_dir, 'generated-diagrams')
         self._ensure_diagram_folder()
     
     def _ensure_diagram_folder(self):

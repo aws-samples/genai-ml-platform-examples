@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# Generated files
+generated-diagrams/
+advisor_agent_interactions.txt
+
+# Environment
+.env
+.env.local
+
+# Documentation
+README.md
+README_CLI.md
+LAUNCHER_GUIDE.md
+*.pdf
+
+# Test files
+test_*.py
