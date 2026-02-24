@@ -16,10 +16,9 @@ RUN apt-get update && apt-get install -y \
 # Install Cython (needed for NeMo)
 RUN pip install Cython
 
-# Clone the specified branch of the pytorch-lightning repository and install it
-RUN git clone -b bug_fix https://github.com/athitten/pytorch-lightning.git && \
-    cd pytorch-lightning && \
-    PACKAGE_NAME=pytorch pip install -e .
+# Install pytorch-lightning from official PyPI
+# If you need a specific version or patch, pin to a specific release version
+RUN pip install pytorch-lightning
 
 # Install TransformerEngine for optimization
 RUN git clone https://github.com/NVIDIA/TransformerEngine.git && \
@@ -52,7 +51,8 @@ COPY run-eval.sh run-eval.sh
 RUN chmod +x *.sh
 
 # Create a non-root user 'admin' and give ownership of the app directory
-RUN useradd -m admin
+RUN useradd -m admin && \
+    chown -R admin:admin /app
 
 # Create entrypoint script with improved error handling and GPU checks
 RUN cat > /app/entrypoint.sh << 'EOF'
@@ -66,9 +66,6 @@ else
     echo "Detected NVIDIA GPU:"
     nvidia-smi
 fi
-
-# Ensure data directories have correct permissions
-chown -R admin:admin /app/data
 
 # Start tensorboard in the background
 echo "Starting TensorBoard on port 6006..."

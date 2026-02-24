@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir fastapi uvicorn python-multipart soundfile uvloop prometheus-fastapi-instrumentator
 
 
-RUN pip install -v --no-cache-dir nemo_toolkit[asr] torch cuda-python>=12.3
+RUN pip install -v --no-cache-dir torch==2.10.0 torchaudio==2.10.0 torchvision==0.25.0 cuda-python==12.9.4 numba==0.64.0 nemo_toolkit[asr]
 
 # Install Python packages for your use case
 # RUN pip install --no-cache-dir --upgrade pip && \
