@@ -1,14 +1,14 @@
-#  Enhancing speech recognition accuracy by fine-tuning NVIDIA Parakeet models on Amazon EKS Auto Mode
+# Enhancing Speech Recognition Accuracy by Fine-tuning NVIDIA Parakeet Models on Amazon EKS Auto Mode
 
-This repository contains code for fine-tuning NVIDIA Parakeet ASR models.
+This repository contains code for fine-tuning NVIDIA Parakeet ASR models on custom datasets.
 
 ## Repository Structure
 ```
 .
 ├── Dockerfile
 ├── README.md
-├── configs
-│   └── fine_tuning_config.yaml
+├── configs/
+│   └── fine_tuning_config.yaml
 ├── data_preparation_fleurs.py
 ├── download-and-prepare-data-fleurs.sh
 ├── install.sh
@@ -19,114 +19,86 @@ This repository contains code for fine-tuning NVIDIA Parakeet ASR models.
 └── trainer.py
 ```
 
-## Clone the Repository
-### Clone the repository (dev-0 branch)
+## Quick Start
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/aws-samples/genai-ml-platform-examples.git
+cd genai-ml-platform-examples/infrastructure/nvidia-parakeet-model-fine-tuning
 ```
-git clone -b dev-0 https://github.com/oscerai/asr-parakeet.git
-```
-### Navigate to the project directory
-```
-cd asr-parakeet/asr-parakeet-fine-tuning
-```
-## Overview
 
-This project fine-tunes NVIDIA's Parakeet-tdt-0.6b-v2 ASR model.
-
-## Features
-
-### Domain: Fine-tunes pre-trained Parakeet models on a dataset
-### Multi-GPU Training: Supports distributed training across multiple GPUs using DeepSpeed and DDP
-### Data Preparation: Includes utilities for preparing audio datasets in the required format
-### Evaluation: Measures Word Error Rate (WER), Character Error Rate (CER) and Drug Name Recall
-
-## Pre-requisites
-
-### Hardware Requirements
-- GPU: At least one NVIDIA GPU with 16GB+ VRAM (4x GPUs recommended for full training)
-- Storage: At least 100GB free disk space for datasets and model checkpoints
-
-### Software Requirements
-- CUDA: CUDA 12.8
-- Python: Python 3.12
-- AWS CLI: Configured with appropriate permissions to access the dataset
-
-### Getting Started
-
-#### Step 1: Install Dependencies
-Run the installation script to set up the required environment:
-```
+### 2. Install Dependencies
+```bash
 chmod +x install.sh
 ./install.sh
-```
-This will create a Conda environment with all necessary dependencies including PyTorch, NVIDIA NeMo, and other libraries.
-
-#### Step 2: Activate the conda environment
-```
 conda activate nemo-env
 ```
 
-#### Step 3: Download and Prepare Data
-
-Download and prepare the dataset. You need to provide the absolute path to the download directory:
-```
-chmod +x download-and-prepare-data.sh
-./download-and-prepare-data.sh
+### 3. Download and Prepare Data
+```bash
+chmod +x download-and-prepare-data-fleurs.sh
+./download-and-prepare-data-fleurs.sh
 ```
 
-This script will:
-
-- Download data from AWS S3, Process the data into the format required by NeMo.
-
-#### Step 3: Configure Training Parameters
-Edit the configuration file at configs/fine_tuning_config.yaml to adjust training parameters such as:
-
-- Batch size
-- Learning rate
-- Number of epochs
-- Model architecture settings (if required)
-- Data augmentation settings
-
-Step 4: Start Training
-- Begin the fine-tuning process:
-```
+### 4. Start Training
+```bash
 chmod +x run-train.sh
 ./run-train.sh
 ```
 
-The script uses DeepSpeed for distributed training across all available GPUs. Training progress will be logged to the console and to MLflow/TensorBoard.
+## Overview
 
-- Model Configuration
-The fine-tuning process uses a YAML configuration file with settings for:
+This project fine-tunes NVIDIA's Parakeet-tdt-0.6b-v2 ASR model for improved speech recognition on domain-specific datasets.
 
-- Model Architecture: Based on Parakeet Token and Duration Transducer (TDT)
+## Features
 
-- Training Data: Path to processed recordings
+- **Domain Adaptation**: Fine-tune pre-trained Parakeet models on custom datasets
+- **Multi-GPU Training**: Distributed training with DeepSpeed and DDP
+- **Data Preparation**: Utilities for audio dataset preprocessing
+- **Evaluation Metrics**: WER, CER, and Drug Name Recall
+- **Experiment Tracking**: MLflow and TensorBoard integration
 
-- Optimization: Learning rate schedule, weight decay, and other hyperparameters
-- Distributed Training: DeepSpeed stage 2 configuration
+## Requirements
 
-#### Run as an app
-Simply run the app by modifying the batch size, absolute path to the dataset and the number of epochs:
-```
+### Hardware
+- GPU: NVIDIA GPU with 16GB+ VRAM (4x GPUs recommended)
+- Storage: 100GB+ free disk space
+
+### Software
+- CUDA 12.8+
+- Python 3.12
+- AWS CLI (configured with appropriate permissions)
+
+## Configuration
+
+Edit `configs/fine_tuning_config.yaml` to adjust:
+- Batch size
+- Learning rate
+- Number of epochs
+- Model architecture
+- Data augmentation
+
+Training progress is logged to console, MLflow, and TensorBoard.
+
+## Alternative Deployment Options
+
+### Run as Application
+```bash
 chmod +x run-app.sh
 ./run-app.sh
 ```
 
-#### Run as a docker file
-Simply run it as a docker file. You can modify the batch size, absolute path to the dataset, number of epochs, container name and path to mapped models:
-```
+### Run with Docker
+```bash
 chmod +x run-docker.sh
 ./run-docker.sh
 ```
 
-### Authors
+## Authors
 
 - Iman Abbasnejad (Applied Scientist, AWS)
-
 - Faisal Masood (AppMod and Inferencing, AWS)
 
+## Acknowledgments
 
-### Acknowledgments
-- Based on NVIDIA NeMo framework and Parakeet ASR models
-
-
+Based on NVIDIA NeMo framework and Parakeet ASR models.
