@@ -1,0 +1,125 @@
+# This workflow will get the approved model from model registry and deploy to dev, pre-prod and prod
+
+name: Sagemaker Model Deploy Pipeline 
+run-name: ${{ github.actor }} is deploying a new model to SageMaker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - model_deploy/config/deploy_config.json
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+          - info
+          - warning
+          - debug
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CONFIG_FILE: model_deploy/config/deploy_config.json
+
+jobs:
+  GitHub-Actions-Deploy:
+
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo "The job was automatically triggered by a ${{ github.event_name }} event."
+    - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+    - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+    - run: echo "The commit message for the event -\n ${{ github.event.head_commit.message }}"
+    - uses: actions/checkout@v4
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Load Configuration
+      id: load_config
+      run: |
+        AWS_REGION=$(jq -r '.aws_region' ${{ env.CONFIG_FILE }})
+        DEPLOY_ACCOUNT=$(jq -r '.deploy_account' ${{ env.CONFIG_FILE }})
+        MODEL_PACKAGE_GROUP_NAME=$(jq -r '.model_package_group_name' ${{ env.CONFIG_FILE }})
+        DATA_BUCKET_NAME=$(jq -r '.DataBucketName' ${{ env.CONFIG_FILE }})
+        
+        echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
+        echo "deploy_account=$DEPLOY_ACCOUNT" >> $GITHUB_OUTPUT
+        echo "model_package_group_name=$MODEL_PACKAGE_GROUP_NAME" >> $GITHUB_OUTPUT
+        echo "data_bucket_name=$DATA_BUCKET_NAME" >> $GITHUB_OUTPUT
+
+    - name: Configure Dev Account AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+          role-to-assume: ${{secrets.OIDC_ROLE_GITHUB_WORKFLOW}}
+          aws-region: ${{ steps.load_config.outputs.aws_region }}
+
+    - name: Install dependencies
+      working-directory: model_deploy
+      run: |
+        sh install-prerequisites-brew.sh
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+                 
+    - name: CDK Synth
+      working-directory: model_deploy
+      run: |
+        cdk synth --no-lookups 
+        
+    - name: Check and Create Bootstrap
+      working-directory: model_deploy
+      env:
+        AWS_REGION: ${{ steps.load_config.outputs.aws_region }}
+        DEPLOY_ACCOUNT: ${{ steps.load_config.outputs.deploy_account }}
+        OIDC_ROLE_GITHUB_WORKFLOW: ${{secrets.OIDC_ROLE_GITHUB_WORKFLOW}}
+        CDK_QUALIFIER: "gitactions"
+      run: |
+        # Validate ARN format
+        if [[ ! "${OIDC_ROLE_GITHUB_WORKFLOW}" =~ ^arn:aws:iam::[0-9]{12}:role/ ]]; then
+          echo "Error: OIDC_ROLE_GITHUB_WORKFLOW must be a valid IAM role ARN"
+          exit 1
+        fi
+        
+        STACK_EXISTS=$(aws cloudformation list-stacks \
+          --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+          --query "StackSummaries[?StackName=='CDKToolkit-${CDK_QUALIFIER}'].StackName" \
+          --output text) || true
+        
+        if [ ! -z "$STACK_EXISTS" ]; then
+          echo "Bootstrap stack CDKToolkit-${CDK_QUALIFIER} already exists, proceeding with deployment..."
+        else
+          echo "Bootstrap stack CDKToolkit-${CDK_QUALIFIER} not found, creating new stack..."
+          cdk bootstrap aws://${DEPLOY_ACCOUNT}/${AWS_REGION} \
+            --toolkit-stack-name CDKToolkit-${CDK_QUALIFIER} \
+            --qualifier ${CDK_QUALIFIER} \
+            --trust ${DEPLOY_ACCOUNT} \
+            --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess 
+        fi
+          
+    - name: CDK Deploy
+      working-directory: model_deploy
+      env:
+        CDK_QUALIFIER: "gitactions"
+      run: |
+        cdk deploy \
+          --require-approval never \
+          --toolkit-stack-name CDKToolkit-${CDK_QUALIFIER} \
+          --context "@aws-cdk/core:bootstrapQualifier=${CDK_QUALIFIER}" \
+          --verbose
+
+  
+    - name: CDK list
+      working-directory: model_deploy
+      run: |
+        cdk list 
+    - run: echo "This github action job's status is ${{ job.status }}."

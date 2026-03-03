@@ -1,0 +1,133 @@
+name: BuildSageMakerModel
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - model_build/ml_pipelines/**
+      - model_build/source_scripts/**
+      - model_build/config/pipeline_config.json
+  workflow_dispatch:
+
+env:
+  CONFIG_FILE: model_build/config/pipeline_config.json
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r model_build/requirements.txt
+
+      - name: Load Configuration
+        id: load_config
+        run: |
+          AWS_REGION=$(jq -r '.aws_region' ${{ env.CONFIG_FILE }})
+          SAGEMAKER_PROJECT_NAME=$(jq -r '.sagemaker_project_name' ${{ env.CONFIG_FILE }})
+          SAGEMAKER_PIPELINE_ROLE_ARN=$(jq -r '.sagemaker_pipeline_role_arn' ${{ env.CONFIG_FILE }})
+          GLUE_DATABASE=$(jq -r '.glue_database' ${{ env.CONFIG_FILE }})
+          GLUE_TABLE=$(jq -r '.glue_table' ${{ env.CONFIG_FILE }})
+          DATA_BUCKET_NAME=$(jq -r '.DataBucketName' ${{ env.CONFIG_FILE }})
+          GLUE_DATA_S3_KEY=$(jq -r '.glue_data_s3_key' ${{ env.CONFIG_FILE }})
+          MODEL_PACKAGE_GROUP_NAME=$(jq -r '.model_package_group_name' ${{ env.CONFIG_FILE }})
+          MLFLOW_TRACKING_URI=$(jq -r '.mlflow_tracking_uri' ${{ env.CONFIG_FILE }})
+          MLFLOW_EXPERIMENT_NAME=$(jq -r '.mlflow_experiment_name' ${{ env.CONFIG_FILE }})
+          
+          echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
+          echo "sagemaker_project_name=$SAGEMAKER_PROJECT_NAME" >> $GITHUB_OUTPUT
+          echo "sagemaker_pipeline_role_arn=$SAGEMAKER_PIPELINE_ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "glue_database=$GLUE_DATABASE" >> $GITHUB_OUTPUT
+          echo "glue_table=$GLUE_TABLE" >> $GITHUB_OUTPUT
+          echo "data_bucket_name=$DATA_BUCKET_NAME" >> $GITHUB_OUTPUT
+          echo "glue_data_s3_key=$GLUE_DATA_S3_KEY" >> $GITHUB_OUTPUT
+          echo "model_package_group_name=$MODEL_PACKAGE_GROUP_NAME" >> $GITHUB_OUTPUT
+          echo "mlflow_tracking_uri=$MLFLOW_TRACKING_URI" >> $GITHUB_OUTPUT
+          echo "mlflow_experiment_name=$MLFLOW_EXPERIMENT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_GITHUB_WORKFLOW }}
+          aws-region: ${{ steps.load_config.outputs.aws_region }}
+
+      - name: Upload Dataset to S3
+        run: |
+          GLUE_BUCKET="${{ steps.load_config.outputs.data_bucket_name }}"
+          S3_KEY="${{ steps.load_config.outputs.glue_data_s3_key }}"
+          
+          # Use glue bucket if provided, otherwise use artifact bucket
+          if [ -z "$GLUE_BUCKET" ] || [ "$GLUE_BUCKET" = "null" ]; then
+            export SAGEMAKER_PROJECT_ID=$(aws sagemaker describe-project \
+              --project-name ${{ steps.load_config.outputs.sagemaker_project_name }} \
+              --query ProjectId \
+              --output text)
+            GLUE_BUCKET=sagemaker-project-github-$SAGEMAKER_PROJECT_ID-${{ steps.load_config.outputs.aws_region }}
+          fi
+          
+          # Use default key if not provided
+          if [ -z "$S3_KEY" ] || [ "$S3_KEY" = "null" ]; then
+            S3_KEY="ml_pipelines/data/bank-marketing-dataset.csv"
+          fi
+          
+          cd model_build
+          aws s3 cp ml_pipelines/data/bank-marketing-dataset.csv s3://$GLUE_BUCKET/$S3_KEY
+
+      - name: Build SageMaker Pipeline
+        run: |
+          export SAGEMAKER_PROJECT_ID=$(aws sagemaker describe-project \
+            --project-name ${{ steps.load_config.outputs.sagemaker_project_name }} \
+            --query ProjectId \
+            --output text)
+          export SAGEMAKER_PROJECT_ARN=$(aws sagemaker describe-project \
+            --project-name ${{ steps.load_config.outputs.sagemaker_project_name }} \
+            --query ProjectArn \
+            --output text)
+          export ARTIFACT_BUCKET=sagemaker-project-github-$SAGEMAKER_PROJECT_ID-${{ steps.load_config.outputs.aws_region }}
+          export SAGEMAKER_PROJECT_NAME_ID="${{ steps.load_config.outputs.sagemaker_project_name }}-$SAGEMAKER_PROJECT_ID"
+          
+          # Use custom model package group name if provided, otherwise use project-based name
+          export MODEL_PACKAGE_GROUP_NAME="${{ steps.load_config.outputs.model_package_group_name }}"
+          if [ -z "$MODEL_PACKAGE_GROUP_NAME" ] || [ "$MODEL_PACKAGE_GROUP_NAME" = "null" ]; then
+            MODEL_PACKAGE_GROUP_NAME="${SAGEMAKER_PROJECT_NAME_ID}"
+          fi
+          export SAGEMAKER_PIPELINE_ROLE_ARN=${{ steps.load_config.outputs.sagemaker_pipeline_role_arn }}
+          export PYTHONPATH="${PYTHONPATH}:${PWD}/model_build"
+          
+          cd model_build
+          
+          # Build kwargs with optional MLflow parameters
+          KWARGS="{\"region\":\"${{ steps.load_config.outputs.aws_region }}\",\"sagemaker_project_arn\":\"${SAGEMAKER_PROJECT_ARN}\",\"role\":\"${SAGEMAKER_PIPELINE_ROLE_ARN}\",\"default_bucket\":\"${ARTIFACT_BUCKET}\",\"pipeline_name\":\"${SAGEMAKER_PROJECT_NAME_ID}\",\"model_package_group_name\":\"${MODEL_PACKAGE_GROUP_NAME}\",\"base_job_prefix\":\"${SAGEMAKER_PROJECT_NAME_ID}\",\"glue_database_name\":\"${{ steps.load_config.outputs.glue_database }}\",\"glue_table_name\":\"${{ steps.load_config.outputs.glue_table }}\""
+          
+          # Add MLflow parameters if configured
+          MLFLOW_URI="${{ steps.load_config.outputs.mlflow_tracking_uri }}"
+          MLFLOW_EXP="${{ steps.load_config.outputs.mlflow_experiment_name }}"
+          if [ -n "$MLFLOW_URI" ] && [ "$MLFLOW_URI" != "null" ]; then
+            KWARGS="${KWARGS},\"mlflow_tracking_uri\":\"$MLFLOW_URI\""
+          fi
+          if [ -n "$MLFLOW_EXP" ] && [ "$MLFLOW_EXP" != "null" ]; then
+            KWARGS="${KWARGS},\"mlflow_experiment_name\":\"$MLFLOW_EXP\""
+          fi
+          KWARGS="${KWARGS}}"
+          
+          python ml_pipelines/run_pipeline.py \
+            --module-name training.pipeline \
+            --role-arn ${SAGEMAKER_PIPELINE_ROLE_ARN} \
+            --tags "[{\"Key\":\"sagemaker:project-name\", \"Value\":\"${{ steps.load_config.outputs.sagemaker_project_name }}\"}, {\"Key\":\"sagemaker:project-id\", \"Value\":\"${SAGEMAKER_PROJECT_ID}\"}]" \
+            --kwargs "${KWARGS}"

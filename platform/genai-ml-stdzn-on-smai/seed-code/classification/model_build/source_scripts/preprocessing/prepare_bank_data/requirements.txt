@@ -1,0 +1,5 @@
+mlflow==3.4.0
+sagemaker-mlflow
+boto3
+awswrangler==2.16.1
+pymysql
