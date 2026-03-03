@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3-based MLOps template for Bank Marketing Classification using SageMaker and GitHub Actions with Glue Catalog integration'
+
+Parameters:
+  SageMakerProjectName:
+    Type: String
+    Description: Name of the project
+    MinLength: 1
+    MaxLength: 32
+    AllowedPattern: ^[a-zA-Z](-*[a-zA-Z0-9])*
+
+  SageMakerProjectId:
+    Type: String
+    Description: Service generated ID of the project
+
+  ModelBuildCodeRepositoryFullname:
+    Type: String
+    MaxLength: 1024
+    Description: Full repository name for Model Building (format owner/repo-name)
+    Default: your-github-username/bank-classification-mlops-build-repo
+
+  ModelDeployCodeRepositoryFullname:
+    Type: String
+    MaxLength: 1024
+    Description: Full repository name for Model Deployment (format owner/repo-name)
+    Default: your-github-username/bank-classification-mlops-deploy-repo
+
+  CodeConnectionArn:
+    Type: String
+    Description: CodeConnections ARN for GitHub authentication
+
+  GitHubWorkflowNameForDeployment:
+    Type: String
+    MaxLength: 1024
+    Default: deploy.yml
+    Description: GitHub workflow file name for deployment
+
+  SeedCodeBucketName:
+    Type: String
+    Description: S3 bucket name where seed code resides (bank-model-repo.zip)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Project Information"
+        Parameters:
+          - SageMakerProjectName
+          - SageMakerProjectId
+      - Label:
+          default: "GitHub Repository Configuration"
+        Parameters:
+          - ModelBuildCodeRepositoryFullname
+          - ModelDeployCodeRepositoryFullname
+          - CodeConnectionArn
+          - GitHubWorkflowNameForDeployment
+      - Label:
+          default: "Seed Code Configuration"
+        Parameters:
+          - SeedCodeBucketName
+
+Resources:
+  MlOpsArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub sagemaker-project-${SageMakerProjectId}
+
+  ModelDeployLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !Join 
+        - ':'
+        - - 'arn'
+          - !Ref 'AWS::Partition'
+          - 'iam:'
+          - !Ref 'AWS::AccountId'
+          - 'role/service-role/AmazonSageMakerServiceCatalogProductsLambdaRole'
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import urllib.request
+          import urllib.error
+
+          def lambda_handler(event, context):
+              print(f"Received event: {json.dumps(event)}")
+              
+              repo_fullname = os.environ['GITHUB_REPO_FULLNAME']
+              workflow_name = os.environ['GITHUB_WORKFLOW_NAME']
+              repo_owner, repo_name = repo_fullname.split('/', 1)
+              
+              # Get PAT from Secrets Manager
+              secrets = boto3.client('secretsmanager')
+              try:
+                  response = secrets.get_secret_value(SecretId='github/pat-for-workflow-trigger')
+                  github_token = response['SecretString']
+              except Exception as e:
+                  print(f"Error retrieving GitHub token: {e}")
+                  raise
+              
+              # Trigger GitHub Actions workflow
+              url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/actions/workflows/{workflow_name}/dispatches"
+              
+              data = json.dumps({
+                  "ref": "main",
+                  "inputs": {
+                      "model_package_group_name": event.get('detail', {}).get('ModelPackageGroupName', ''),
+                      "model_package_arn": event.get('detail', {}).get('ModelPackageArn', '')
+                  }
+              }).encode('utf-8')
+              
+              headers = {
+                  'Authorization': f'token {github_token}',
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Content-Type': 'application/json'
+              }
+              
+              req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+              
+              try:
+                  with urllib.request.urlopen(req) as response:
+                      print(f"GitHub Actions workflow triggered successfully: {response.status}")
+                      return {
+                          'statusCode': 200,
+                          'body': json.dumps('Workflow triggered successfully')
+                      }
+              except urllib.error.HTTPError as e:
+                  error_body = e.read().decode()
+                  print(f"Error triggering workflow: {e.code} - {error_body}")
+                  raise e
+      Environment:
+        Variables:
+          GITHUB_REPO_FULLNAME: !Ref ModelDeployCodeRepositoryFullname
+          GITHUB_WORKFLOW_NAME: !Ref GitHubWorkflowNameForDeployment
+
+  EventBridgeInvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ModelDeployLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ModelApprovalEventRule.Arn
+
+  ModelApprovalEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${SageMakerProjectName}-model-approval
+      Description: Trigger deployment when model is approved
+      EventPattern:
+        source:
+          - aws.sagemaker
+        detail-type:
+          - SageMaker Model Package State Change
+        detail:
+          ModelPackageGroupName:
+            - bank-classification-model-group
+          ModelApprovalStatus:
+            - Approved
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ModelDeployLambda.Arn
+          Id: ModelDeploymentTarget
+
+  SageMakerCodeRepository:
+    Type: AWS::SageMaker::CodeRepository
+    Properties:
+      CodeRepositoryName: !Sub sagemaker-${SageMakerProjectId}-modelbuild
+      GitConfig:
+        RepositoryUrl: !Sub https://github.com/${ModelBuildCodeRepositoryFullname}
+
+  # Seed Code Automation
+  GitSeedCodeCheckinProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub sagemaker-${SageMakerProjectName}-${SageMakerProjectId}-git-seedcodecheckin
+      Description: Checkin the initial seedcode into the given repository
+      ServiceRole: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsCodeBuildRole
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: SeedCodeBucket
+            Value: !Ref SeedCodeBucketName
+          - Name: ModelBuildSeedCode
+            Value: bank-model-build-repo.zip
+          - Name: ModelDeploySeedCode
+            Value: bank-model-deploy-repo.zip
+          - Name: SourceModelBuildCodeRepositoryBranch
+            Value: main
+          - Name: SourceModelDeployCodeRepositoryBranch
+            Value: main
+          - Name: SourceModelBuildCodeRepositoryFullname
+            Value: !Ref ModelBuildCodeRepositoryFullname
+          - Name: SourceModelDeployCodeRepositoryFullname
+            Value: !Ref ModelDeployCodeRepositoryFullname
+          - Name: CodestarConnectionArn
+            Value: !Ref CodeConnectionArn
+      Source:
+        Type: S3
+        Location: !Sub sagemaker-servicecatalog-seedcode-${AWS::Region}/bootstrap/GitRepositorySeedCodeCheckinCodeBuildProject-v1.1.zip
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 14
+
+  GitSeedCodeCheckinProjectTriggerLambda:
+    DependsOn: GitSeedCodeCheckinProject
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Trigger CodeBuild project for seedcode checkin
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      FunctionName: !Sub sagemaker-${SageMakerProjectId}-git-seedcodecheckin
+      Timeout: 900
+      Role: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsLambdaRole
+      Environment:
+        Variables:
+          MODEL_BUILD_REPO: !Ref ModelBuildCodeRepositoryFullname
+          MODEL_DEPLOY_REPO: !Ref ModelDeployCodeRepositoryFullname
+          CODE_CONNECTION_ARN: !Ref CodeConnectionArn
+          SEED_CODE_BUCKET: !Ref SeedCodeBucketName
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import time
+          import os
+          from botocore.exceptions import ClientError
+
+          def lambda_handler(event, context):
+            responseData = {}
+            if event['RequestType'] == 'Create':
+              try:
+                time.sleep(20)
+                print("Starting seed code checkin")
+                client = boto3.client('codebuild')
+                
+                # Parse connection ARN
+                connection_arn = os.environ['CODE_CONNECTION_ARN']
+                arn_parts = connection_arn.split(':')
+                region = arn_parts[3]
+                account = arn_parts[4]
+                connection_id = arn_parts[5].split('/')[-1]
+                
+                # Get connection URL prefix
+                url_prefix = 'codestar-connections' if 'codestar-connections' in connection_arn else 'codeconnections'
+                
+                # Start build for model-build repo
+                build_repo_url = f'https://{url_prefix}.{region}.amazonaws.com/git-http/{account}/{region}/{connection_id}/{os.environ["MODEL_BUILD_REPO"]}.git'
+                response = client.start_build(
+                  projectName=event['ResourceProperties']['ProjectName'],
+                  environmentVariablesOverride=[
+                    {'name': 'GIT_REPOSITORY_BRANCH', 'value': 'main', 'type': 'PLAINTEXT'},
+                    {'name': 'GIT_REPOSITORY_URL', 'value': build_repo_url, 'type': 'PLAINTEXT'}
+                  ],
+                  secondarySourcesOverride=[
+                    {
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/bank-model-build-repo.zip',
+                      'type': 'S3',
+                      'sourceIdentifier': 'source'
+                    }
+                  ]
+                )
+                print(f"Build repo CodeBuild started: {response['build']['id']}")
+                
+                # Start build for model-deploy repo
+                deploy_repo_url = f'https://{url_prefix}.{region}.amazonaws.com/git-http/{account}/{region}/{connection_id}/{os.environ["MODEL_DEPLOY_REPO"]}.git'
+                response2 = client.start_build(
+                  projectName=event['ResourceProperties']['ProjectName'],
+                  environmentVariablesOverride=[
+                    {'name': 'GIT_REPOSITORY_BRANCH', 'value': 'main', 'type': 'PLAINTEXT'},
+                    {'name': 'GIT_REPOSITORY_URL', 'value': deploy_repo_url, 'type': 'PLAINTEXT'}
+                  ],
+                  secondarySourcesOverride=[
+                    {
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/bank-model-deploy-repo.zip',
+                      'type': 'S3',
+                      'sourceIdentifier': 'source'
+                    }
+                  ]
+                )
+                print(f"Deploy repo CodeBuild started: {response2['build']['id']}")
+                
+                responseData['BuildId'] = response['build']['id']
+                responseData['DeployBuildId'] = response2['build']['id']
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+              except ClientError as e:
+                print(f"Error: {e}")
+                cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+            else:
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+
+  TriggerGitSeedCodeCheckin:
+    Type: Custom::TriggerLambda
+    DependsOn: GitSeedCodeCheckinProjectTriggerLambda
+    Properties:
+      ServiceToken: !GetAtt GitSeedCodeCheckinProjectTriggerLambda.Arn
+      ProjectName: !Ref GitSeedCodeCheckinProject
+
+Outputs:
+  ArtifactBucket:
+    Description: S3 bucket for ML artifacts
+    Value: !Ref MlOpsArtifactsBucket
+
+  LambdaFunctionArn:
+    Description: Lambda function ARN for GitHub workflow trigger
+    Value: !GetAtt ModelDeployLambda.Arn
+
+  EventRuleArn:
+    Description: EventBridge rule ARN
+    Value: !GetAtt ModelApprovalEventRule.Arn
+
+  CodeRepositoryName:
+    Description: SageMaker code repository name
+    Value: !GetAtt SageMakerCodeRepository.CodeRepositoryName
+
+  ModelPackageGroupName:
+    Description: Use this exact name when registering models in your pipeline - bank-classification-model-group
+    Value: bank-classification-model-group
