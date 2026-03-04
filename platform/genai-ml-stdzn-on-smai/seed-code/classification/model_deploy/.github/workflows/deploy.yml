@@ -3,24 +3,6 @@
 name: Sagemaker Model Deploy Pipeline 
 run-name: ${{ github.actor }} is deploying a new model to SageMaker
 
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - model_deploy/config/deploy_config.json
-  workflow_dispatch:
-    inputs:
-      logLevel:
-        description: 'Log level'
-        required: true
-        default: 'warning'
-        type: choice
-        options:
-          - info
-          - warning
-          - debug
-
 permissions:
   id-token: write
   contents: read
