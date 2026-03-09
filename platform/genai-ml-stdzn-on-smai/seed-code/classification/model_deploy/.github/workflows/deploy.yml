@@ -4,6 +4,11 @@ name: Sagemaker Model Deploy Pipeline
 run-name: ${{ github.actor }} is deploying a new model to SageMaker
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - model_deploy/config/deploy_config.json
   workflow_dispatch:
     inputs:
       model_package_group_name:
@@ -16,7 +21,7 @@ on:
         type: string
       logLevel:
         description: 'Log level'
-        required: true
+        required: false
         default: 'warning'
         type: choice
         options:
@@ -51,23 +56,14 @@ jobs:
     - name: Load Configuration
       id: load_config
       run: |
-        # Load from config file
         AWS_REGION=$(jq -r '.aws_region' ${{ env.CONFIG_FILE }})
         DEPLOY_ACCOUNT=$(jq -r '.deploy_account' ${{ env.CONFIG_FILE }})
-        DATA_BUCKET_NAME=$(jq -r '.data_bucket' ${{ env.CONFIG_FILE }})
-        
-        # Use Lambda inputs if provided, otherwise use config file
-        MODEL_PACKAGE_GROUP_NAME="${{ github.event.inputs.model_package_group_name }}"
-        MODEL_PACKAGE_ARN="${{ github.event.inputs.model_package_arn }}"
-        
-        if [ -z "$MODEL_PACKAGE_GROUP_NAME" ]; then
-          MODEL_PACKAGE_GROUP_NAME=$(jq -r '.model_package_group_name' ${{ env.CONFIG_FILE }})
-        fi
+        MODEL_PACKAGE_GROUP_NAME=$(jq -r '.model_package_group_name' ${{ env.CONFIG_FILE }})
+        DATA_BUCKET_NAME=$(jq -r '.DataBucketName' ${{ env.CONFIG_FILE }})
         
         echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
         echo "deploy_account=$DEPLOY_ACCOUNT" >> $GITHUB_OUTPUT
         echo "model_package_group_name=$MODEL_PACKAGE_GROUP_NAME" >> $GITHUB_OUTPUT
-        echo "model_package_arn=$MODEL_PACKAGE_ARN" >> $GITHUB_OUTPUT
         echo "data_bucket_name=$DATA_BUCKET_NAME" >> $GITHUB_OUTPUT
 
     - name: Configure Dev Account AWS Credentials
