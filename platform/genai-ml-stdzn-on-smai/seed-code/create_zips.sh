@@ -2,7 +2,7 @@
 
 # Get the directory where the script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEED_CODE_DIR="$SCRIPT_DIR/seed-code/bank-classification"
+SEED_CODE_DIR="$SCRIPT_DIR/classification"
 
 cd "$SEED_CODE_DIR"
 

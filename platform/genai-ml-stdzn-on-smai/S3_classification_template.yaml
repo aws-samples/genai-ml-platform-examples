@@ -37,7 +37,7 @@ Parameters:
 
   SeedCodeBucketName:
     Type: String
-    Description: S3 bucket name where seed code resides (bank-model-repo.zip)
+    Description: S3 bucket name where seed code resides (classification-model-repo.zip)
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -191,9 +191,9 @@ Resources:
           - Name: SeedCodeBucket
             Value: !Ref SeedCodeBucketName
           - Name: ModelBuildSeedCode
-            Value: bank-model-build-repo.zip
+            Value: classification-model-build-repo.zip
           - Name: ModelDeploySeedCode
-            Value: bank-model-deploy-repo.zip
+            Value: classification-model-deploy-repo.zip
           - Name: SourceModelBuildCodeRepositoryBranch
             Value: main
           - Name: SourceModelDeployCodeRepositoryBranch
@@ -262,7 +262,7 @@ Resources:
                   ],
                   secondarySourcesOverride=[
                     {
-                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/bank-model-build-repo.zip',
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/classification-model-build-repo.zip',
                       'type': 'S3',
                       'sourceIdentifier': 'source'
                     }
@@ -280,7 +280,7 @@ Resources:
                   ],
                   secondarySourcesOverride=[
                     {
-                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/bank-model-deploy-repo.zip',
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/classification-model-deploy-repo.zip',
                       'type': 'S3',
                       'sourceIdentifier': 'source'
                     }
