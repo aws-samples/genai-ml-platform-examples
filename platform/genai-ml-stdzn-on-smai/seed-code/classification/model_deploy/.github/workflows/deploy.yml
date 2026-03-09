@@ -11,9 +11,17 @@ on:
       - model_deploy/config/deploy_config.json
   workflow_dispatch:
     inputs:
+      model_package_group_name:
+        description: 'Model Package Group Name'
+        required: false
+        type: string
+      model_package_arn:
+        description: 'Model Package ARN'
+        required: false
+        type: string
       logLevel:
         description: 'Log level'
-        required: true
+        required: false
         default: 'warning'
         type: choice
         options:
