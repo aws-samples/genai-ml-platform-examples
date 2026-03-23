@@ -14,7 +14,9 @@ examples/basic_usage.py
 examples/generate_admin_config.py
 examples/sagemaker_operations.py
 examples/xgboost_training_example.ipynb
+examples/xgboost_training_example_xacct.ipynb
 examples/xgboost_training_script.py
+examples/xgboost_training_script_xacct.py
 mlp_sdk/__init__.py
 mlp_sdk/config.py
 mlp_sdk/exceptions.py
