@@ -627,7 +627,112 @@ class MLP_Session:
                 self.audit_trail.record("run_training_job", "failed",
                                       name=job_name, error=str(e))
             raise
-        
+
+    def run_training_job_xacct(self,
+                               job_name: str,
+                               target_role_arn: str,
+                               training_image: str,
+                               source_code_dir: Optional[str] = None,
+                               entry_script: Optional[str] = None,
+                               requirements: Optional[str] = None,
+                               inputs: Optional[Dict[str, Any]] = None,
+                               session_name: Optional[str] = None,
+                               external_id: Optional[str] = None,
+                               duration_seconds: int = 3600,
+                               **kwargs):
+        """
+        Execute training job in another AWS account by assuming a cross-account IAM role.
+
+        Assumes the specified target role via STS, creates a new session with
+        temporary credentials, and runs the training job in the target account.
+
+        Args:
+            job_name: Training job name (used as base_job_name)
+            target_role_arn: IAM role ARN in the target account to assume
+            training_image: Container image URI for training
+            source_code_dir: Directory containing training script and dependencies
+            entry_script: Entry point script for training (e.g., 'train.py')
+            requirements: Path to requirements.txt file for dependencies
+            inputs: Training data inputs (dict of channel_name: S3 path)
+            session_name: Optional STS session name (defaults to job_name)
+            external_id: Optional external ID required by the target role's trust policy
+            duration_seconds: Assumed role credential duration in seconds (default 3600)
+            **kwargs: Additional training job parameters that override defaults
+                     (e.g., hyperparameters, environment, role_arn for execution role,
+                      target_region for running in a different region)
+
+        Returns:
+            ModelTrainer object running in the target account
+
+        Raises:
+            ValidationError: If required parameters are missing or invalid
+            SessionError: If session is not initialized
+            AWSServiceError: If STS assume-role or training job execution fails
+
+        Example:
+            >>> session = MLP_Session()
+            >>> trainer = session.run_training_job_xacct(
+            ...     job_name='xacct-training-job',
+            ...     target_role_arn='arn:aws:iam::<target_account_id>:role/SageMakerCrossAccountRole',
+            ...     training_image='763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-training:2.0.0-cpu-py310',
+            ...     role_arn='arn:aws:iam::<target_account_id>:role/SageMakerExecutionRole',
+            ...     source_code_dir='training-scripts',
+            ...     entry_script='train.py',
+            ...     inputs={'train': 's3://target-account-bucket/data/train/'}
+            ... )
+        """
+        if not self._sagemaker_session:
+            raise SessionError("SageMaker session is not initialized")
+
+        if not job_name or not isinstance(job_name, str):
+            raise ValidationError("job_name must be a non-empty string")
+
+        if not target_role_arn or not isinstance(target_role_arn, str):
+            raise ValidationError("target_role_arn must be a non-empty string")
+
+        if not training_image or not isinstance(training_image, str):
+            raise ValidationError("training_image must be a non-empty string")
+
+        self.logger.info("run_training_job_xacct called",
+                         name=job_name, target_role_arn=target_role_arn)
+
+        if self.audit_trail is not None:
+            self.audit_trail.record("run_training_job_xacct", "started",
+                                    name=job_name, target_role_arn=target_role_arn)
+
+        try:
+            trainer = self._training_wrapper.run_training_job_xacct(
+                sagemaker_session=self._sagemaker_session,
+                job_name=job_name,
+                target_role_arn=target_role_arn,
+                training_image=training_image,
+                source_code_dir=source_code_dir,
+                entry_script=entry_script,
+                requirements=requirements,
+                inputs=inputs,
+                session_name=session_name,
+                external_id=external_id,
+                duration_seconds=duration_seconds,
+                **kwargs
+            )
+
+            if self.audit_trail is not None:
+                self.audit_trail.record("run_training_job_xacct", "completed",
+                                        name=job_name, target_role_arn=target_role_arn)
+
+            return trainer
+
+        except (ValidationError, SessionError) as e:
+            if self.audit_trail is not None:
+                self.audit_trail.record("run_training_job_xacct", "failed",
+                                        name=job_name, error=str(e))
+            raise
+        except Exception as e:
+            if self.audit_trail is not None:
+                self.audit_trail.record("run_training_job_xacct", "failed",
+                                        name=job_name, error=str(e))
+            raise
+
     def deploy_model(self,
                     model_data: str,
                     image_uri: str,

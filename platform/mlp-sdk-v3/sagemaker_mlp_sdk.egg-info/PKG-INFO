@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: sagemaker-mlp-sdk
-Version: 0.1.0
+Version: 0.1.1
 Summary: A Python wrapper library for SageMaker SDK v3 with configuration-driven defaults
 Author-email: Ram Vittal <rvvittal@amazon.com>
 License: MIT

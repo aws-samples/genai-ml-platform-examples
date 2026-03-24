@@ -203,6 +203,10 @@ class TrainingWrapper:
         if networking_params:
             trainer_params['networking'] = Networking(**networking_params)
         
+        # Pass sagemaker_session so ModelTrainer uses the correct account/credentials
+        if sagemaker_session is not None:
+            trainer_params['sagemaker_session'] = sagemaker_session
+
         # Create ModelTrainer
         model_trainer = ModelTrainer(**trainer_params)
         
@@ -266,6 +270,138 @@ class TrainingWrapper:
                 f"Failed to run training job '{job_name}': {e}",
                 aws_error=e
             ) from e
+
+
+    def run_training_job_xacct(self,
+                               sagemaker_session,
+                               job_name: str,
+                               target_role_arn: str,
+                               training_image: Optional[str] = None,
+                               source_code_dir: Optional[str] = None,
+                               entry_script: Optional[str] = None,
+                               requirements: Optional[str] = None,
+                               inputs: Optional[Dict[str, Any]] = None,
+                               session_name: Optional[str] = None,
+                               external_id: Optional[str] = None,
+                               duration_seconds: int = 3600,
+                               **kwargs) -> Any:
+        """
+        Execute training job in another AWS account by assuming a cross-account IAM role.
+
+        Assumes the specified target role via STS, creates a new boto3 session with
+        the temporary credentials, and delegates to run_training_job using that session.
+
+        Args:
+            sagemaker_session: Caller's SageMaker session (used to derive region)
+            job_name: Name of the training job (used as base_job_name)
+            target_role_arn: IAM role ARN in the target account to assume
+            training_image: Container image URI for training
+            source_code_dir: Directory containing training script and dependencies
+            entry_script: Entry point script for training (e.g., 'train.py')
+            requirements: Path to requirements.txt file for dependencies
+            inputs: Training data inputs (S3 paths or InputData objects)
+            session_name: Optional STS session name (defaults to job_name)
+            external_id: Optional external ID required by the target role's trust policy
+            duration_seconds: Assumed role credential duration in seconds (default 3600)
+            **kwargs: Additional parameters passed to run_training_job
+                     (e.g., hyperparameters, environment, role_arn for execution role)
+
+        Returns:
+            ModelTrainer object running in the target account
+
+        Raises:
+            ValidationError: If required parameters are missing or invalid
+            AWSServiceError: If STS assume-role or training job execution fails
+        """
+        self.logger.info("Running cross-account training job",
+                         name=job_name, target_role_arn=target_role_arn)
+
+        # Validate cross-account specific parameters
+        if not target_role_arn:
+            raise ValidationError("target_role_arn is required for cross-account training")
+
+        if not isinstance(target_role_arn, str) or not target_role_arn.startswith('arn:aws:iam::'):
+            raise ValidationError(
+                f"Invalid target_role_arn format: {target_role_arn}. "
+                "Must be a valid IAM role ARN (arn:aws:iam::<account_id>:role/<role_name>)"
+            )
+
+        if duration_seconds < 900 or duration_seconds > 43200:
+            raise ValidationError(
+                f"duration_seconds must be between 900 and 43200, got {duration_seconds}"
+            )
+
+        try:
+            import boto3
+            from botocore.exceptions import ClientError
+        except ImportError as e:
+            raise MLPSDKError("boto3 is required for cross-account access") from e
+
+        # Assume role in target account
+        try:
+            sts_client = boto3.client('sts')
+
+            assume_role_params = {
+                'RoleArn': target_role_arn,
+                'RoleSessionName': session_name or f"mlp-xacct-{job_name}"[:64],
+                'DurationSeconds': duration_seconds,
+            }
+            if external_id:
+                assume_role_params['ExternalId'] = external_id
+
+            self.logger.debug("Assuming cross-account role", target_role_arn=target_role_arn)
+            sts_response = sts_client.assume_role(**assume_role_params)
+            credentials = sts_response['Credentials']
+
+            self.logger.info("Successfully assumed cross-account role",
+                             target_role_arn=target_role_arn,
+                             assumed_role_id=sts_response['AssumedRoleUser']['AssumedRoleId'])
+
+        except ClientError as e:
+            self.logger.error("Failed to assume cross-account role",
+                              target_role_arn=target_role_arn, error=e)
+            raise AWSServiceError(
+                f"Failed to assume role '{target_role_arn}': {e}",
+                aws_error=e
+            ) from e
+
+        # Create a SageMaker session with the assumed role credentials
+        try:
+            from sagemaker.core.helper.session_helper import Session
+
+            target_region = kwargs.pop('target_region', None) or boto3.Session().region_name
+
+            xacct_boto_session = boto3.Session(
+                aws_access_key_id=credentials['AccessKeyId'],
+                aws_secret_access_key=credentials['SecretAccessKey'],
+                aws_session_token=credentials['SessionToken'],
+                region_name=target_region,
+            )
+
+            xacct_sagemaker_session = Session(boto_session=xacct_boto_session)
+
+            self.logger.debug("Created cross-account SageMaker session",
+                              region=target_region)
+
+        except Exception as e:
+            self.logger.error("Failed to create cross-account session", error=e)
+            raise AWSServiceError(
+                f"Failed to create cross-account SageMaker session: {e}",
+                aws_error=e
+            ) from e
+
+        # Delegate to run_training_job with the cross-account session
+        return self.run_training_job(
+            sagemaker_session=xacct_sagemaker_session,
+            job_name=job_name,
+            training_image=training_image,
+            source_code_dir=source_code_dir,
+            entry_script=entry_script,
+            requirements=requirements,
+            inputs=inputs,
+            **kwargs
+        )
+
     
     def _build_training_config(self, runtime_params: Dict[str, Any]) -> Dict[str, Any]:
         """
