@@ -1,5 +1,5 @@
 # Core AWS and ML packages
-sagemaker==2.253.1
+sagemaker==2.256.0
 boto3>=1.40.65
 botocore>=1.40.65
 
