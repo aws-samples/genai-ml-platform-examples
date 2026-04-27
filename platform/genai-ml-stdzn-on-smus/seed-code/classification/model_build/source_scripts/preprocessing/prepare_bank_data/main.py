@@ -24,7 +24,8 @@ logger.addHandler(logging.StreamHandler())
 
 # Bank marketing dataset features
 numeric_features = ["age", "duration", "campaign", "pdays", "previous",
-                   "emp.var.rate", "cons.price.idx", "cons.conf.idx", "euribor3m", "nr.employed"]
+    "emp_var_rate", "cons_price_idx", "cons_conf_idx", "euribor3m", "nr_employed"]
+
 categorical_features = ["job", "marital", "education", "default", "housing", "loan",
                        "contact", "month", "day_of_week", "poutcome"]
 label_column = "y"
@@ -81,6 +82,11 @@ if __name__ == "__main__":
             """ 
             *** We are subscribing to S3 iceberg table and need to use pyiceberg to read *** 
 
+
+        
+            """ 
+            *** We are subscribing to S3 iceberg table and need to use pyiceberg to read *** 
+
             logger.info(f"Getting table location for {args.database_name}.{args.table_name}")
             s3_location = wr.catalog.get_table_location(
                 database=args.database_name,
@@ -108,7 +114,7 @@ if __name__ == "__main__":
                 "glue",
                 **{
                     "type": "glue",
-                    "region_name": region,
+                    "glue.region": region,
                 }
             )
             table_identifier = f"{args.database_name}.{args.table_name}"
@@ -182,4 +188,3 @@ if __name__ == "__main__":
     finally:
         if tracking_uri:
             mlflow.end_run()
-

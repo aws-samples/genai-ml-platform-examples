@@ -79,9 +79,13 @@ jobs:
     - name: Create Requirements Directory
       run: |
         mkdir -p source_scripts/preprocessing/prepare_bank_data/requirements
-        echo "awswrangler==2.16.1" > source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
+        echo "PyJWT==2.7.0" > source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
+        echo "awswrangler==2.16.1" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
         echo "pymysql" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
         echo "pandas==1.1.3" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
+        echo "mlflow==3.4.0" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
+        echo "sagemaker-mlflow==0.2.0" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
+        echo "pyiceberg[glue]>=0.7.0" >> source_scripts/preprocessing/prepare_bank_data/requirements/requirements.txt
     - name: Upload Files to S3
       run: |
         # Upload dataset

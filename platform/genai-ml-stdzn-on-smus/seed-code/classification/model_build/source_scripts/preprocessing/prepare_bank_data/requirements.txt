@@ -1,6 +1,8 @@
+PyJWT==2.7.0
+pyarrow>=9.0.0,<18.0.0
 mlflow==3.4.0
-sagemaker-mlflow
+sagemaker-mlflow==0.2.0
 boto3
-awswrangler==2.16.1
+awswrangler>=3.0.0
 pymysql
 pyiceberg[glue]>=0.7.0
