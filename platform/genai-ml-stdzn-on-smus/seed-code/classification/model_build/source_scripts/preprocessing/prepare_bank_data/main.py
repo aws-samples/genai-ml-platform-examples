@@ -82,11 +82,6 @@ if __name__ == "__main__":
             """ 
             *** We are subscribing to S3 iceberg table and need to use pyiceberg to read *** 
 
-
-        
-            """ 
-            *** We are subscribing to S3 iceberg table and need to use pyiceberg to read *** 
-
             logger.info(f"Getting table location for {args.database_name}.{args.table_name}")
             s3_location = wr.catalog.get_table_location(
                 database=args.database_name,
