@@ -1,0 +1,2030 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  This template creates a VPC with public and private subnets, Internet Gateway, NAT Gateway,
+  VPC endpoints, SageMaker Domain with user profiles, Serverless MLflow Tracking Server, and S3 access grants configuration.
+  Private subnets host SageMaker resources and have outbound internet access via NAT Gateway.
+  Includes MLflow for experiment tracking and model management.
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: 'smai-project-a'
+    Description: 'Project name (must be lowercase letters, numbers, and hyphens only)'
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: 'ProjectName must contain only lowercase letters, numbers, and hyphens'
+
+  VpcCIDR:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Default:  10.0.0.0/16
+
+  PrivateSubnetCIDR:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Default: 10.0.1.0/24
+
+  PrivateSubnet2CIDR:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Default: 10.0.2.0/24
+
+  PublicSubnetCIDR:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Default: 10.0.3.0/24
+
+  JupyterLabAppInstance:
+    Type: String
+    Description: Name of an ML instance to run JupyterLab App space
+    Default: 'ml.m5.2xlarge'
+
+  UserAProfileName:
+    Type: String
+    Description: Name for User A profile
+    Default: 'userA'
+
+  UserBProfileName:
+    Type: String
+    Description: Name for User B profile
+    Default: 'userB'
+
+  SeedCodeType:
+    Type: String
+    Description: Type of seed code to use for SageMaker projects
+    Default: 'llm-fine-tuning'
+    AllowedValues:
+      - regression
+      - llm-fine-tuning
+      - classification
+
+Resources:
+
+# Network
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-vpc
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PrivateSubnetCIDR
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub  "${AWS::Region}a"
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-private-subnet
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub  "${AWS::Region}b"
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-private-subnet-2
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PublicSubnetCIDR
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub  "${AWS::Region}a"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-subnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nat-eip
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nat-gateway
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: security group for SageMaker notebook instance, training jobs and hosting endpoint
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic to Internet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-security-group
+
+  SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: '-1'
+      GroupId: !Ref SecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+      Description: Allow traffic within security group
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-private-rt
+
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NATGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow TLS for VPC Endpoint
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic from VPC Endpoints
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-endpoint-security-group
+
+  EndpointSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      GroupId: !Ref VPCEndpointSecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+
+  EndpointSecurityGroupIngressFromVPC:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      GroupId: !Ref VPCEndpointSecurityGroup
+      CidrIp: !Ref VpcCIDR
+      Description: Allow HTTPS from VPC CIDR
+
+  VPCEndpointS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      VpcId: !Ref VPC
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:ListBucket"
+              - "s3:DeleteObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketLocation"
+              - "s3:ListAllMyBuckets"
+              - "s3:CreateBucket"
+            Resource: "arn:aws:s3:::*"
+          - Effect: Allow
+            Principal: "*"
+            Action: "s3:GetDataAccess"
+            Resource: !Sub "arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default"
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
+
+  VPCEndpointS3Id:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Name: !Sub "ds-s3-endpoint-${ProjectName}-id"
+      Type: String
+      Value: !Ref VPCEndpointS3
+      Description: S3 VPC Endpoint ID
+
+  VPCEndpointSagemakerAPI:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sagemaker.api'
+      VpcId: !Ref VPC
+
+  VPCEndpointSageMakerRuntime:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sagemaker.runtime'
+      VpcId: !Ref VPC
+
+  VPCEndpointSageMakerStudio:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'aws.sagemaker.${AWS::Region}.studio'
+      VpcId: !Ref VPC
+
+  VPCEndpointSTS:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sts'
+      VpcId: !Ref VPC
+
+  VPCEndpointSSM:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref VPC
+
+  VPCEndpointCW:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.monitoring'
+      VpcId: !Ref VPC
+
+  VPCEndpointCWL:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcId: !Ref VPC
+
+  VPCEndpointECR:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcId: !Ref VPC
+
+  VPCEndpointECRAPI:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: '*'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcId: !Ref VPC
+
+# IAM Policies
+  S3GetDataPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-s3-data-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetDataAccess"
+            Resource:
+              - !Sub "arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default"
+      Roles:
+        - !Ref ProductSageMakerExecutionRole
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+
+  S3AccessGrantsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-ag-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ObjectLevelReadPermissions
+            Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetObjectAcl"
+              - "s3:GetObjectVersionAcl"
+              - "s3:ListMultipartUploadParts"
+            Resource:
+              - "arn:aws:s3:::*"
+            Condition:
+              StringEquals:
+                "aws:ResourceAccount": !Ref "AWS::AccountId"
+              ArnEquals:
+                "s3:AccessGrantsInstanceArn":
+                  - !Sub "arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default"
+          - Sid: ObjectLevelWritePermissions
+            Effect: Allow
+            Action:
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+              - "s3:PutObjectVersionAcl"
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+              - "s3:AbortMultipartUpload"
+            Resource:
+              - "arn:aws:s3:::*"
+            Condition:
+              StringEquals:
+                "aws:ResourceAccount": !Ref "AWS::AccountId"
+              ArnEquals:
+                "s3:AccessGrantsInstanceArn":
+                  - !Sub "arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default"
+          - Sid: BucketLevelReadPermissions
+            Effect: Allow
+            Action:
+              - "s3:ListBucket"
+            Resource:
+              - "arn:aws:s3:::*"
+            Condition:
+              StringEquals:
+                "aws:ResourceAccount": !Ref "AWS::AccountId"
+              ArnEquals:
+                "s3:AccessGrantsInstanceArn":
+                  - !Sub "arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default"
+      Roles:
+        - !Ref ProductSageMakerExecutionRole
+
+  SageMakerStudioUserPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-studio-user-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SMStudioCreatePresignedDomainUrlForUserProfile
+            Effect: Allow
+            Action:
+              - "sagemaker:CreatePresignedDomainUrl"
+            Resource: "*"
+          - Sid: SMStudioAppPermissionsListAndDescribe
+            Effect: Allow
+            Action:
+              - "sagemaker:ListApps"
+              - "sagemaker:ListDomains"
+              - "sagemaker:ListUserProfiles"
+              - "sagemaker:ListSpaces"
+              - "sagemaker:DescribeApp"
+              - "sagemaker:DescribeDomain"
+              - "sagemaker:DescribeUserProfile"
+              - "sagemaker:DescribeSpace"
+            Resource: "*"
+          - Sid: KMSAccess
+            Effect: Allow
+            Action:
+              - "kms:CreateGrant"
+              - "kms:Decrypt"
+              - "kms:DescribeKey"
+              - "kms:Encrypt"
+              - "kms:GenerateDataKey"
+              - "kms:ListAliases"
+            Resource: "*"
+          - Sid: S3LocalDataAccess
+            Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:ListBucket"
+              - "s3:GetObjectTagging"
+              - "s3:PutObjectTagging"
+              - "s3:PutBucketTagging"
+            Resource:
+              - !Sub "arn:aws:s3:::${ProjectName}-data-${AWS::AccountId}-${AWS::Region}"
+              - !Sub "arn:aws:s3:::${ProjectName}-data-${AWS::AccountId}-${AWS::Region}/*"
+              - !Sub "arn:aws:s3:::${ProjectName}-grants-${AWS::AccountId}-${AWS::Region}"
+              - !Sub "arn:aws:s3:::${ProjectName}-grants-${AWS::AccountId}-${AWS::Region}/*"
+              - "arn:aws:s3:::aws-ml-blog/artifacts/sm-ai-gov-workshop/*"
+              - "arn:aws:s3:::sagemaker-project-*"
+          
+          - Sid: EventsRuleAll
+            Effect: Allow
+            Action:
+              - "events:*"
+            Resource:
+              - !Sub "arn:aws:events:us-east-1:${AWS::AccountId}:rule/*"
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+
+# Sagemaker CommonJobManagement Policy 
+  SageMakerCommonJobManagementPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+            - sagemaker:CreateTrainingJob
+            - sagemaker:CreateTransformJob
+            - sagemaker:CreateProcessingJob
+            - sagemaker:CreateAutoMLJob
+            - sagemaker:CreateHyperParameterTuningJob
+            - sagemaker:StopTrainingJob
+            - sagemaker:StopProcessingJob
+            - sagemaker:StopAutoMLJob
+            - sagemaker:StopHyperParameterTuningJob
+            - sagemaker:DescribeTrainingJob
+            - sagemaker:DescribeTransformJob
+            - sagemaker:DescribeProcessingJob
+            - sagemaker:DescribeAutoMLJob
+            - sagemaker:DescribeHyperParameterTuningJob
+            - sagemaker:UpdateTrainingJob
+            - sagemaker:BatchGetMetrics
+            Resource: arn:aws:sagemaker:*:*:*/*
+          - Effect: Allow
+            Action:
+            - sagemaker:Search
+            - sagemaker:ListTrainingJobs
+            - sagemaker:ListTransformJobs
+            - sagemaker:ListProcessingJobs
+            - sagemaker:ListAutoMLJobs
+            - sagemaker:ListCandidatesForAutoMLJob
+            - sagemaker:ListHyperParameterTuningJobs
+            - sagemaker:ListTrainingJobsForHyperParameterTuningJob
+            Resource: "*"
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource:
+            - !GetAtt UserASageMakerExecutionRole.Arn
+            - !GetAtt UserBSageMakerExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: sagemaker.amazonaws.com
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+
+# Sagemaker ExperimentsManagement
+  SageMakerExperimentsManagementPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+            - sagemaker:AddAssociation
+            - sagemaker:CreateAction
+            - sagemaker:CreateArtifact
+            - sagemaker:CreateContext
+            - sagemaker:CreateExperiment
+            - sagemaker:CreateTrial
+            - sagemaker:CreateTrialComponent
+            - sagemaker:UpdateAction
+            - sagemaker:UpdateArtifact
+            - sagemaker:UpdateContext
+            - sagemaker:UpdateExperiment
+            - sagemaker:UpdateTrial
+            - sagemaker:UpdateTrialComponent
+            - sagemaker:AssociateTrialComponent
+            - sagemaker:DisassociateTrialComponent
+            - sagemaker:DeleteAssociation
+            - sagemaker:DeleteAction
+            - sagemaker:DeleteArtifact
+            - sagemaker:DeleteContext
+            - sagemaker:DeleteExperiment
+            - sagemaker:DeleteTrial
+            - sagemaker:DeleteTrialComponent
+            Resource: arn:aws:sagemaker:*:*:*/*
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+# Sagemaker ExperimentsVisualization
+  SageMakerExperimentsVisualizationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sagemaker:CreateVisualization
+              - sagemaker:DeleteVisualization
+              - sagemaker:DescribeVisualization
+              - sagemaker:UpdateVisualization
+              - sagemaker:ListModel
+            Resource: "*"
+
+          - Effect: Allow
+            Action:
+            - sagemaker:DescribeAction
+            - sagemaker:DescribeArtifact
+            - sagemaker:DescribeContext
+            - sagemaker:DescribeExperiment
+            - sagemaker:DescribeTrial
+            - sagemaker:DescribeTrialComponent
+            - sagemaker:DescribeLineageGroup
+            Resource: arn:aws:sagemaker:*:*:*/*
+          - Effect: Allow
+            Action:
+            - sagemaker:ListAssociations
+            - sagemaker:ListActions
+            - sagemaker:ListArtifacts
+            - sagemaker:ListContexts
+            - sagemaker:ListExperiments
+            - sagemaker:ListTrials
+            - sagemaker:ListTrialComponents
+            - sagemaker:ListLineageGroups
+            - sagemaker:GetLineageGroupPolicy
+            - sagemaker:QueryLineage
+            - sagemaker:Search
+            - sagemaker:GetSearchSuggestions
+            Resource: "*"
+
+
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+
+# Sagemaker ModelManagement
+  SageMakerModelManagementPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+            - sagemaker:CreateModel
+            - sagemaker:CreateModelPackage
+            - sagemaker:CreateModelPackageGroup
+            - sagemaker:DescribeModel
+            - sagemaker:DescribeModelPackage
+            - sagemaker:DescribeModelPackageGroup
+            - sagemaker:BatchDescribeModelPackage
+            - sagemaker:UpdateModelPackage
+            - sagemaker:DeleteModel
+            - sagemaker:DeleteModelPackage
+            - sagemaker:DeleteModelPackageGroup
+            Resource: arn:aws:sagemaker:*:*:*/*
+
+          - Effect: Allow
+            Action:
+            - sagemaker:ListModels
+            - sagemaker:ListModelPackages
+            - sagemaker:ListModelPackageGroups
+            Resource: "*"
+
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource:
+            - !GetAtt UserASageMakerExecutionRole.Arn
+            - !GetAtt UserBSageMakerExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: sagemaker.amazonaws.com
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+
+# Sagemaker StudioAppPermissions
+  SageMakerStudioAppPermissionsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sagemaker:CreateApp
+              - sagemaker:DeleteApp
+              - sagemaker:DescribeApp
+              - sagemaker:ListModel
+              - sagemaker:UpdateApp
+            Resource: "*"
+
+          - Sid: SMStudioUserProfileAppPermissionsCreateAndDelete
+            Effect: Allow
+            Action:
+            - sagemaker:CreateApp
+            - sagemaker:DeleteApp
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*
+            Condition:
+              'Null':
+                sagemaker:OwnerUserProfileArn: 'true'
+
+          - Sid: SMStudioCreatePresignedDomainUrlForUserProfile
+            Effect: Allow
+            Action:
+            - sagemaker:CreatePresignedDomainUrl
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*/*
+
+          - Sid: SMStudioAppPermissionsListAndDescribe
+            Effect: Allow
+            Action:
+            - sagemaker:ListApps
+            - sagemaker:ListDomains
+            - sagemaker:ListUserProfiles
+            - sagemaker:ListSpaces
+            - sagemaker:DescribeApp
+            - sagemaker:DescribeDomain
+            - sagemaker:DescribeUserProfile
+            - sagemaker:DescribeSpace
+            Resource: "*"
+
+          - Sid: SMStudioAppPermissionsTagOnCreate
+            Effect: Allow
+            Action:
+            - sagemaker:AddTags
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/*
+            Condition:
+              'Null':
+                sagemaker:TaggingAction: 'false'
+
+          - Sid: SMStudioRestrictSharedSpacesWithoutOwners
+            Effect: Allow
+            Action:
+            - sagemaker:CreateSpace
+            - sagemaker:UpdateSpace
+            - sagemaker:DeleteSpace
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:space/*/*
+            Condition:
+              'Null':
+                sagemaker:OwnerUserProfileArn: 'true'
+          - Sid: SMStudioRestrictSpacesToOwnerUserProfile
+            Effect: Allow
+            Action:
+            - sagemaker:CreateSpace
+            - sagemaker:UpdateSpace
+            - sagemaker:DeleteSpace
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:space/*/*
+            Condition:
+              ArnLike:
+                sagemaker:OwnerUserProfileArn: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*/*
+              StringEquals:
+                sagemaker:SpaceSharingType:
+                - Private
+                - Shared
+          - Sid: SMStudioRestrictCreatePrivateSpaceAppsToOwnerUserProfile
+            Effect: Allow
+            Action:
+            - sagemaker:CreateApp
+            - sagemaker:DeleteApp
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*
+            Condition:
+              ArnLike:
+                sagemaker:OwnerUserProfileArn: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*/*
+              StringEquals:
+                sagemaker:SpaceSharingType:
+                - Private
+          - Sid: AllowAppActionsForSharedSpaces
+            Effect: Allow
+            Action:
+            - sagemaker:CreateApp
+            - sagemaker:DeleteApp
+            Resource: !Sub arn:aws:sagemaker:*:*:app/*/*/*/*
+            Condition:
+              StringEquals:
+                sagemaker:SpaceSharingType:
+                - Shared
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+
+# Sagemaker MLflow Permissions
+  SageMakerMLflowPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-mlflow-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: MLflowTrackingServerPermissions
+            Effect: Allow
+            Action:
+              - sagemaker:DescribeMlflowTrackingServer
+              - sagemaker:ListMlflowTrackingServers
+              - sagemaker:CreatePresignedMlflowTrackingServerUrl
+              - sagemaker-mlflow:*
+            Resource:
+              - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:mlflow-tracking-server/*"
+          - Sid: MLflowArtifactsBucketAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt MLflowArtifactsBucket.Arn
+              - !Sub "${MLflowArtifactsBucket.Arn}/*"
+      Roles:
+        - !Ref ProductSageMakerExecutionRole
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+
+# CloudWatch Logs Permissions
+  CloudWatchLogsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-cw-logs-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: CloudWatchLogsReadAccess
+            Effect: Allow
+            Action:
+              - logs:FilterLogEvents
+              - logs:GetLogEvents
+              - logs:DescribeLogStreams
+              - logs:DescribeLogGroups
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/sagemaker/*"
+      Roles:
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+        - !Ref ProductSageMakerExecutionRole
+
+# access grants IAM policy
+  S3AccessGrantsIAMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: KMSPermissions
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: "*"
+          - Sid: ObjectLevelReadPermissions
+            Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetObjectAcl
+            - s3:GetObjectVersionAcl
+            - s3:ListMultipartUploadParts
+            Resource:
+            - arn:aws:s3:::*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Sub '${AWS::AccountId}'
+              ArnEquals:
+                s3:AccessGrantsInstanceArn:
+                - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default'
+          - Sid: ObjectLevelWritePermissions
+            Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:PutObjectAcl
+            - s3:PutObjectVersionAcl
+            - s3:DeleteObject
+            - s3:DeleteObjectVersion
+            - s3:AbortMultipartUpload
+            Resource:
+            - arn:aws:s3:::*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Sub '${AWS::AccountId}'
+              ArnEquals:
+                s3:AccessGrantsInstanceArn:
+                - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default'
+          - Sid: BucketLevelReadPermissions
+            Effect: Allow
+            Action:
+            - s3:ListBucket
+            Resource:
+            - arn:aws:s3:::*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Sub '${AWS::AccountId}'
+              ArnEquals:
+                s3:AccessGrantsInstanceArn:
+                - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:access-grants/default'
+      Roles:
+        - !Ref S3AccessGrantsRole
+ 
+#sagemaker projects policy
+  SageMakerServiceCatalogManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-smprojects-policy
+      Description: Policy for SageMaker Service Catalog, EventBridge, CodeStar, and CI/CD services
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # CodeStar Connections and EventBridge Rules
+          - Sid: CodeStarConnectionsAndEvents
+            Effect: Allow
+            Action:
+              - events:DescribeRule
+              - iam:UntagRole
+              - iam:ListRoleTags
+              - codestar-connections:GetInstallationUrl
+              - iam:TagRole
+              - events:PutRule
+              - codestar-connections:GetConnection
+              - codestar-connections:*
+              - codestar-connections:ListRepositoryLinks
+              - codestar-connections:ListConnections
+              - codestar-connections:GetIndividualAccessToken
+              - events:PutTargets
+              - events:DeleteRule
+              - codestar-connections:UseConnection
+              - codestar-connections:GetConnectionToken
+              - codestar-connections:StartOAuthHandshake
+              - events:RemoveTargets
+              - codestar-connections:PassConnection
+            Resource: "*"
+
+          # IAM PassRole for SageMaker Service Catalog Roles
+          - Sid: PassRoleForServiceCatalog
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsLaunchRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsUseRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsApiGatewayRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsCloudformationRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsCodeBuildRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsCodePipelineRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsEventsRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsFirehoseRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsGlueRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsExecutionRole"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsLambdaRole"
+
+          # SageMaker Domain Tags
+          - Sid: SageMakerDomainTags
+            Effect: Allow
+            Action:
+              - sagemaker:ListTags
+            Resource:
+              - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/*"
+
+          # Lambda Functions
+          - Sid: LambdaFunctions
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+              - lambda:*
+            Resource: "*"
+
+          # CloudFormation
+          - Sid: CloudFormation
+            Effect: Allow
+            Action:
+              - cloudformation:*
+            Resource: "*"
+
+          # CI/CD Services
+          - Sid: CICDServices
+            Effect: Allow
+            Action:
+              - codeconnections:*
+              - codedeploy:*
+              - codepipeline:*
+              - codebuild:*
+            Resource: "*"
+
+          # Tagging Permissions
+          - Sid: TaggingPermissions
+            Effect: Allow
+            Action:
+              - tag:GetResources
+              - tag:TagResources
+              - tag:UntagResources
+              - tag:GetTagKeys
+              - tag:GetTagValues
+              - codebuild:CreateReportGroup
+              - codebuild:CreateReport
+              - codebuild:UpdateReport
+              - codebuild:BatchPutTestCases
+              - codepipeline:TagResource
+              - codepipeline:UntagResource
+              - events:TagResource
+              - events:UntagResource
+              - lambda:TagResource
+              - lambda:UntagResource
+              - s3:PutBucketTagging
+              - s3:GetBucketTagging
+            Resource: "*"
+      Roles:
+        - !Ref ProductSageMakerExecutionRole
+        - !Ref UserASageMakerExecutionRole
+        - !Ref UserBSageMakerExecutionRole
+
+  ProductSageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      RoleName: !Sub ${ProjectName}-product-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+
+  UserASageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      RoleName: !Sub ${ProjectName}-usera-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+
+  UserBSageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      RoleName: !Sub ${ProjectName}-userb-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      RoleName: !Sub ${ProjectName}-ag-lambda-execution
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess
+
+# s3 access grants role
+  S3AccessGrantsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - access-grants.s3.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+              - "sts:SetSourceIdentity"
+              - "sts:SetContext"
+
+      RoleName: !Sub ${ProjectName}-s3-ag-role
+
+  MLflowTrackingServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      RoleName: !Sub ${ProjectName}-mlflow-server-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: MLflowS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt MLflowArtifactsBucket.Arn
+                  - !Sub "${MLflowArtifactsBucket.Arn}/*"
+
+# SageMaker Domain & Profiles
+  SageMakerDomain:
+    Type: AWS::SageMaker::Domain
+    Properties:
+      AppNetworkAccessType: VpcOnly
+      AuthMode: IAM
+      DomainSettings:
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        DockerSettings:
+          EnableDockerAccess: ENABLED
+      DefaultUserSettings:
+        ExecutionRole: !GetAtt ProductSageMakerExecutionRole.Arn
+        StudioWebPortal: ENABLED 
+        DefaultLandingUri: 'studio::'
+      TagPropagation: ENABLED
+      DomainName: !Sub "${ProjectName}-domain"
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      VpcId:
+        !Ref VPC
+      Tags: 
+        - Key: sagemaker:projectS3TemplatesLocation 
+          Value: !Sub "s3://${ProjectName}-data-${AWS::AccountId}-${AWS::Region}"
+        - Key: ProjectName
+          Value: !Ref ProjectName
+
+  SageMakerUserAProfile:
+    Type: AWS::SageMaker::UserProfile
+    Properties:
+      DomainId: !Ref SageMakerDomain
+      UserProfileName: !Ref UserAProfileName
+      UserSettings:
+        ExecutionRole: !GetAtt UserASageMakerExecutionRole.Arn
+        SecurityGroups:
+          - !Ref SecurityGroup
+      Tags:
+        - Key: UserName
+          Value: !Ref UserAProfileName
+
+  SageMakerUserBProfile:
+    Type: AWS::SageMaker::UserProfile
+    Properties:
+      DomainId: !Ref SageMakerDomain
+      UserProfileName: !Ref UserBProfileName
+      UserSettings:
+        ExecutionRole: !GetAtt UserBSageMakerExecutionRole.Arn
+        SecurityGroups:
+          - !Ref SecurityGroup
+      Tags:
+        - Key: UserName
+          Value: !Ref UserBProfileName
+
+# MLflow Tracking Server
+#  MLflowTrackingServer:
+ #   Type: AWS::SageMaker::MlflowTrackingServer
+  #  Properties:
+   #   TrackingServerName: !Sub "${ProjectName}-mlflow-tracking-server"
+    #  AutomaticModelRegistration: True
+     # ArtifactStoreUri: !Sub "s3://${MLflowArtifactsBucket}"
+      #RoleArn: !GetAtt MLflowTrackingServerRole.Arn
+#      MlflowVersion: "3.0.0"
+ #     Tags:
+  #      - Key: Name
+   #       Value: !Sub ${ProjectName}-mlflow-tracking-server
+
+# S3
+  GrantsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-grants-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  
+  # S3
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-data-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - POST
+              - PUT
+              - GET
+              - HEAD
+              - DELETE
+            AllowedOrigins:
+              - "https://*.sagemaker.aws"
+            ExposedHeaders:
+              - ETag
+              - x-amz-delete-marker
+              - x-amz-id-2
+              - x-amz-request-id
+              - x-amz-server-side-encryption
+              - x-amz-version-id
+
+  MLflowArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-mlflow-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSageMakerServiceCatalogCodeBuildAccess
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !GetAtt DataBucket.Arn
+              - !Sub '${DataBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+          - Sid: AllowSageMakerServiceCatalogRoleAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !GetAtt DataBucket.Arn
+              - !Sub '${DataBucket.Arn}/*'
+            Condition:
+              StringLike:
+                'aws:PrincipalArn': !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMaker*'
+
+# AccessGrantsInstance
+  AccessGrantsInstance: 
+    Type: AWS::S3::AccessGrantsInstance
+
+  AccessGrantsLocation:
+    Type: AWS::S3::AccessGrantsLocation
+    Properties:
+      IamRoleArn:  !GetAtt S3AccessGrantsRole.Arn
+      LocationScope: !Sub s3://${GrantsBucket}
+    DependsOn: AccessGrantsInstance
+    
+  S3AccessGrantProductReadUserA:
+    Type: AWS::S3::AccessGrant
+    Properties:
+      AccessGrantsLocationId: !GetAtt AccessGrantsLocation.AccessGrantsLocationId
+      Permission: READWRITE
+      AccessGrantsLocationConfiguration:
+        S3SubPrefix: 'Product/*'
+      Grantee:
+        GranteeType: IAM
+        GranteeIdentifier: !GetAtt UserASageMakerExecutionRole.Arn
+
+  S3AccessGrantProductReadUserB:
+    Type: AWS::S3::AccessGrant
+    Properties:
+      AccessGrantsLocationId: !GetAtt AccessGrantsLocation.AccessGrantsLocationId
+      Permission: READWRITE
+      AccessGrantsLocationConfiguration:
+        S3SubPrefix: 'Product/*'
+      Grantee:
+        GranteeType: IAM
+        GranteeIdentifier: !GetAtt UserBSageMakerExecutionRole.Arn
+
+  S3AccessGrantUserASpace:
+     Type: AWS::S3::AccessGrant
+     Properties:
+       AccessGrantsLocationId: !GetAtt AccessGrantsLocation.AccessGrantsLocationId
+       Permission: READWRITE
+       AccessGrantsLocationConfiguration:
+         S3SubPrefix: 'UserA/*'
+       Grantee:
+         GranteeType: IAM
+         GranteeIdentifier: !GetAtt UserASageMakerExecutionRole.Arn
+
+  S3AccessGrantUserBSpace:
+    Type: AWS::S3::AccessGrant
+    Properties:
+      AccessGrantsLocationId: !GetAtt AccessGrantsLocation.AccessGrantsLocationId
+      Permission: READWRITE
+      AccessGrantsLocationConfiguration:
+        S3SubPrefix: 'UserB/*'
+      Grantee:
+        GranteeType: IAM
+        GranteeIdentifier: !GetAtt UserBSageMakerExecutionRole.Arn
+
+# Data Copy Lambda
+  CopyS3FilesLambdaFunction: 
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AccessGrantsBlogCopyS3FilesLambdaFunction
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 59
+      MemorySize: 255
+      Environment:
+        Variables:
+          SOURCE_BUCKET: 'aws-blogs-artifacts-public'
+          SOURCE_PREFIX: 'ML-16183/abalone.csv'
+          DEST_BUCKET: !Ref GrantsBucket
+          GITHUB_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/S3_model_build_deploy_template.yaml'
+          GITHUB_CLASSIFICATION_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/S3_classification_template.yaml'
+          GITHUB_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/seed-code'
+          GITHUB_CLASSIFICATION_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/seed-code'
+          SEED_CODE_TYPE: !Ref SeedCodeType
+          DEST2_BUCKET: !Ref DataBucket
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import logging
+          import cfnresponse
+          import urllib.request
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          def lambda_handler(event, context):
+              responseData = {}
+              result = cfnresponse.FAILED
+              try:
+                  if event["RequestType"] == "Delete":
+                      result = cfnresponse.SUCCESS
+
+                  elif event["RequestType"] == "Create" or event["RequestType"] == "Update":
+
+                      # Read environment variables
+                      source_bucket = os.getenv('SOURCE_BUCKET', None)
+                      dest_bucket = os.getenv('DEST_BUCKET', None)
+                      source_prefix = os.getenv('SOURCE_PREFIX', None)
+
+                      github_template_url = os.getenv('GITHUB_TEMPLATE_URL', None)
+                      github_classification_template_url = os.getenv('GITHUB_CLASSIFICATION_TEMPLATE_URL', None)
+                      github_base_url = os.getenv('GITHUB_BASE_URL', None)
+                      seed_code_type = os.getenv('SEED_CODE_TYPE', 'llm-fine-tuning')
+                      dest2_bucket = os.getenv('DEST2_BUCKET', None)
+
+                      # Construct GitHub URLs dynamically based on seed code type
+                      github_model_build_url = f"{github_base_url}/{seed_code_type}/model-build-repo.zip"
+                      github_model_deploy_url = f"{github_base_url}/{seed_code_type}/model-deploy-repo.zip"
+
+                      # Create S3 client
+                      s3 = boto3.client('s3')
+
+                      # Define the keys for the objects to be copied
+                      user_a_key = 'UserA/abalone.csv'
+                      user_b_key = 'UserB/abalone.csv'
+                      product_key = 'Product/abalone.csv'
+
+                      # Copy the objects from S3
+                      logger.info(f"Copying object from {source_bucket}/{source_prefix} to {dest_bucket}/{user_a_key}")
+                      s3.copy_object(Bucket=dest_bucket, Key=user_a_key, CopySource={'Bucket': source_bucket, 'Key': source_prefix})
+                      logger.info(f"Copying object from {source_bucket}/{source_prefix} to {dest_bucket}/{user_b_key}")
+                      s3.copy_object(Bucket=dest_bucket, Key=user_b_key, CopySource={'Bucket': source_bucket, 'Key': source_prefix})
+                      logger.info(f"Copying object from {source_bucket}/{source_prefix} to {dest_bucket}/{product_key}")
+                      s3.copy_object(Bucket=dest_bucket, Key=product_key, CopySource={'Bucket': source_bucket, 'Key': source_prefix})
+                      
+                      # Download template from GitHub and upload to S3
+                      s3_template_key = 'S3_model_build_deploy_template.yaml'
+                      logger.info(f"Downloading template from {github_template_url}")
+                      with urllib.request.urlopen(github_template_url) as response:
+                          template_content = response.read()
+                      
+                      logger.info(f"Uploading template to {dest2_bucket}/{s3_template_key}")
+                      s3.put_object(Bucket=dest2_bucket, Key=s3_template_key, Body=template_content)
+                      
+                      # Download classification template from GitHub and upload to S3
+                      s3_classification_template_key = 'S3_classification_template.yaml'
+                      logger.info(f"Downloading classification template from {github_classification_template_url}")
+                      with urllib.request.urlopen(github_classification_template_url) as response:
+                          classification_template_content = response.read()
+                      
+                      logger.info(f"Uploading classification template to {dest2_bucket}/{s3_classification_template_key}")
+                      s3.put_object(Bucket=dest2_bucket, Key=s3_classification_template_key, Body=classification_template_content)
+                      
+                      # Download LLM fine-tuning seed code
+                      llm_base_url = f"{github_base_url}/llm-fine-tuning"
+                      logger.info(f"Downloading LLM fine-tuning model-build-repo.zip from {llm_base_url}/model-build-repo.zip")
+                      with urllib.request.urlopen(f"{llm_base_url}/model-build-repo.zip") as response:
+                          llm_build_content = response.read()
+                      logger.info(f"Uploading to {dest2_bucket}/model-build-repo.zip")
+                      s3.put_object(Bucket=dest2_bucket, Key='model-build-repo.zip', Body=llm_build_content)
+                      
+                      logger.info(f"Downloading LLM fine-tuning model-deploy-repo.zip from {llm_base_url}/model-deploy-repo.zip")
+                      with urllib.request.urlopen(f"{llm_base_url}/model-deploy-repo.zip") as response:
+                          llm_deploy_content = response.read()
+                      logger.info(f"Uploading to {dest2_bucket}/model-deploy-repo.zip")
+                      s3.put_object(Bucket=dest2_bucket, Key='model-deploy-repo.zip', Body=llm_deploy_content)
+                      
+                      # Download classification seed code from fork
+                      github_classification_base_url = os.getenv('GITHUB_CLASSIFICATION_BASE_URL', None)
+                      classification_base_url = f"{github_classification_base_url}/classification" if github_classification_base_url else f"{github_base_url}/classification"
+                      logger.info(f"Downloading classification model-build-repo.zip from {classification_base_url}/model-build-repo.zip")
+                      with urllib.request.urlopen(f"{classification_base_url}/model-build-repo.zip") as response:
+                          classification_build_content = response.read()
+                      logger.info(f"Uploading to {dest2_bucket}/classification-model-build-repo.zip")
+                      s3.put_object(Bucket=dest2_bucket, Key='classification-model-build-repo.zip', Body=classification_build_content)
+                      
+                      logger.info(f"Downloading classification model-deploy-repo.zip from {classification_base_url}/model-deploy-repo.zip")
+                      with urllib.request.urlopen(f"{classification_base_url}/model-deploy-repo.zip") as response:
+                          classification_deploy_content = response.read()
+                      logger.info(f"Uploading to {dest2_bucket}/classification-model-deploy-repo.zip")
+                      s3.put_object(Bucket=dest2_bucket, Key='classification-model-deploy-repo.zip', Body=classification_deploy_content)
+
+                      # add object tagging to s3 template key
+                      put_tags_response = s3.put_object_tagging(
+                          Bucket=dest2_bucket,
+                          Key=s3_template_key,    
+                          Tagging={
+                              'TagSet': [
+                                  {
+                                      'Key': 'sagemaker:studio-visibility',
+                                      'Value': 'true'
+                                  },
+                              ]
+                          }
+                      )
+                      
+                      # add object tagging to classification template key
+                      put_tags_response = s3.put_object_tagging(
+                          Bucket=dest2_bucket,
+                          Key=s3_classification_template_key,    
+                          Tagging={
+                              'TagSet': [
+                                  {
+                                      'Key': 'sagemaker:studio-visibility',
+                                      'Value': 'true'
+                                  },
+                              ]
+                          }
+                      )
+
+                      result = cfnresponse.SUCCESS
+
+
+                  else:
+                      result = cfnresponse.SUCCESS
+              except Exception as e:
+                  result = cfnresponse.FAILED
+                  responseData=str(e)
+                  logger.error(f"An error occurred: {e}")
+            
+                  raise e
+              cfnresponse.send(event, context, result, responseData)
+              return { "response": responseData}
+          
+# # Trigger lambda function
+  CopyS3FilesLambdaTrigger:
+    Type: Custom::CopyS3Files
+    Properties:
+      ServiceToken: !GetAtt CopyS3FilesLambdaFunction.Arn
+      Version: '1'
+
+  LifeCycleConfigLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'LifeCycleConfigLambdaPolicy-${AWS::StackName}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:CreateStudioLifecycleConfig'
+                  - 'sagemaker:DeleteStudioLifecycleConfig'
+                Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:studio-lifecycle-config/*'
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:UpdateUserProfile'
+                  - 'sagemaker:DeleteUserProfile'
+                Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # IAM Role for MLflow App Creation Lambda
+  MLflowAppLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-mlflow-app-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: MLflowAppManagement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:CreateMlflowApp'
+                  - 'sagemaker:DeleteMlflowApp'
+                  - 'sagemaker:DescribeMlflowApp'
+                  - 'sagemaker:ListMlflowApps'
+                  - 'iam:PassRole'
+                Resource: '*'
+
+  LifeCycleConfigLambda:
+    DependsOn:
+      - SageMakerUserAProfile
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Add LifeCycle Configuration to copy workshop files to Studio
+      Handler: index.lambda_handler
+      Role: !GetAtt LifeCycleConfigLambdaRole.Arn
+      Runtime: python3.10
+      Timeout: 60
+      Code:
+        ZipFile: !Join
+          - |+
+
+          - - 'import boto3'
+            - 'import base64'
+            - 'import cfnresponse'
+            - ''
+            - 'client = boto3.client(''sagemaker'')'
+            - 'lcc_up1 = ''\n''.join(('
+            - '    ''#!/bin/bash'','
+            - '    '''','
+            - '    ''set -ex'','
+            - '    '''','
+            - '    ''if [ ! -z "${SM_JOB_DEF_VERSION}" ]'','
+            - '    ''then'','
+            - '    ''   echo "Running in job mode, skip lcc"'','
+            - '    ''else'','
+            - '    ''    git clone --depth 1 --filter=blob:none --sparse https://github.com/aws-samples/genai-ml-platform-examples.git temp-repo || { echo "Error: Failed to clone repo"; exit 0; }'','
+            - '    ''    cd temp-repo'','
+            - '    ''    git sparse-checkout set platform/genai-ml-stdzn-on-smai'','
+            - '    ''    cp -r platform/genai-ml-stdzn-on-smai/* ../ 2>/dev/null || cp -r platform/genai-ml-stdzn-on-smai/. ../'','
+            - '    ''    cd ..'','
+            - '    ''    rm -rf temp-repo'','
+            - '    ''    echo "Files cloned from GitHub repository (platform/genai-ml-stdzn-on-smai folder)"'','
+            - '    ''fi'','
+            - '    '''','
+            - '))'
+            - ''
+            - !Sub 'lcc_name_up1 = "${AWS::StackName}-clone-repo"'
+            - !Sub 'up1 = "${SageMakerUserAProfile}"'
+            - ''
+            - 'def get_lcc_base64_string(lcc_string):'
+            - '    lcc_bytes = lcc_string.encode("ascii")'
+            - '    base64_lcc_bytes = base64.b64encode(lcc_bytes)'
+            - '    base64_lcc_string = base64_lcc_bytes.decode("ascii")'
+            - '    return base64_lcc_string'
+            - ''
+            - ''
+            - 'def apply_lcc_to_user_profile(base64_lcc_string, lcc_config_name, profile):'
+            - '    response = client.create_studio_lifecycle_config('
+            - '        StudioLifecycleConfigName=lcc_config_name,'
+            - '        StudioLifecycleConfigContent=base64_lcc_string,'
+            - '        StudioLifecycleConfigAppType="JupyterLab",'
+            - '   )'
+            - ''
+            - '    lcc_arn = response["StudioLifecycleConfigArn"]'
+            - '    update_up = client.update_user_profile('
+            - '        DomainId=profile.split("|")[1],'
+            - '        UserProfileName=profile.split("|")[0],'
+            - '        UserSettings={'
+            - '            "JupyterLabAppSettings": {'
+            - '                "DefaultResourceSpec": {"LifecycleConfigArn": lcc_arn},'
+            - '                "LifecycleConfigArns": [lcc_arn]'
+            - '            }'
+            - '        }'
+            - '    )'
+            - '    return update_up'
+            - ''
+            - ''
+            - 'def lambda_handler(event, context):'
+            - '    print(event)'
+            - '    try:'
+            - '        base64_lcc_up1_string = get_lcc_base64_string(lcc_up1)'
+            - '        updated_up1 = apply_lcc_to_user_profile('
+            - '            base64_lcc_up1_string,'
+            - '            lcc_name_up1,'
+            - '            up1'
+            - '        )'
+            - '        print("Response User Profile LCC update for UP1")'
+            - '        print(updated_up1)'
+            - ''
+            - '        response_value = 120'
+            - '        response_data = {"Data": response_value}'
+            - '        cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)'
+            - '    except Exception as e:'
+            - '        if "RequestType" in event:'
+            - '            if event["RequestType"] == "Delete":'
+            - '                try:'
+            - '                    response1 = client.delete_studio_lifecycle_config('
+            - '                        StudioLifecycleConfigName=lcc_name_up1'
+            - '                    )'
+            - '                    print(response1)'
+            - '                    response_data = {}'
+            - '                    cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)'
+            - '                    return'
+            - '                except Exception as e2:'
+            - '                    print(e2)'
+            - '                    response_data = e2'
+            - '                    cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)'
+            - '                    return'
+            - '        print(e)'
+            - '        response_data = {"Data": str(e)}'
+            - '        cfnresponse.send(event, context, cfnresponse.FAILED, response_data)'
+      
+
+  LifeCycleConfigLambdaInvoke:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt LifeCycleConfigLambda.Arn
+  JupyterAppSpace:
+    Type: AWS::SageMaker::Space
+    Properties:
+      DomainId: !GetAtt SageMakerDomain.DomainId
+      OwnershipSettings:
+        OwnerUserProfileName: !Select [2, !Split ["/", !GetAtt SageMakerUserAProfile.UserProfileArn ]]
+      SpaceDisplayName: jupyterlab-space
+      SpaceName: usera-jl-space
+      SpaceSettings:
+        AppType: JupyterLab
+        JupyterLabAppSettings:
+          DefaultResourceSpec:
+            InstanceType: !Ref JupyterLabAppInstance
+        SpaceStorageSettings:
+          EbsStorageSettings:
+            EbsVolumeSizeInGb: 50
+      SpaceSharingSettings:
+        SharingType: Private
+
+  # Lambda Function to Create Serverless MLflow App
+  CreateMLflowAppLambda:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - MLflowTrackingServerRole
+      - DataBucket
+    Properties:
+      FunctionName: !Sub '${ProjectName}-create-mlflow-app'
+      Description: Create Serverless MLflow App for experiment tracking
+      Handler: index.lambda_handler
+      Role: !GetAtt MLflowAppLambdaRole.Arn
+      Runtime: python3.12
+      Timeout: 600
+      Code:
+        ZipFile: !Sub |
+          import subprocess
+          import sys
+          
+          # Install updated boto3 with MLflow Apps API support
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/tmp", "boto3==1.42.54"])
+          sys.path.insert(0, '/tmp')
+          
+          import boto3
+          import cfnresponse
+          import time
+                    
+          client = boto3.client('sagemaker')
+          
+          def lambda_handler(event, context):
+              print(f"Event: {event}")
+              
+              try:
+                  request_type = event.get('RequestType', 'Create')
+                  stack_name = event['ResourceProperties']['StackName']
+                  mlflow_app_name = event['ResourceProperties']['MLflowAppName']
+                  artifact_store_uri = event['ResourceProperties']['ArtifactStoreUri']
+                  role_arn = event['ResourceProperties']['RoleArn']
+                  
+                  if request_type == 'Create':
+                      # Check if MLflow App already exists
+                      try:
+                          response = client.list_mlflow_apps(MaxResults=100)
+                          existing_apps = response.get('Summaries', [])
+                          for app in existing_apps:
+                              if app['Name'] == mlflow_app_name:
+                                  print(f"MLflow App {mlflow_app_name} already exists")
+                                  response_data = {
+                                      'MLflowAppArn': app['Arn'],
+                                      'MLflowAppName': app['Name']
+                                  }
+                                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, app['Arn'])
+                                  return
+                      except Exception as e:
+                          print(f"Error checking existing apps: {e}")
+                      
+                      # Create MLflow App
+                      print(f"Creating MLflow App: {mlflow_app_name}")
+                      response = client.create_mlflow_app(
+                          Name=mlflow_app_name,
+                          ArtifactStoreUri=artifact_store_uri,
+                          RoleArn=role_arn,
+                          Tags=[
+                              {'Key': 'StackName', 'Value': stack_name},
+                              {'Key': 'ManagedBy', 'Value': 'CloudFormation'},
+                              {'Key': 'ProjectName', 'Value': '${ProjectName}'}
+                          ]
+                      )
+                      
+                      mlflow_app_arn = response['Arn']
+                      print(f"Created MLflow App: {mlflow_app_arn}")
+                      
+                      # Return immediately - MLflow App will finish creating asynchronously
+                      response_data = {
+                          'MLflowAppArn': mlflow_app_arn,
+                          'MLflowAppName': mlflow_app_name
+                      }
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, mlflow_app_arn)
+                      return
+                      
+                  elif request_type == 'Delete':
+                      # Delete MLflow App
+                      try:
+                          print(f"Deleting MLflow App: {mlflow_app_name}")
+                          client.delete_mlflow_app(Arn=mlflow_app_name)
+                          print(f"Deleted MLflow App: {mlflow_app_name}")
+                      except client.exceptions.ResourceNotFound:
+                          print(f"MLflow App {mlflow_app_name} not found, skipping deletion")
+                      except Exception as e:
+                          print(f"Error deleting MLflow App: {e}")
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  else:  # Update
+                      # MLflow Apps don't support updates, return existing
+                      response_data = {
+                          'MLflowAppArn': event['PhysicalResourceId'],
+                          'MLflowAppName': mlflow_app_name
+                      }
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, event['PhysicalResourceId'])
+                      return
+              
+              except Exception as e:
+                  print(f"Error: {e}")
+                  import traceback
+                  traceback.print_exc()
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  # Custom Resource to Create MLflow App
+  MLflowAppResource:
+    Type: Custom::MLflowApp
+    DependsOn:
+      - CreateMLflowAppLambda
+      - MLflowTrackingServerRole
+      - MLflowArtifactsBucket
+    Properties:
+      ServiceToken: !GetAtt CreateMLflowAppLambda.Arn
+      StackName: !Ref AWS::StackName
+      MLflowAppName: !Sub '${ProjectName}-mlflow-app'
+      ArtifactStoreUri: !Sub 's3://${MLflowArtifactsBucket}/mlflow-artifacts'
+      RoleArn: !GetAtt MLflowTrackingServerRole.Arn
+
+  # Glue Database for Lab 3b - Bank Classification
+  BankClassificationGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: bank-classification-db
+        Description: Database for bank marketing campaign classification data
+
+  # Glue Table for Lab 3b - Bank Marketing Data
+  BankMarketingGlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref BankClassificationGlueDatabase
+      TableInput:
+        Name: bank-marketing-data
+        Description: Bank marketing campaign dataset for classification
+        StorageDescriptor:
+          Columns:
+            - Name: age
+              Type: int
+            - Name: job
+              Type: string
+            - Name: marital
+              Type: string
+            - Name: education
+              Type: string
+            - Name: default
+              Type: string
+            - Name: balance
+              Type: int
+            - Name: housing
+              Type: string
+            - Name: loan
+              Type: string
+            - Name: contact
+              Type: string
+            - Name: day
+              Type: int
+            - Name: month
+              Type: string
+            - Name: duration
+              Type: int
+            - Name: campaign
+              Type: int
+            - Name: pdays
+              Type: int
+            - Name: previous
+              Type: int
+            - Name: poutcome
+              Type: string
+            - Name: y
+              Type: string
+          Location: !Sub 's3://${DataBucket}/ml_pipelines/data/'
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+            Parameters:
+              field.delim: ','
+              skip.header.line.count: '1'
+        TableType: EXTERNAL_TABLE
+
+Outputs:
+  VPCId:
+    Value: !Ref VPC
+    Description: VPC ID
+  PublicSubnetId:
+    Value: !Ref PublicSubnet
+    Description: Public Subnet ID
+  PrivateSubnetId:
+    Value: !Ref PrivateSubnet
+    Description: Private Subnet ID
+  PrivateSubnet2Id:
+    Value: !Ref PrivateSubnet2
+    Description: Private Subnet 2 ID
+  InternetGatewayId:
+    Value: !Ref InternetGateway
+    Description: Internet Gateway ID
+  NATGatewayId:
+    Value: !Ref NATGateway
+    Description: NAT Gateway ID
+  NATGatewayEIP:
+    Value: !Ref NATGatewayEIP
+    Description: NAT Gateway Elastic IP
+  GrantsBucketName:
+    Value: !Ref GrantsBucket
+    Description: Grants bucket name
+  DataBucketName:
+    Value: !Ref DataBucket
+    Description: Data bucket name
+  SageMakerDomainId:
+    Value: !GetAtt SageMakerDomain.DomainId
+    Description: SageMaker Domain Id
+  SageMakerUserAProfileName:
+    Value: !Ref SageMakerUserAProfile
+    Description: SageMaker User A Profile Name
+  SageMakerUserBProfileName:
+    Value: !Ref SageMakerUserBProfile
+    Description: SageMaker User B Profile Name
+  AccessGrantsInstanceArn:
+    Value: !GetAtt AccessGrantsInstance.AccessGrantsInstanceArn
+    Description: Access Grants Instance Arn
+  AccessGrantsLocationId:
+    Value: !GetAtt AccessGrantsLocation.AccessGrantsLocationId
+    Description: Access Grants Location Id
+  CopyS3FilesLambdaFunctionArn:
+    Value: !GetAtt CopyS3FilesLambdaFunction.Arn
+    Description: Copy S3 Files Lambda Function Arn
+  MLflowAppArn:
+    Description: ARN of the Serverless MLflow App
+    Value: !GetAtt MLflowAppResource.MLflowAppArn
+    Export:
+      Name: !Sub '${AWS::StackName}-MLflowAppArn'
+  MLflowAppName:
+    Description: Name of the Serverless MLflow App
+    Value: !GetAtt MLflowAppResource.MLflowAppName
+    Export:
+      Name: !Sub '${AWS::StackName}-MLflowAppName'
+  MLflowArtifactsBucketName:
+    Value: !Ref MLflowArtifactsBucket
+    Description: MLflow Artifacts S3 Bucket Name
+  UserAExecutionRoleArn:
+    Value: !GetAtt UserASageMakerExecutionRole.Arn
+    Description: User A SageMaker Execution Role ARN
+  UserBExecutionRoleArn:
+    Value: !GetAtt UserBSageMakerExecutionRole.Arn
+    Description: User B SageMaker Execution Role ARN
+  BankClassificationGlueDatabaseName:
+    Value: !Ref BankClassificationGlueDatabase
+    Description: Glue Database name for bank classification
+  BankMarketingGlueTableName:
+    Value: !Ref BankMarketingGlueTable
+    Description: Glue Table name for bank marketing data
