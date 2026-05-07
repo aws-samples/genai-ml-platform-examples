@@ -1,0 +1,57 @@
+[
+  {
+    "session_id": "sess-day1-chr-01",
+    "timestamp_base": "2026-03-09T11:05:00",
+    "turns": [
+      {"role": "user", "content": "George Papadopoulos had his fasting blood test this morning. Now I need to set up the rest of his diabetes cycle — results review next week and then his medication review two weeks after that. All with Dr Chen."},
+      {"role": "assistant", "content": "Let me get George's details and set up the full quarterly cycle.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-009"}, "result": {"id": "pat-009", "first_name": "George", "last_name": "Papadopoulos", "notes": "Type 2 diabetes — quarterly cycle: fasting blood test (Mon/Tue morning, must be fasting) → results review with Dr Chen 1 week later → dietitian referral if HbA1c elevated. On metformin 1000mg twice daily. Wife Maria manages his diet and usually calls with questions about results."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-chen", "date": "2026-03-17"}, "result": {"doctor_id": "dr-chen", "date": "2026-03-17", "available_slots": ["09:00", "09:30", "10:00", "10:30", "14:00", "14:30", "15:00"]}},
+        {"tool": "book_appointment", "params": {"patient_id": "pat-009", "doctor_id": "dr-chen", "date": "2026-03-17", "time": "10:00", "type": "follow_up"}, "result": {"id": "apt-074", "patient_id": "pat-009", "doctor_id": "dr-chen", "date": "2026-03-17", "time": "10:00", "status": "scheduled"}}
+      ]},
+      {"role": "user", "content": "Good, 10am Monday for his results review. Now the medication review — that should be about 2 weeks after."},
+      {"role": "assistant", "content": "Checking Dr Chen's availability for the week of March 31.", "tool_calls": [
+        {"tool": "check_availability", "params": {"doctor_id": "dr-chen", "date": "2026-03-31"}, "result": {"doctor_id": "dr-chen", "date": "2026-03-31", "available_slots": ["09:30", "10:30", "11:00", "14:00", "15:00", "16:00"]}},
+        {"tool": "book_appointment", "params": {"patient_id": "pat-009", "doctor_id": "dr-chen", "date": "2026-03-31", "time": "14:00", "type": "standard"}, "result": {"id": "apt-075", "patient_id": "pat-009", "doctor_id": "dr-chen", "date": "2026-03-31", "time": "14:00", "status": "scheduled"}}
+      ]},
+      {"role": "user", "content": "Perfect — blood test today, results review on the 17th, medication review on the 31st. That's his full quarterly cycle sorted. His wife Maria might call about the results too — she usually does."},
+      {"role": "assistant", "content": "All three stages of George's quarterly cycle are now booked. I'll note that Maria may call about results."},
+      {"role": "user", "content": "This is the same pattern every 3 months — blood test, then results a week later, then medication review two weeks after. Like clockwork."}
+    ]
+  },
+  {
+    "session_id": "sess-day1-chr-02",
+    "timestamp_base": "2026-03-09T11:25:00",
+    "turns": [
+      {"role": "user", "content": "Ben O'Sullivan is due for his asthma cycle too. He needs a spirometry test first, then a review with Dr Chen a week later. Can you set both up?"},
+      {"role": "assistant", "content": "Let me find slots for both appointments in Ben's 3-monthly cycle.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-004"}, "result": {"id": "pat-004", "first_name": "Ben", "last_name": "O'Sullivan", "notes": "Asthma — 3-monthly cycle: spirometry test → review with Dr Chen (1 week later) → adjust preventer if needed. Also gets annual flu vaccine in March. Action plan on file — step-up protocol if peak flow drops below 80%."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-chen", "date": "2026-03-18"}, "result": {"doctor_id": "dr-chen", "date": "2026-03-18", "available_slots": ["09:00", "09:30", "10:00", "13:00", "14:00", "15:30", "16:00"]}},
+        {"tool": "book_appointment", "params": {"patient_id": "pat-004", "doctor_id": "dr-chen", "date": "2026-03-18", "time": "09:00", "type": "blood_test"}, "result": {"id": "apt-076", "patient_id": "pat-004", "doctor_id": "dr-chen", "date": "2026-03-18", "time": "09:00", "status": "scheduled"}}
+      ]},
+      {"role": "user", "content": "Spirometry on the 18th at 9am. Now the follow-up review — try the following week."},
+      {"role": "assistant", "content": "Checking Dr Chen's availability for the week after.", "tool_calls": [
+        {"tool": "check_availability", "params": {"doctor_id": "dr-chen", "date": "2026-03-25"}, "result": {"doctor_id": "dr-chen", "date": "2026-03-25", "available_slots": ["09:30", "10:30", "11:00", "13:30", "14:30", "15:30"]}},
+        {"tool": "book_appointment", "params": {"patient_id": "pat-004", "doctor_id": "dr-chen", "date": "2026-03-25", "time": "10:30", "type": "follow_up"}, "result": {"id": "apt-077", "patient_id": "pat-004", "doctor_id": "dr-chen", "date": "2026-03-25", "time": "10:30", "status": "scheduled"}}
+      ]},
+      {"role": "user", "content": "Sorted. Spirometry the 18th, review the 25th. Same deal as George — it's the same pattern every quarter for these chronic patients. Test first, then review, then adjust meds if needed."}
+    ]
+  },
+  {
+    "session_id": "sess-day1-chr-03",
+    "timestamp_base": "2026-03-09T11:40:00",
+    "turns": [
+      {"role": "user", "content": "Angela Romano called — she had her blood test last Friday and needs to book her GP follow-up with Dr Chen. Her rheumatologist already reviewed the results. She also mentioned her hands are flaring up again."},
+      {"role": "assistant", "content": "Let me look up Angela's details and find a slot for her GP follow-up.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-042"}, "result": {"id": "pat-042", "first_name": "Angela", "last_name": "Romano", "notes": "Rheumatoid arthritis — 6-weekly cycle: blood test (CRP + ESR + liver function) → rheumatologist review (external, Dr Webb at Westmead) → GP follow-up with Dr Chen 2 weeks later to adjust methotrexate if needed. Flares up in winter — may need extra urgent appointments May-August. Keep Friday afternoons free for her when possible."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-chen", "date": "2026-03-21"}, "result": {"doctor_id": "dr-chen", "date": "2026-03-21", "available_slots": ["09:00", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"]}}
+      ]},
+      {"role": "user", "content": "Friday afternoon is best for her — try 2pm. And if she's flaring up, Dr Chen might want to see her sooner for the methotrexate adjustment."},
+      {"role": "assistant", "content": "Booking Angela with Dr Chen at 2pm Friday for her cycle follow-up.", "tool_calls": [
+        {"tool": "book_appointment", "params": {"patient_id": "pat-042", "doctor_id": "dr-chen", "date": "2026-03-21", "time": "14:00", "type": "follow_up"}, "result": {"id": "apt-078", "patient_id": "pat-042", "doctor_id": "dr-chen", "date": "2026-03-21", "time": "14:00", "status": "scheduled"}},
+        {"tool": "send_message", "params": {"patient_id": "pat-042", "message": "Hi Angela, your GP follow-up with Dr Chen has been booked for Friday 21 March at 2:00pm. Please bring your latest rheumatologist notes from Dr Webb. Call (02) 9555 0100 if you need to change this."}, "result": {"status": "sent", "channel": "email"}}
+      ]},
+      {"role": "user", "content": "Her cycle is every 6 weeks — blood test, then rheumatologist externally, then back to us for the GP review. It's like a three-step dance every time. And she always needs Fridays."}
+    ]
+  }
+]

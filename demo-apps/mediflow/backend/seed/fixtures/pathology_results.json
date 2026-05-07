@@ -1,0 +1,57 @@
+[
+  {
+    "id": "path-001",
+    "patient_id": "pat-003",
+    "test_name": "HbA1c",
+    "result_value": "9.2%",
+    "reference_range": "4.0-5.6%",
+    "flagged": 1,
+    "flag_reason": "elevated — indicates poor glycaemic control",
+    "ordering_doctor_id": "dr-chen",
+    "received_date": "__TODAY__"
+  },
+  {
+    "id": "path-002",
+    "patient_id": "pat-005",
+    "test_name": "eGFR",
+    "result_value": "48 mL/min",
+    "reference_range": ">60 mL/min",
+    "flagged": 1,
+    "flag_reason": "declining — stage 3a CKD, trending down from 55",
+    "ordering_doctor_id": "dr-patel",
+    "received_date": "__TODAY__"
+  },
+  {
+    "id": "path-003",
+    "patient_id": "pat-007",
+    "test_name": "CRP",
+    "result_value": "4.1 mg/L",
+    "reference_range": "<5.0 mg/L",
+    "flagged": 0,
+    "flag_reason": null,
+    "ordering_doctor_id": "dr-chen",
+    "received_date": "__TODAY__"
+  },
+  {
+    "id": "path-004",
+    "patient_id": "pat-002",
+    "test_name": "TSH",
+    "result_value": "0.2 mIU/L",
+    "reference_range": "0.4-4.0 mIU/L",
+    "flagged": 1,
+    "flag_reason": "suppressed — possible hyperthyroidism, needs clinical correlation",
+    "ordering_doctor_id": "dr-kim",
+    "received_date": "__TODAY__"
+  },
+  {
+    "id": "path-005",
+    "patient_id": "pat-006",
+    "test_name": "Full Blood Count",
+    "result_value": "Hb 128 g/L, WCC 7.2, Plt 245",
+    "reference_range": "Hb 130-170, WCC 4-11, Plt 150-400",
+    "flagged": 0,
+    "flag_reason": null,
+    "ordering_doctor_id": "dr-nguyen",
+    "received_date": "__TODAY__"
+  }
+]

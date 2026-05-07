@@ -1,0 +1,72 @@
+[
+  {
+    "session_id": "sess-day1-ped-01",
+    "timestamp_base": "2026-03-09T10:05:00",
+    "turns": [
+      {"role": "user", "content": "Lily Zhang's due for her check-up. Can you book her in with Dr Kim?"},
+      {"role": "assistant", "content": "Let me pull up Lily's details and check Dr Kim's availability.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-025"}, "result": {"id": "pat-025", "first_name": "Lily", "last_name": "Zhang", "dob": "2022-01-30", "phone": "0465 012 345", "notes": "Parent/guardian: Wei Zhang (father) and Mei Zhang (mother). 4 year old. Paediatric patient of Dr Kim. Allergic to penicillin."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-13"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-13", "available_slots": ["09:00", "09:45", "10:30", "11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "10:30 works. Her dad Wei is the one who usually brings her in so send the reminder to him."},
+      {"role": "assistant", "content": "Booking Lily in with Dr Kim at 10:30 on Friday and I'll notify her father Wei.", "tool_calls": [
+        {"tool": "book_appointment", "params": {"patient_id": "pat-025", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "10:30", "type": "standard"}, "result": {"id": "apt-070", "patient_id": "pat-025", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "10:30", "status": "scheduled"}},
+        {"tool": "send_message", "params": {"patient_id": "pat-025", "message": "Hi Wei, this is Greenfield Medical. Lily has a check-up with Dr Kim on Friday 13 March at 10:30am. Please remember to bring her Medicare card. Call us on (02) 9555 0100 if you need to reschedule."}, "result": {"status": "sent", "channel": "phone"}}
+      ]},
+      {"role": "user", "content": "Perfect. And remember she's allergic to penicillin — make sure that's flagged for Dr Kim."}
+    ]
+  },
+  {
+    "session_id": "sess-day1-ped-02",
+    "timestamp_base": "2026-03-09T10:20:00",
+    "turns": [
+      {"role": "user", "content": "Noah Mitchell needs to see Dr Kim about his ears again. His mum Sarah called this morning."},
+      {"role": "assistant", "content": "Let me look up Noah and check what's available with Dr Kim.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-036"}, "result": {"id": "pat-036", "first_name": "Noah", "last_name": "Mitchell", "dob": "2020-08-14", "phone": "0412 334 556", "notes": "Parent: Sarah Mitchell (mum, 0412 334 556) handles all appointments and medical decisions. Father David Mitchell (0421 887 334) manages billing and insurance claims. Sarah works Mon-Wed so David brings Noah those days. Paediatric patient of Dr Kim. Recurring ear infections — ENT referral pending."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-13"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-13", "available_slots": ["09:00", "09:45", "11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "Friday would be good — Sarah's off Thursdays and Fridays so she can bring him. Try 9am."},
+      {"role": "assistant", "content": "Booking Noah with Dr Kim at 9am Friday. I'll message Sarah to confirm.", "tool_calls": [
+        {"tool": "book_appointment", "params": {"patient_id": "pat-036", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "09:00", "type": "standard"}, "result": {"id": "apt-071", "patient_id": "pat-036", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "09:00", "status": "scheduled"}},
+        {"tool": "send_message", "params": {"patient_id": "pat-036", "message": "Hi Sarah, Noah has been booked in with Dr Kim on Friday 13 March at 9:00am for his ear check. Please call (02) 9555 0100 if you need to change this."}, "result": {"status": "sent", "channel": "sms"}}
+      ]},
+      {"role": "user", "content": "Great. If it's billing related, remember to contact David, not Sarah — he handles all the insurance stuff."}
+    ]
+  },
+  {
+    "session_id": "sess-day1-ped-03",
+    "timestamp_base": "2026-03-09T10:35:00",
+    "turns": [
+      {"role": "user", "content": "Zoe Mitchell — that's Noah's sister — also needs her asthma review with Dr Kim. Can you check availability for the same day? Sarah wants to bring them both at once if possible."},
+      {"role": "assistant", "content": "Smart idea to combine the trips. Let me check if there's a slot right after Noah's appointment.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-037"}, "result": {"id": "pat-037", "first_name": "Zoe", "last_name": "Mitchell", "dob": "2018-02-11", "phone": "0412 334 556", "notes": "Parent: Sarah Mitchell (mum, 0412 334 556). Sister of Noah Mitchell (pat-036). Father David Mitchell (0421 887 334) for billing. Paediatric patient of Dr Kim. Asthma action plan on file — preventer review every 3 months."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-13"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-13", "available_slots": ["09:45", "11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "9:45 — right after Noah at 9. Perfect. Book her in."},
+      {"role": "assistant", "content": "Booking Zoe at 9:45 right after Noah. Same parent contact so Sarah gets one trip for both.", "tool_calls": [
+        {"tool": "book_appointment", "params": {"patient_id": "pat-037", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "09:45", "type": "follow_up"}, "result": {"id": "apt-072", "patient_id": "pat-037", "doctor_id": "dr-kim", "date": "2026-03-13", "time": "09:45", "status": "scheduled"}},
+        {"tool": "send_message", "params": {"patient_id": "pat-037", "message": "Hi Sarah, Zoe has been booked for her asthma review with Dr Kim on Friday 13 March at 9:45am — right after Noah's 9am appointment. Call (02) 9555 0100 if you need to change either."}, "result": {"status": "sent", "channel": "sms"}}
+      ]},
+      {"role": "user", "content": "Love it — both kids back to back. Sarah will appreciate that. Make sure to note the sibling link so we always try to batch them together."}
+    ]
+  },
+  {
+    "session_id": "sess-day1-ped-04",
+    "timestamp_base": "2026-03-09T10:50:00",
+    "turns": [
+      {"role": "user", "content": "Charlotte Barnes needs her quarterly HbA1c check. Her dad Mark handles everything — he's got primary custody."},
+      {"role": "assistant", "content": "Let me pull up Charlotte's details and find a slot with Dr Kim.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-039"}, "result": {"id": "pat-039", "first_name": "Charlotte", "last_name": "Barnes", "dob": "2014-05-29", "phone": "0455 667 234", "notes": "Parent/guardian: Mark Barnes (father, 0455 667 234). Mum Lisa (0455 667 235) for emergencies only — Mark has primary custody. Paediatric patient of Dr Kim. 12-year-old. Type 1 diabetes — insulin pump management. Quarterly HbA1c checks. School nurse coordinates with clinic for hypo management plan."}},
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-17"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-17", "available_slots": ["09:00", "09:45", "10:30", "11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "Monday at 11:15 would work — she finishes school early on Mondays."},
+      {"role": "assistant", "content": "Booking Charlotte with Dr Kim at 11:15 on Monday. I'll notify Mark.", "tool_calls": [
+        {"tool": "book_appointment", "params": {"patient_id": "pat-039", "doctor_id": "dr-kim", "date": "2026-03-17", "time": "11:15", "type": "standard"}, "result": {"id": "apt-073", "patient_id": "pat-039", "doctor_id": "dr-kim", "date": "2026-03-17", "time": "11:15", "status": "scheduled"}},
+        {"tool": "send_message", "params": {"patient_id": "pat-039", "message": "Hi Mark, Charlotte's quarterly HbA1c check has been booked with Dr Kim on Monday 17 March at 11:15am. Please ensure she fasts from the night before. Call (02) 9555 0100 to reschedule."}, "result": {"status": "sent", "channel": "email"}}
+      ]},
+      {"role": "user", "content": "And make sure we only contact Mark — not Lisa. He's very particular about that."},
+      {"role": "assistant", "content": "Noted — Mark is the primary contact for all of Charlotte's appointments and communications. I'll always direct messages to him."},
+      {"role": "user", "content": "Exactly. Lisa's number is emergency-only."}
+    ]
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "session_id": "sess-day1-abs-01",
+    "timestamp_base": "2026-03-09T15:10:00",
+    "turns": [
+      {"role": "user", "content": "OK we've just been told Dr Kim won't be in on Wednesday. She's got a conference. Can you pull up who's booked with her on Wednesday so we can start rescheduling?"},
+      {"role": "assistant", "content": "Let me check Dr Kim's Wednesday schedule.", "tool_calls": [
+        {"tool": "list_upcoming_appointments", "params": {"doctor_id": "dr-kim", "date": "2026-03-11"}, "result": [
+          {"id": "apt-080", "patient_id": "pat-021", "date": "2026-03-11", "time": "09:00", "patient_name": "Liam Walsh", "status": "scheduled"},
+          {"id": "apt-081", "patient_id": "pat-028", "date": "2026-03-11", "time": "09:45", "patient_name": "Oliver Stewart", "status": "scheduled"},
+          {"id": "apt-082", "patient_id": "pat-038", "date": "2026-03-11", "time": "10:30", "patient_name": "Aiden Kapoor", "status": "scheduled"},
+          {"id": "apt-083", "patient_id": "pat-033", "date": "2026-03-11", "time": "13:00", "patient_name": "Ruby Campbell", "status": "scheduled"}
+        ]}
+      ]},
+      {"role": "user", "content": "Four kids. All paediatric. They all need to stay with Dr Kim so we can't move them to another doctor. Check her Friday availability."},
+      {"role": "assistant", "content": "Good point — paediatric patients should stay with their specialist. Let me check Friday.", "tool_calls": [
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-13"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-13", "available_slots": ["11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "Only 3 slots and we've got 4 kids. Check next Monday too."},
+      {"role": "assistant", "content": "Checking next Monday.", "tool_calls": [
+        {"tool": "check_availability", "params": {"doctor_id": "dr-kim", "date": "2026-03-16"}, "result": {"doctor_id": "dr-kim", "date": "2026-03-16", "available_slots": ["09:00", "09:45", "10:30", "11:15", "13:00", "13:45"]}}
+      ]},
+      {"role": "user", "content": "Monday's wide open. Move Liam and Oliver to Friday — they're siblings so their mums might prefer the same day. Actually no, they're not siblings. Doesn't matter. Put Liam at 11:15 and Oliver at 1pm Friday. Then Aiden and Ruby on Monday."},
+      {"role": "assistant", "content": "Rescheduling all four now — Liam and Oliver to Friday, Aiden and Ruby to Monday.", "tool_calls": [
+        {"tool": "reschedule_appointment", "params": {"appointment_id": "apt-080", "new_date": "2026-03-13", "new_time": "11:15"}, "result": {"id": "apt-080", "date": "2026-03-13", "time": "11:15", "status": "rescheduled"}},
+        {"tool": "reschedule_appointment", "params": {"appointment_id": "apt-081", "new_date": "2026-03-13", "new_time": "13:00"}, "result": {"id": "apt-081", "date": "2026-03-13", "time": "13:00", "status": "rescheduled"}},
+        {"tool": "reschedule_appointment", "params": {"appointment_id": "apt-082", "new_date": "2026-03-16", "new_time": "09:00"}, "result": {"id": "apt-082", "date": "2026-03-16", "time": "09:00", "status": "rescheduled"}},
+        {"tool": "reschedule_appointment", "params": {"appointment_id": "apt-083", "new_date": "2026-03-16", "new_time": "09:45"}, "result": {"id": "apt-083", "date": "2026-03-16", "time": "09:45", "status": "rescheduled"}}
+      ]},
+      {"role": "user", "content": "Now we need to message all the parents. Remember — for paediatric patients, the message goes to the parent, not the child. Can you send each one a personalised message?"},
+      {"role": "assistant", "content": "Sending personalised notifications to each child's parent now.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-021"}, "result": {"id": "pat-021", "first_name": "Liam", "last_name": "Walsh", "notes": "Parent/guardian: Jenny Walsh. 6 year old."}},
+        {"tool": "send_message", "params": {"patient_id": "pat-021", "message": "Hi Jenny, Dr Kim unfortunately won't be available this Wednesday due to a conference. Liam's appointment has been moved to Friday 13 March at 11:15am, still with Dr Kim. Call (02) 9555 0100 if that doesn't suit."}, "result": {"status": "sent", "channel": "sms"}},
+        {"tool": "get_patient", "params": {"patient_id": "pat-028"}, "result": {"id": "pat-028", "first_name": "Oliver", "last_name": "Stewart", "notes": "Parent/guardian: Kate Stewart. 9 year old. ADHD management plan."}},
+        {"tool": "send_message", "params": {"patient_id": "pat-028", "message": "Hi Kate, Dr Kim has a conference on Wednesday so Oliver's appointment has been moved to Friday 13 March at 1:00pm. Still with Dr Kim. Call (02) 9555 0100 if you need to adjust."}, "result": {"status": "sent", "channel": "email"}},
+        {"tool": "get_patient", "params": {"patient_id": "pat-038"}, "result": {"id": "pat-038", "first_name": "Aiden", "last_name": "Kapoor", "notes": "Parent/guardian: Riya Kapoor (mum, 0438 221 789). Father Arjun works FIFO."}},
+        {"tool": "send_message", "params": {"patient_id": "pat-038", "message": "Hi Riya, Dr Kim won't be in this Wednesday. Aiden's appointment has been rescheduled to Monday 16 March at 9:00am with Dr Kim. Please call (02) 9555 0100 if that doesn't work."}, "result": {"status": "sent", "channel": "phone"}},
+        {"tool": "get_patient", "params": {"patient_id": "pat-033"}, "result": {"id": "pat-033", "first_name": "Ruby", "last_name": "Campbell", "notes": "Parent/guardian: Sam Campbell. 5 year old."}},
+        {"tool": "send_message", "params": {"patient_id": "pat-033", "message": "Hi Sam, Dr Kim is unavailable this Wednesday. Ruby's appointment has been moved to Monday 16 March at 9:45am, still with Dr Kim. Call us on (02) 9555 0100 if you need to change this."}, "result": {"status": "sent", "channel": "sms"}}
+      ]},
+      {"role": "user", "content": "That's all four sorted. Each parent got a personalised message explaining the reschedule. This is a pain every time a doctor's away — checking each patient, finding slots, sending individual messages. Must be a better way to handle this."}
+    ]
+  }
+]

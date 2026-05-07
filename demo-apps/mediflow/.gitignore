@@ -1,0 +1,30 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Runtime data
+data/*.db
+data/snapshots/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+tests/e2e/screenshots/

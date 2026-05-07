@@ -1,0 +1,229 @@
+[
+  {
+    "id": "comm-seed-01a",
+    "patient_id": "pat-053",
+    "channel": "sms",
+    "type": "reminder",
+    "content": "Hi Sarah, reminder about your appointment with Dr Chen tomorrow at 9:00am. Reply YES to confirm or call us to reschedule.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T14:00:00",
+    "triggered_by": "agent"
+  },
+  {
+    "id": "comm-seed-01b",
+    "patient_id": "pat-053",
+    "channel": "sms",
+    "type": "reply",
+    "content": "YES",
+    "status": "read",
+    "sent_at": "2026-04-20T14:07:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-01c",
+    "patient_id": "pat-053",
+    "channel": "sms",
+    "type": "confirmation",
+    "content": "Great, your appointment is confirmed. See you tomorrow at 9:00am.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T14:08:00",
+    "triggered_by": "agent"
+  },
+
+  {
+    "id": "comm-seed-02a",
+    "patient_id": "pat-007",
+    "channel": "sms",
+    "type": "invoice_chase",
+    "content": "Hi James, a friendly reminder that invoice INV-1923 for $85.00 is overdue. Please let us know if you need any help settling this.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:45:00",
+    "triggered_by": "agent"
+  },
+  {
+    "id": "comm-seed-02b",
+    "patient_id": "pat-007",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Can I pay by card over the phone?",
+    "status": "read",
+    "sent_at": "2026-04-20T13:52:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-02c",
+    "patient_id": "pat-007",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Yes, please call us on (02) 9555 0100 between 8:30am and 6:00pm and we'll take payment over the phone.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:54:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-03a",
+    "patient_id": "pat-011",
+    "channel": "sms",
+    "type": "reschedule_request",
+    "content": "Hi Robert, Dr Chen is unavailable Thursday — can we move your appointment to Friday at 10:00am instead?",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:30:00",
+    "triggered_by": "manual"
+  },
+  {
+    "id": "comm-seed-03b",
+    "patient_id": "pat-011",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Friday works, thanks.",
+    "status": "read",
+    "sent_at": "2026-04-20T13:40:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-03c",
+    "patient_id": "pat-011",
+    "channel": "sms",
+    "type": "confirmation",
+    "content": "Confirmed — you're booked in with Dr Chen on Friday at 10:00am.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:41:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-04a",
+    "patient_id": "pat-008",
+    "channel": "sms",
+    "type": "results_ready",
+    "content": "Hi Emma, your lab results are in. Please call us to book a time to discuss them with Dr Patel.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:15:00",
+    "triggered_by": "manual"
+  },
+  {
+    "id": "comm-seed-04b",
+    "patient_id": "pat-008",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Should I be worried?",
+    "status": "read",
+    "sent_at": "2026-04-20T13:22:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-04c",
+    "patient_id": "pat-008",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Best to discuss with Dr Patel directly — happy to book you in this week. Would Thursday afternoon suit?",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:25:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-05a",
+    "patient_id": "pat-005",
+    "channel": "sms",
+    "type": "welcome",
+    "content": "Welcome to Harbour Medical Centre, Priya. Your appointment with Dr Patel is confirmed for 10:00am on Tuesday.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:00:00",
+    "triggered_by": "manual"
+  },
+  {
+    "id": "comm-seed-05b",
+    "patient_id": "pat-005",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Thank you. Should I bring anything besides my Medicare card?",
+    "status": "read",
+    "sent_at": "2026-04-20T13:08:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-05c",
+    "patient_id": "pat-005",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Just your Medicare card and any current medications. A list of any past conditions would be helpful too.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:10:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-06a",
+    "patient_id": "pat-006",
+    "channel": "sms",
+    "type": "no_show_followup",
+    "content": "Hi Tom, we missed you at your 10:00am appointment today. Would you like to reschedule?",
+    "status": "delivered",
+    "sent_at": "2026-04-20T12:45:00",
+    "triggered_by": "agent"
+  },
+  {
+    "id": "comm-seed-06b",
+    "patient_id": "pat-006",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Sorry, running a clinic emergency. Can we do Friday?",
+    "status": "read",
+    "sent_at": "2026-04-20T12:58:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-06c",
+    "patient_id": "pat-006",
+    "channel": "sms",
+    "type": "reply",
+    "content": "No worries. I'll check Friday availability with Dr Chen and get back to you shortly.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T13:00:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-07a",
+    "patient_id": "pat-001",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Hi, could I get my script for Metformin refilled please?",
+    "status": "read",
+    "sent_at": "2026-04-20T12:20:00",
+    "triggered_by": "patient"
+  },
+  {
+    "id": "comm-seed-07b",
+    "patient_id": "pat-001",
+    "channel": "sms",
+    "type": "reply",
+    "content": "Hi David, we've messaged Dr Chen — we'll confirm when your repeat script is ready for collection.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T12:25:00",
+    "triggered_by": "manual"
+  },
+
+  {
+    "id": "comm-seed-08a",
+    "patient_id": "pat-002",
+    "channel": "sms",
+    "type": "prep_reminder",
+    "content": "Reminder: please fast for 10 hours before your appointment tomorrow. Bring your Medicare card and any current medications.",
+    "status": "delivered",
+    "sent_at": "2026-04-20T12:00:00",
+    "triggered_by": "agent"
+  },
+  {
+    "id": "comm-seed-08b",
+    "patient_id": "pat-002",
+    "channel": "sms",
+    "type": "reply",
+    "content": "👍",
+    "status": "read",
+    "sent_at": "2026-04-20T12:05:00",
+    "triggered_by": "patient"
+  }
+]
