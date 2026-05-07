@@ -1,0 +1,12 @@
+{
+  "name": "Harbour Medical Centre",
+  "address": "42 Circular Quay West, Sydney NSW 2000",
+  "phone": "(02) 9555 0100",
+  "email": "reception@harbourmedical.com.au",
+  "hours": "Monday-Friday 8:30am-6:00pm, Saturday 9:00am-12:00pm",
+  "cancellation_policy": "Please provide 24 hours notice for cancellations. Late cancellations may incur a $50 fee.",
+  "after_hours": "For after-hours emergencies, please call 000 or visit your nearest emergency department.",
+  "telehealth_info": "Telehealth appointments available via our patient portal. Link sent via SMS before appointment.",
+  "billing_info": "We accept Medicare bulk billing for concession card holders. Standard consultation gap: $38. Payment due within 14 days.",
+  "parking": "2-hour street parking available on Circular Quay West. Nearest parking garage: Cahill Expressway Car Park."
+}

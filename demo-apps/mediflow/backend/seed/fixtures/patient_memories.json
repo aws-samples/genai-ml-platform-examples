@@ -1,0 +1,572 @@
+[
+  {
+    "id": "mem-seed-001",
+    "patient_id": "pat-002",
+    "memory_type": "preference",
+    "content": "Prefers appointments after 2pm — mentioned childcare constraints during morning hours",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-002",
+    "patient_id": "pat-012",
+    "memory_type": "preference",
+    "content": "Prefers to be addressed as 'Mrs Park' — corrected the agent when called by first name",
+    "source": "agent_observed",
+    "confidence": 0.85,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-003",
+    "patient_id": "pat-015",
+    "memory_type": "preference",
+    "content": "Always requests Dr Chen specifically — declined alternative doctors when offered",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-004",
+    "patient_id": "pat-036",
+    "memory_type": "communication",
+    "content": "Mum Sarah prefers text confirmation for bookings but wants a phone call for any changes or cancellations",
+    "source": "agent_observed",
+    "confidence": 0.75,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-005",
+    "patient_id": "pat-044",
+    "memory_type": "behavioral",
+    "content": "Tends to cancel Friday appointments (4 of 5 Friday bookings were cancelled). Tuesday and Wednesday attendance is 100%",
+    "source": "system_detected",
+    "confidence": 0.88,
+    "observation_count": 5,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-006",
+    "patient_id": "pat-045",
+    "memory_type": "behavioral",
+    "content": "Cancels Monday appointments frequently (3 of 4 cancelled). Reliable on other weekdays",
+    "source": "system_detected",
+    "confidence": 0.82,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-007",
+    "patient_id": "pat-007",
+    "memory_type": "behavioral",
+    "content": "3 of 4 missed appointments were Wednesday mornings. Tuesday and Thursday attendance is 100%",
+    "source": "system_detected",
+    "confidence": 0.85,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-008",
+    "patient_id": "pat-030",
+    "memory_type": "behavioral",
+    "content": "Consistently books follow-up within 48 hours of appointment completion — proactive scheduler",
+    "source": "system_detected",
+    "confidence": 0.7,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-009",
+    "patient_id": "pat-009",
+    "memory_type": "medical_context",
+    "content": "Follows exact quarterly diabetes management cycle: fasting blood test → results review (1 week) → medication adjustment if needed",
+    "source": "system_detected",
+    "confidence": 0.92,
+    "observation_count": 6,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-010",
+    "patient_id": "pat-003",
+    "memory_type": "medical_context",
+    "content": "Needs extra appointment time — mobility issues mean she arrives slowly and needs help settling in",
+    "source": "agent_observed",
+    "confidence": 0.8,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-011",
+    "patient_id": "pat-019",
+    "memory_type": "communication",
+    "content": "Becomes defensive about billing topics — responds better to empathetic, factual tone rather than formal statements",
+    "source": "agent_observed",
+    "confidence": 0.75,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-012",
+    "patient_id": "pat-025",
+    "memory_type": "communication",
+    "content": "All communications should go through father Wei Zhang (0433 111 222) — never contact the patient directly",
+    "source": "agent_observed",
+    "confidence": 0.95,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-013",
+    "patient_id": "pat-029",
+    "memory_type": "communication",
+    "content": "Daughter manages all bookings and appointment changes. Patient cannot use phone independently.",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 5,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-014",
+    "patient_id": "pat-047",
+    "memory_type": "communication",
+    "content": "Does not respond to SMS or email — phone calls only. Confirmed in two separate conversations.",
+    "source": "agent_observed",
+    "confidence": 0.95,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-015",
+    "patient_id": "pat-048",
+    "memory_type": "communication",
+    "content": "Gets very anxious when receiving phone calls — always use SMS. Has specifically requested no calls.",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-016",
+    "patient_id": "pat-004",
+    "memory_type": "medical_context",
+    "content": "Asthma management follows strict 3-monthly cycle — disruption causes anxiety about health management",
+    "source": "system_detected",
+    "confidence": 0.85,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-017",
+    "patient_id": "pat-042",
+    "memory_type": "medical_context",
+    "content": "Rheumatoid arthritis cycle is 6-weekly not quarterly — tighter monitoring due to methotrexate",
+    "source": "system_detected",
+    "confidence": 0.88,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-018",
+    "patient_id": "pat-040",
+    "memory_type": "preference",
+    "content": "Son Keith drives her to appointments — only available before 1pm. Do not schedule afternoon slots.",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-019",
+    "patient_id": "pat-041",
+    "memory_type": "preference",
+    "content": "Wife Doris accompanies to all appointments and translates medical information — always CC her on follow-up",
+    "source": "agent_observed",
+    "confidence": 0.85,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-020",
+    "patient_id": "pat-006",
+    "memory_type": "preference",
+    "content": "Uni student — only available after 3pm on weekdays or Friday mornings (no classes). Prefers telehealth.",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-021",
+    "patient_id": "pat-049",
+    "memory_type": "behavioral",
+    "content": "Has a pattern of no-shows for early morning appointments (9:00-9:30). Attends reliably for mid-morning and afternoon slots.",
+    "source": "system_detected",
+    "confidence": 0.85,
+    "observation_count": 5,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-022",
+    "patient_id": "pat-050",
+    "memory_type": "behavioral",
+    "content": "Improved attendance since switching to earlier time slots — previously missed 4 afternoon appointments",
+    "source": "system_detected",
+    "confidence": 0.65,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-023",
+    "patient_id": "pat-008",
+    "memory_type": "medical_context",
+    "content": "Currently 28 weeks pregnant — antenatal check-ups increasing in frequency. May need to switch to weekly visits soon.",
+    "source": "agent_observed",
+    "confidence": 0.8,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-024",
+    "patient_id": "pat-008",
+    "memory_type": "preference",
+    "content": "Prefers first appointment of the day — morning sickness is less severe before 10am",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-025",
+    "patient_id": "pat-011",
+    "memory_type": "behavioral",
+    "content": "Always arrives 15 minutes early. If appointment is running late, gets noticeably agitated.",
+    "source": "agent_observed",
+    "confidence": 0.6,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-026",
+    "patient_id": "pat-014",
+    "memory_type": "communication",
+    "content": "Daughter Amira (0412 555 678) acts as interpreter — call her first to arrange complex appointment discussions",
+    "source": "agent_observed",
+    "confidence": 0.85,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-027",
+    "patient_id": "pat-017",
+    "memory_type": "communication",
+    "content": "Hard of hearing — prefers SMS over phone calls despite being elderly. Phone calls require shouting.",
+    "source": "agent_observed",
+    "confidence": 0.8,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-028",
+    "patient_id": "pat-020",
+    "memory_type": "behavioral",
+    "content": "Consistently reschedules first booking then keeps the rescheduled appointment. Account for this pattern.",
+    "source": "system_detected",
+    "confidence": 0.65,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-029",
+    "patient_id": "pat-022",
+    "memory_type": "preference",
+    "content": "Specifically requests Dr Nguyen for HRT management — uncomfortable discussing menopause with male doctors",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-030",
+    "patient_id": "pat-026",
+    "memory_type": "behavioral",
+    "content": "Consistently pays invoices within 24 hours of receiving them — never required a payment chase",
+    "source": "system_detected",
+    "confidence": 0.9,
+    "observation_count": 6,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-031",
+    "patient_id": "pat-027",
+    "memory_type": "medical_context",
+    "content": "New patient transferred from Melbourne — still waiting on complete medical records from previous practice",
+    "source": "agent_observed",
+    "confidence": 0.6,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-032",
+    "patient_id": "pat-032",
+    "memory_type": "communication",
+    "content": "Prefers not to discuss mental health in waiting room — appreciates direct-to-room when arriving",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-033",
+    "patient_id": "pat-032",
+    "memory_type": "behavioral",
+    "content": "Cancellation rate increases during high work-stress periods — typically March and September (end of quarter)",
+    "source": "system_detected",
+    "confidence": 0.55,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-034",
+    "patient_id": "pat-039",
+    "memory_type": "medical_context",
+    "content": "Type 1 diabetes (paediatric) — quarterly cycle aligned with school terms to minimise missed classes",
+    "source": "system_detected",
+    "confidence": 0.8,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-035",
+    "patient_id": "pat-039",
+    "memory_type": "preference",
+    "content": "Dad Mark always accompanies — prefers afternoon appointments after school pickup at 3:15pm",
+    "source": "agent_observed",
+    "confidence": 0.75,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-036",
+    "patient_id": "pat-021",
+    "memory_type": "behavioral",
+    "content": "Very shy with new people — mum Jenny mentioned he takes 10 minutes to warm up. Give him space.",
+    "source": "agent_observed",
+    "confidence": 0.65,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-037",
+    "patient_id": "pat-028",
+    "memory_type": "preference",
+    "content": "Mum Kate requests same appointment slot each visit (Wednesday 10:30am) to maintain ADHD routine consistency",
+    "source": "agent_observed",
+    "confidence": 0.85,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-038",
+    "patient_id": "pat-046",
+    "memory_type": "communication",
+    "content": "Speaks basic conversational English but needs Mandarin interpreter for anything medical. Use simple language for scheduling.",
+    "source": "agent_observed",
+    "confidence": 0.9,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-039",
+    "patient_id": "pat-034",
+    "memory_type": "behavioral",
+    "content": "Tends to book annual review in January then reschedule to February — consider booking directly for February",
+    "source": "system_detected",
+    "confidence": 0.5,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-040",
+    "patient_id": "pat-016",
+    "memory_type": "communication",
+    "content": "Responds well to gentle, warm tone. Direct or clinical language about mental health increases her anxiety.",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-041",
+    "patient_id": "pat-019",
+    "memory_type": "behavioral",
+    "content": "Has disputed 3 of last 5 invoices — always resolved after showing detailed breakdown. Send itemised invoices proactively.",
+    "source": "system_detected",
+    "confidence": 0.82,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-042",
+    "patient_id": "pat-003",
+    "memory_type": "preference",
+    "content": "Always brings her own cushion for the waiting room chair. Has been coming since 2015 — loyalty patient.",
+    "source": "agent_observed",
+    "confidence": 0.5,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-043",
+    "patient_id": "pat-005",
+    "memory_type": "preference",
+    "content": "Works from home — flexible on appointment times but prefers mid-week (Tue-Thu)",
+    "source": "agent_observed",
+    "confidence": 0.6,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-044",
+    "patient_id": "pat-038",
+    "memory_type": "communication",
+    "content": "Mum Riya handles all bookings. Dad Arjun works in construction — only available for evening calls after 5:30pm",
+    "source": "agent_observed",
+    "confidence": 0.75,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-045",
+    "patient_id": "pat-043",
+    "memory_type": "medical_context",
+    "content": "COPD spirometry must be done in morning when respiratory effort is best — afternoon results are unreliable",
+    "source": "system_detected",
+    "confidence": 0.8,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-046",
+    "patient_id": "pat-031",
+    "memory_type": "communication",
+    "content": "Sensitive about fertility topics — avoids discussing in reception area. Use private message or phone for any fertility-related follow-up.",
+    "source": "agent_observed",
+    "confidence": 0.7,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-047",
+    "patient_id": "pat-001",
+    "memory_type": "preference",
+    "content": "Prefers early morning appointments before 9:30am — drops kids at school then comes straight to clinic",
+    "source": "agent_observed",
+    "confidence": 0.65,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-048",
+    "patient_id": "pat-013",
+    "memory_type": "behavioral",
+    "content": "No-show rate drops to zero when sent an SMS reminder 2 hours before appointment. Standard 24hr reminder insufficient.",
+    "source": "system_detected",
+    "confidence": 0.7,
+    "observation_count": 3,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-049",
+    "patient_id": "pat-023",
+    "memory_type": "medical_context",
+    "content": "Knee injury recovery — cleared for light exercise but not contact sport. Needs updated specialist letter for insurance.",
+    "source": "agent_observed",
+    "confidence": 0.6,
+    "observation_count": 1,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-050",
+    "patient_id": "pat-037",
+    "memory_type": "preference",
+    "content": "Sister of Noah Mitchell (pat-036) — mum Sarah prefers booking both siblings back-to-back to minimise clinic visits",
+    "source": "agent_observed",
+    "confidence": 0.8,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-051",
+    "patient_id": "pat-010",
+    "memory_type": "behavioral",
+    "content": "Always confirms appointments via return SMS within 5 minutes of receiving reminder. Very responsive.",
+    "source": "system_detected",
+    "confidence": 0.7,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-052",
+    "patient_id": "pat-033",
+    "memory_type": "preference",
+    "content": "Dad Sam only available mornings due to shift work — must book before 12pm for accompanied visits",
+    "source": "agent_observed",
+    "confidence": 0.75,
+    "observation_count": 2,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-053",
+    "patient_id": "pat-051",
+    "memory_type": "communication",
+    "content": "Daughter Lily Chen interprets — call Lily on 0412 775 330, not Mrs Chen directly",
+    "source": "agent_observed",
+    "confidence": 0.95,
+    "observation_count": 5,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-054",
+    "patient_id": "pat-051",
+    "memory_type": "preference",
+    "content": "Appointments must be after 1:30pm — daughter Lily finishes work at 1pm and needs to be present to translate",
+    "source": "agent_observed",
+    "confidence": 0.92,
+    "observation_count": 4,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-055",
+    "patient_id": "pat-052",
+    "memory_type": "preference",
+    "content": "Wheelchair user — needs ground-floor wheelchair-accessible room",
+    "source": "agent_observed",
+    "confidence": 0.98,
+    "observation_count": 6,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-056",
+    "patient_id": "pat-052",
+    "memory_type": "preference",
+    "content": "Never book Room 3 — upstairs with no lift access",
+    "source": "agent_observed",
+    "confidence": 0.98,
+    "observation_count": 5,
+    "status": "active"
+  },
+  {
+    "id": "mem-seed-057",
+    "patient_id": "pat-053",
+    "memory_type": "preference",
+    "content": "Prefers morning appointments — drops kids at school then comes straight to clinic",
+    "source": "agent_observed",
+    "confidence": 0.85,
+    "observation_count": 3,
+    "status": "active"
+  }
+]

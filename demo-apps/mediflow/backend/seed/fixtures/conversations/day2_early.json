@@ -1,0 +1,118 @@
+[
+  {
+    "session_id": "sess-day2-am-01",
+    "timestamp_base": "2026-03-10T08:30:00",
+    "turns": [
+      {"role": "user", "content": "Morning! Can you pull up Dr Chen's schedule for today? I want to see who's coming in."},
+      {"role": "assistant", "content": "Good morning! Pulling up Dr Chen's appointments for today.", "tool_calls": [
+        {"tool": "list_upcoming_appointments", "params": {"doctor_id": "dr-chen", "date": "2026-03-10"}, "result": [
+          {"id": "apt-037", "patient_id": "pat-003", "date": "2026-03-10", "time": "09:00", "type": "follow-up", "status": "scheduled", "patient_name": "Margaret Wilson"},
+          {"id": "apt-038", "patient_id": "pat-007", "date": "2026-03-10", "time": "09:30", "type": "standard", "status": "scheduled", "patient_name": "James Cooper"},
+          {"id": "apt-042", "patient_id": "pat-012", "date": "2026-03-10", "time": "10:30", "type": "follow-up", "status": "scheduled", "patient_name": "Soo-Yun Park"},
+          {"id": "apt-043", "patient_id": "pat-005", "date": "2026-03-10", "time": "11:30", "type": "telehealth", "status": "scheduled", "patient_name": "Priya Sharma"},
+          {"id": "apt-047", "patient_id": "pat-035", "date": "2026-03-10", "time": "14:30", "type": "urgent", "status": "scheduled", "patient_name": "Mia Jackson"},
+          {"id": "apt-049", "patient_id": "pat-017", "date": "2026-03-10", "time": "15:30", "type": "follow-up", "status": "scheduled", "patient_name": "William Hughes"},
+          {"id": "apt-052", "patient_id": "pat-011", "date": "2026-03-10", "time": "16:00", "type": "follow-up", "status": "scheduled", "patient_name": "Robert MacLeod"}
+        ]}
+      ]},
+      {"role": "user", "content": "Seven patients for Dr Chen today. Mrs Wilson first at 9, then Cooper at 9:30 — keep an eye on him, you know his history. Mrs Park at 10:30, Priya's telehealth at 11:30, then the afternoon lot. And that urgent one for Mia Jackson at 2:30 — make sure she gets seen promptly."},
+      {"role": "assistant", "content": "Got it. I'll keep a close eye on James Cooper — with his three no-shows, we don't want another one. And I've noted Mia Jackson's 2:30 as urgent priority. Mrs Park's post-surgery review at 10:30 should allow extra time for mobility too."},
+      {"role": "user", "content": "Good thinking. Is Dr Patel back today?"},
+      {"role": "assistant", "content": "Let me check his schedule.", "tool_calls": [
+        {"tool": "list_upcoming_appointments", "params": {"doctor_id": "dr-patel", "date": "2026-03-10"}, "result": [
+          {"id": "apt-039", "patient_id": "pat-009", "date": "2026-03-10", "time": "08:30", "type": "follow-up", "status": "scheduled", "patient_name": "George Papadopoulos"},
+          {"id": "apt-040", "patient_id": "pat-001", "date": "2026-03-10", "time": "09:30", "type": "standard", "status": "scheduled", "patient_name": "David Thompson"},
+          {"id": "apt-045", "patient_id": "pat-013", "date": "2026-03-10", "time": "10:30", "type": "standard", "status": "scheduled", "patient_name": "Daniel Brown"},
+          {"id": "apt-046", "patient_id": "pat-016", "date": "2026-03-10", "time": "14:00", "type": "follow-up", "status": "scheduled", "patient_name": "Hannah Lee"},
+          {"id": "apt-050", "patient_id": "pat-027", "date": "2026-03-10", "time": "15:00", "type": "standard", "status": "scheduled", "patient_name": "Jasmine Kaur"}
+        ]}
+      ]},
+      {"role": "user", "content": "Yep, he's got a full day. Good, glad he's feeling better. George is already here for his 8:30 — he was fasting for bloods so he's keen to get going. Thanks!"}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-02",
+    "timestamp_base": "2026-03-10T08:40:00",
+    "turns": [
+      {"role": "user", "content": "Send Mrs Park a reminder about her 10:30 with Dr Chen. She was originally booked with Dr Patel but we moved her yesterday when he was out. I want to make sure she remembers the new time and doctor."},
+      {"role": "assistant", "content": "Of course. Let me send Mrs Park a gentle reminder about her rescheduled appointment.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-012"}, "result": {"id": "pat-012", "first_name": "Soo-Yun", "last_name": "Park", "phone": "0422 789 012", "preferred_contact": "phone", "notes": "Recovering from hip replacement surgery (Feb 2026). Needs gentle handling. Daughter Jenny (0433 111 222) often accompanies. Prefers to be called Mrs Park."}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-012", "appointment_id": "apt-042", "message": "Good morning Mrs Park. A gentle reminder about your appointment today at 10:30am with Dr Chen for your post-surgery review. Please allow extra time for parking. We look forward to seeing you."}, "result": {"status": "sent", "channel": "phone", "type": "reminder"}}
+      ]},
+      {"role": "assistant", "content": "Done. I've called Mrs Park's number with a reminder about her 10:30 appointment with Dr Chen. I kept it warm and mentioned it's her post-surgery review. Her notes say her daughter Jenny often accompanies her, so she should be well looked after."},
+      {"role": "user", "content": "Perfect, thanks. She's such a lovely lady."}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-03",
+    "timestamp_base": "2026-03-10T08:48:00",
+    "turns": [
+      {"role": "user", "content": "Also send one to James Cooper for his 9:30. You know the drill — be firm. Three no-shows. We can't have another one."},
+      {"role": "assistant", "content": "On it. Sending James a firm reminder.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-007"}, "result": {"id": "pat-007", "first_name": "James", "last_name": "Cooper", "phone": "0467 234 567", "preferred_contact": "phone", "notes": "Tends to forget appointments. Has missed 3 previous bookings. Please send extra reminders day before AND morning of appointment."}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-007", "appointment_id": "apt-038", "message": "Good morning James. This is a reminder about your appointment TODAY at 9:30am with Dr Chen. Please note this appointment was rebooked after your previous missed visit. If you are unable to attend, please call us immediately so we can offer the slot to another patient. Thank you."}, "result": {"status": "sent", "channel": "phone", "type": "reminder"}}
+      ]},
+      {"role": "assistant", "content": "Sent. I kept it polite but direct — mentioned it was rebooked after his last missed visit and asked him to call if he can't make it. His notes say he prefers phone, so I called his mobile."},
+      {"role": "user", "content": "Good. Fingers crossed he actually shows up this time."}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-04",
+    "timestamp_base": "2026-03-10T08:55:00",
+    "turns": [
+      {"role": "user", "content": "Quick question — has Carlos Torres paid his invoice yet? The one from February. He said he'd pay on Friday."},
+      {"role": "assistant", "content": "Let me check the status of Carlos's invoice.", "tool_calls": [
+        {"tool": "get_invoice", "params": {"invoice_id": "inv-004"}, "result": {"id": "inv-004", "patient_id": "pat-019", "amount": 175.00, "amount_paid": 0, "status": "outstanding", "due_date": "2026-02-28", "description": "Consultation 2026-02-17 - shoulder pain. Patient disputes billing.", "chase_count": 0}}
+      ]},
+      {"role": "user", "content": "Still nothing? That's $175 and it's been outstanding since February. He promised Friday... alright, let's give him until Wednesday. If it's still unpaid by then, chase him."},
+      {"role": "assistant", "content": "Understood. I'll flag inv-004 for a follow-up on Wednesday the 12th if no payment comes through. Carlos prefers phone contact only, so I'll call him then."},
+      {"role": "user", "content": "Yep, phone only. He gets annoyed if you email. Thanks."}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-05",
+    "timestamp_base": "2026-03-10T09:05:00",
+    "turns": [
+      {"role": "user", "content": "One more — can you send William Hughes a reminder? He's at 3:30 this arvo with Dr Chen. Remember he's hard of hearing so text him even though his preference is phone."},
+      {"role": "assistant", "content": "Good call. I'll send Mr Hughes a text message instead of calling.", "tool_calls": [
+        {"tool": "get_patient", "params": {"patient_id": "pat-017"}, "result": {"id": "pat-017", "first_name": "William", "last_name": "Hughes", "phone": "0477 234 567", "preferred_contact": "phone", "notes": "Hard of hearing. Speak clearly and loudly. Wears hearing aid in left ear."}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-017", "appointment_id": "apt-049", "channel": "sms", "message": "Hello William. Reminder: You have an appointment TODAY at 3:30pm with Dr Chen at Riverside Medical. Please arrive 5 minutes early. See you then!"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}}
+      ]},
+      {"role": "assistant", "content": "Done. Sent William a text reminder for his 3:30pm appointment with Dr Chen. Even though his preference is phone, a text makes more sense given his hearing difficulties — he can read it at his own pace."},
+      {"role": "user", "content": "Exactly. Right, Mrs Wilson's just walked in for her 9 o'clock. Let's get the day started!"}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-06",
+    "timestamp_base": "2026-03-10T09:15:00",
+    "turns": [
+      {"role": "user", "content": "Right, let's do the afternoon reminders while it's quiet. Send reminders to all the afternoon patients — Hannah Lee at 2pm with Patel, Mia Jackson at 2:30 with Chen, Jasmine Kaur at 3 with Patel, and William Hughes at 3:30 with Chen. Actually wait — I already did William. So just the other three."},
+      {"role": "assistant", "content": "On it — sending reminders to Hannah, Mia, and Jasmine for their afternoon appointments.", "tool_calls": [
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-016", "appointment_id": "apt-046"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-035", "appointment_id": "apt-047"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-027", "appointment_id": "apt-050"}, "result": {"status": "sent", "channel": "email", "type": "reminder"}}
+      ]},
+      {"role": "user", "content": "Done. Three reminders sent in one go — that's the way to do it. Batch them in the morning so nobody forgets their arvo slot."}
+    ]
+  },
+  {
+    "session_id": "sess-day2-am-07",
+    "timestamp_base": "2026-03-10T09:25:00",
+    "turns": [
+      {"role": "user", "content": "Actually, let's also do tomorrow's reminders now. Dr Kim has a packed day tomorrow. Send reminders to all her Tuesday patients — I think there's about four of them."},
+      {"role": "assistant", "content": "Let me check Dr Kim's schedule for tomorrow and send reminders.", "tool_calls": [
+        {"tool": "list_upcoming_appointments", "params": {"doctor_id": "dr-kim", "date": "2026-03-11"}, "result": [
+          {"id": "apt-055", "patient_id": "pat-002", "date": "2026-03-11", "time": "09:00", "type": "standard", "status": "scheduled", "patient_name": "Sarah Chen"},
+          {"id": "apt-056", "patient_id": "pat-008", "date": "2026-03-11", "time": "10:00", "type": "follow-up", "status": "scheduled", "patient_name": "Lisa Nguyen"},
+          {"id": "apt-057", "patient_id": "pat-014", "date": "2026-03-11", "time": "11:00", "type": "standard", "status": "scheduled", "patient_name": "Emily Watson"},
+          {"id": "apt-058", "patient_id": "pat-022", "date": "2026-03-11", "time": "14:00", "type": "follow-up", "status": "scheduled", "patient_name": "Ahmed Hassan"}
+        ]},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-002", "appointment_id": "apt-055"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-008", "appointment_id": "apt-056"}, "result": {"status": "sent", "channel": "email", "type": "reminder"}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-014", "appointment_id": "apt-057"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}},
+        {"tool": "send_appointment_reminder", "params": {"patient_id": "pat-022", "appointment_id": "apt-058"}, "result": {"status": "sent", "channel": "sms", "type": "reminder"}}
+      ]},
+      {"role": "user", "content": "Four reminders sent for Dr Kim's Tuesday patients. Good — if we do this every morning for the next day's appointments, we'll cut our no-show rate. It's all about the morning batch."}
+    ]
+  }
+]

@@ -1,0 +1,72 @@
+{
+  "patterns": [
+    {
+      "id": "pat-script-001",
+      "pattern_type": "CROSS_SOURCE",
+      "description": "Receptionist performs the same morning routine every weekday around 8:15am — opens each doctor's schedule, checks overnight pathology results, flags patients needing extra time, notes likely late arrivals.",
+      "tool_sequence": "[\"get_doctor_schedule\", \"check_pathology_results\", \"get_patient\", \"get_patient_memories\"]",
+      "occurrence_count": 63,
+      "confidence": 0.94,
+      "example_session_ids": "[\"session-d1-am-001\", \"session-d1-am-002\", \"session-d1-am-003\"]"
+    },
+    {
+      "id": "pat-script-002",
+      "pattern_type": "DATA_PATTERN",
+      "description": "When appointments are rescheduled in bulk, 37% of patients cancel the new slot due to unaddressed personal constraints — interpreter availability, accessibility needs, preferred times.",
+      "tool_sequence": "[\"reschedule_appointment\", \"send_message\", \"get_patient_memories\"]",
+      "occurrence_count": 25,
+      "confidence": 0.91,
+      "example_session_ids": "[\"patient:pat-051\", \"patient:pat-052\", \"patient:pat-053\"]"
+    }
+  ],
+  "skills": [
+    {
+      "id": "sk-script-001",
+      "pattern_id": "pat-script-001",
+      "name": "Morning Briefing",
+      "description": "Compiles the daily briefing you build each morning — doctor schedules, overnight pathology results, patients flagged for extra time — and has it ready at 8am.",
+      "trigger_description": "Weekday mornings before the first patient arrives",
+      "agent_prompt_template": "At the start of each weekday, compile Rada's morning briefing. For each doctor working today, pull their schedule via get_doctor_schedule. Check overnight pathology results via check_pathology_results and flag anything abnormal. Scan today's patient list for memories that indicate extra time (mobility issues, interpreters, guardians) and surface those patients near the top of the briefing. Note likely late arrivals based on past punctuality memory. End with a one-line summary of the day's shape.",
+      "tool_config": "[\"get_doctor_schedule\", \"check_pathology_results\", \"get_patient\", \"get_patient_memories\"]",
+      "batch_selection_hint": "All doctors working today plus every patient flagged in their memories for extra care, interpreter, or no-show risk.",
+      "example_scenario": "Monday 08:00 — agent briefs Rada: Dr Chen and Dr Patel working. 3 pathology results need review. 4 patients flagged: Margaret (mobility), Hassan (wheelchair), Mei-Ling (interpreter), Marcus (no-show risk — triple-reminder sent).",
+      "status": "pending_review",
+      "scheduled": 1,
+      "schedule_cadence": "daily",
+      "schedule_time": "08:00",
+      "schedule_day": null
+    },
+    {
+      "id": "sk-script-002",
+      "pattern_id": "pat-script-002",
+      "name": "Context-Aware Booking",
+      "description": "Before confirming any appointment, checks the patient's profile for scheduling constraints — accessibility needs, interpreter availability, preferred times — and flags mismatches before they become cancellations.",
+      "trigger_description": "When any appointment is created or rescheduled",
+      "agent_prompt_template": "Before confirming this booking, check {{patient_name}}'s memories and notes for: (1) accessibility needs — wheelchair, mobility aids, ground-floor room requirement; (2) interpreter or family member who must attend — check their availability against the proposed time; (3) preferred time windows and days to avoid. If any constraint conflicts with the proposed slot, flag the mismatch and suggest an alternative.",
+      "tool_config": "[\"get_patient\", \"get_patient_memories\", \"check_availability\", \"book_appointment\"]",
+      "batch_selection_hint": null,
+      "example_scenario": "Patient Hassan Abadi is being booked into Room 3. Skill checks his memories — finds 'wheelchair user, needs ground-floor room' — blocks Room 3 (upstairs, no lift), suggests Room 1 (ground floor) instead.",
+      "status": "pending_review",
+      "scheduled": 0,
+      "schedule_cadence": null,
+      "schedule_time": null,
+      "schedule_day": null
+    },
+    {
+      "id": "sk-script-003",
+      "pattern_id": null,
+      "name": "Overdue Invoice Chase",
+      "description": "Contacts patients with outstanding invoices and personalises message tone based on prior chase count — friendly on first reminder, firmer on repeats. Resolves the batch at run time so it always works on the current set of overdue accounts.",
+      "trigger_description": "On request, or when overdue invoices accumulate",
+      "agent_prompt_template": "Identify all invoices with status='outstanding' via a database query. For each: look up the patient, check chase_count to pick the right tone (1st: friendly, 2nd: more direct, 3rd+: firm), and send a personalised payment reminder via send_message. If the patient has a payment-plan memory, honour it in the message. Emit a cascade event for each message sent so the UI can visualise the batch.",
+      "tool_config": "[\"get_patient\", \"get_patient_memories\", \"send_payment_reminder\", \"send_message\"]",
+      "batch_selection_hint": "All patients with one or more invoices currently in 'outstanding' status, ordered by days overdue.",
+      "example_scenario": "Friday afternoon: Rada asks 'run the overdue invoice chase'. Agent resolves 14 outstanding invoices, stages the batch for approval, then sends reminders with tone calibrated per chase count. Cascade plays in Comms.",
+      "status": "pending_review",
+      "scheduled": 0,
+      "schedule_cadence": null,
+      "schedule_time": null,
+      "schedule_day": null
+    }
+  ]
+}

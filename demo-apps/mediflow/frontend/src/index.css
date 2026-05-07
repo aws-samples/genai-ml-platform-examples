@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surface layers — Summit Violet 1000 base */
+  --color-void: #110033;
+  --color-slate: #1B0A42;
+  --color-graphite: #231250;
+  --color-ash: #2C1B58;
+
+  /* Text */
+  --color-primary: #F0F0F3;
+  --color-secondary: #9BA1B0;
+  --color-tertiary: #5C6378;
+  --color-inverse: #110033;
+
+  /* Accents — Summit highlight palette */
+  --color-mint: #00D2E5;
+  --color-apricot: #FF4B14;
+  --color-periwinkle: #8F0072;
+  --color-emerald: #34D399;
+  --color-gold: #FBBF24;
+  --color-coral: #F87171;
+  --color-violet: #D4A8FF;
+
+  /* Font families */
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Borders */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-glow: rgba(0, 210, 229, 0.2);
+  --color-border-active: rgba(0, 210, 229, 0.3);
+  --color-border-violet: rgba(212, 168, 255, 0.3);
+
+  /* Glow backgrounds */
+  --color-glow-mint: rgba(0, 210, 229, 0.15);
+  --color-glow-mint-subtle: rgba(0, 210, 229, 0.05);
+  --color-glow-violet: rgba(212, 168, 255, 0.15);
+  --color-glow-apricot: rgba(255, 75, 20, 0.15);
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Agent thinking pulse animation */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.3; }
+}
+@keyframes glow-pulse-violet {
+  0%, 100% { opacity: 0; box-shadow: 0 0 0 rgba(212, 168, 255, 0); }
+  50% { opacity: 1; box-shadow: 0 0 20px rgba(212, 168, 255, 0.15); }
+}
+
+/* Illuminate effect for agent actions */
+@keyframes illuminate {
+  0% { box-shadow: 0 0 0 rgba(0, 210, 229, 0); border-color: rgba(255, 255, 255, 0.06); }
+  30% { box-shadow: 0 0 20px rgba(0, 210, 229, 0.15); border-color: rgba(0, 210, 229, 0.3); }
+  100% { box-shadow: 0 0 0 rgba(0, 210, 229, 0); border-color: rgba(255, 255, 255, 0.06); }
+}
+
+/* Count-up number animation helper */
+@keyframes count-up-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Cascade stagger base */
+.cascade-item {
+  animation: cascade-in 300ms ease-out both;
+}
+@keyframes cascade-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Sparkline draw animation */
+@keyframes sparkline-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Shimmer for loading states */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 210, 229, 0.05) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Status badge flip */
+@keyframes badge-flip {
+  0% { transform: scaleY(1); }
+  50% { transform: scaleY(0); }
+  100% { transform: scaleY(1); }
+}
+
+/* View crossfade transition — opacity only to avoid scroll jitter */
+@keyframes view-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.view-enter {
+  animation: view-fade-in 250ms ease-out both;
+}
+
+/* Content fade for tab/selection transitions */
+@keyframes content-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.content-enter {
+  animation: content-fade 200ms ease-out both;
+}
+
+/* Panel slide-in from bottom (for inline panels like booking) */
+@keyframes panel-slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.panel-slide-up {
+  animation: panel-slide-up 300ms ease-out both;
+}
+
+/* ─── Execution Overlay ──────────────────────────────── */
+@keyframes overlay-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes overlay-panel-in {
+  from { opacity: 0; transform: scale(0.97) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.overlay-scrim {
+  animation: overlay-scrim-in 250ms ease-out both;
+}
+.overlay-panel {
+  animation: overlay-panel-in 350ms ease-out both;
+}
+
+/* Cascade result row (slides up) */
+@keyframes cascade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cascade-up-item {
+  animation: cascade-up 250ms ease-out both;
+}
+
+/* Step indicator glow */
+@keyframes step-glow {
+  0% { box-shadow: 0 0 0 rgba(0, 210, 229, 0); }
+  50% { box-shadow: 0 0 12px rgba(0, 210, 229, 0.4); }
+  100% { box-shadow: 0 0 4px rgba(0, 210, 229, 0.15); }
+}
+
+/* Enable glow pulse for improvement cards */
+@keyframes enable-glow {
+  0% { box-shadow: 0 0 0 rgba(0, 210, 229, 0); border-left-color: rgba(0, 210, 229, 0.3); }
+  40% { box-shadow: 0 0 24px rgba(0, 210, 229, 0.2); border-left-color: rgba(0, 210, 229, 0.6); }
+  100% { box-shadow: 0 0 0 rgba(0, 210, 229, 0); border-left-color: rgba(0, 210, 229, 0.3); }
+}
+
+/* NEW badge subtle pulse */
+@keyframes new-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.new-badge-pulse {
+  animation: new-badge-pulse 2s ease-in-out 3;
+}
+
+/* Agent pre-highlight blink — applied to elements the agent is about to interact with */
+@keyframes agent-blink {
+  0% { background-color: rgba(0, 210, 229, 0); box-shadow: 0 0 0 rgba(0, 210, 229, 0); }
+  15% { background-color: rgba(0, 210, 229, 0.25); box-shadow: 0 0 20px rgba(0, 210, 229, 0.4); }
+  35% { background-color: rgba(0, 210, 229, 0.05); box-shadow: 0 0 4px rgba(0, 210, 229, 0.1); }
+  55% { background-color: rgba(0, 210, 229, 0.2); box-shadow: 0 0 16px rgba(0, 210, 229, 0.35); }
+  75% { background-color: rgba(0, 210, 229, 0.05); box-shadow: 0 0 4px rgba(0, 210, 229, 0.1); }
+  90% { background-color: rgba(0, 210, 229, 0.15); box-shadow: 0 0 12px rgba(0, 210, 229, 0.3); }
+  100% { background-color: rgba(0, 210, 229, 0); box-shadow: 0 0 0 rgba(0, 210, 229, 0); }
+}
+.agent-blink {
+  animation: agent-blink 1s ease-in-out;
+  outline: 2px solid rgba(0, 210, 229, 0.4);
+  outline-offset: 2px;
+  border-radius: 12px;
+  z-index: 10;
+  position: relative;
+}
+
+/* Calendar unavailability diagonal stripe overlay — see TASK-047 */
+.unavailable-stripe {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--color-gold) 12%, transparent),
+    color-mix(in srgb, var(--color-gold) 12%, transparent) 4px,
+    transparent 4px,
+    transparent 10px
+  );
+}
+
+/* Agent panel resize — during active drag */
+.resize-handle-active,
+.resize-handle-active * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* Disable the wrapper's transform/margin transition while the user is actively dragging
+   the resize handle, so the edge tracks the cursor with no 300ms lag. */
+.panel-no-transition {
+  transition: none !important;
+}
+
+/* Agent markdown prose styling */
+.prose-agent p { margin: 0.25em 0; }
+.prose-agent p:first-child { margin-top: 0; }
+.prose-agent p:last-child { margin-bottom: 0; }
+.prose-agent ul, .prose-agent ol { margin: 0.35em 0; padding-left: 1.25em; }
+.prose-agent li { margin: 0.15em 0; }
+.prose-agent ul { list-style-type: disc; }
+.prose-agent ol { list-style-type: decimal; }
+.prose-agent strong { color: #F0F0F3; font-weight: 600; }
+.prose-agent code { background: rgba(255,255,255,0.06); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.85em; font-family: var(--font-mono); }
+.prose-agent pre { background: rgba(255,255,255,0.04); padding: 0.6em 0.8em; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+.prose-agent pre code { background: transparent; padding: 0; }
+.prose-agent a { color: #00D2E5; text-decoration: underline; text-underline-offset: 2px; }
+.streaming-cursor > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: rgba(0, 210, 229, 0.7);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.prose-agent h1, .prose-agent h2, .prose-agent h3, .prose-agent h4 { color: #F0F0F3; font-weight: 600; margin: 0.5em 0 0.25em; }
+.prose-agent h3 { font-size: 0.9em; }
+.prose-agent h4 { font-size: 0.85em; }
+.prose-agent table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.85em; }
+.prose-agent th, .prose-agent td { border: 1px solid rgba(255,255,255,0.06); padding: 0.3em 0.6em; }
+.prose-agent th { background: rgba(255,255,255,0.04); color: #F0F0F3; font-weight: 600; }

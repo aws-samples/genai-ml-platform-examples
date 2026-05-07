@@ -1,0 +1,38 @@
+[
+  {
+    "id": "dr-chen",
+    "name": "Dr Sarah Chen",
+    "specialty": "General Practice",
+    "consultation_duration_mins": 30,
+    "working_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+    "hours_start": "09:00",
+    "hours_end": "17:00"
+  },
+  {
+    "id": "dr-patel",
+    "name": "Dr Raj Patel",
+    "specialty": "General Practice",
+    "consultation_duration_mins": 30,
+    "working_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+    "hours_start": "08:30",
+    "hours_end": "16:30"
+  },
+  {
+    "id": "dr-kim",
+    "name": "Dr Joon Kim",
+    "specialty": "Paediatrics",
+    "consultation_duration_mins": 45,
+    "working_days": ["Monday", "Wednesday", "Friday"],
+    "hours_start": "09:00",
+    "hours_end": "15:00"
+  },
+  {
+    "id": "dr-nguyen",
+    "name": "Dr Mai Nguyen",
+    "specialty": "Women's Health",
+    "consultation_duration_mins": 30,
+    "working_days": ["Tuesday", "Thursday", "Friday"],
+    "hours_start": "10:00",
+    "hours_end": "18:00"
+  }
+]
