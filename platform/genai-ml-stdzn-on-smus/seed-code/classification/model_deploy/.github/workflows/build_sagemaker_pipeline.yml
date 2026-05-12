@@ -19,6 +19,14 @@ on:
         description: 'Model Package ARN'
         required: false
         type: string
+      sagemaker_project_name:
+        description: 'SageMaker Project Name'
+        required: false
+        type: string
+      sagemaker_project_id:
+        description: 'SageMaker Project ID'
+        required: false
+        type: string
       logLevel:
         description: 'Log level'
         required: false
@@ -144,11 +152,11 @@ jobs:
         MODEL_PACKAGE_ARN: ${{ github.event.inputs.model_package_arn || secrets.MODEL_PACKAGE_ARN }}
         DEPLOY_ACCOUNT: ${{ secrets.DEPLOY_ACCOUNT }}
         ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
-        SAGEMAKER_PROJECT_NAME: ${{ secrets.SAGEMAKER_PROJECT_NAME }}
-        SAGEMAKER_PROJECT_ID: ${{ secrets.SAGEMAKER_PROJECT_ID }}
+        SAGEMAKER_PROJECT_NAME: ${{ github.event.inputs.sagemaker_project_name || secrets.SAGEMAKER_PROJECT_NAME }}
+        SAGEMAKER_PROJECT_ID: ${{ github.event.inputs.sagemaker_project_id || secrets.SAGEMAKER_PROJECT_ID }}
         AMAZON_DATAZONE_DOMAIN: ${{ secrets.AMAZON_DATAZONE_DOMAIN }}
         AMAZON_DATAZONE_SCOPENAME: ${{ secrets.AMAZON_DATAZONE_SCOPENAME }}
-        AMAZON_DATAZONE_PROJECT: ${{ secrets.AMAZON_DATAZONE_PROJECT }}
+        AMAZON_DATAZONE_PROJECT: ${{ github.event.inputs.sagemaker_project_id || secrets.AMAZON_DATAZONE_PROJECT }}
         SAGEMAKER_DOMAIN_ARN: ${{ secrets.SAGEMAKER_DOMAIN_ARN }}
         SAGEMAKER_SPACE_ARN: ${{ secrets.SAGEMAKER_SPACE_ARN }}
       run: |
