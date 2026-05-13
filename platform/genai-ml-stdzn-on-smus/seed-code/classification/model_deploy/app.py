@@ -20,6 +20,7 @@ from deploy_endpoint.deploy_endpoint_stack import DeployEndpointStack
 from config.constants import (
     DEPLOY_ACCOUNT,
     DEFAULT_DEPLOYMENT_REGION,
+    stack_name
 )
 
 
@@ -32,7 +33,7 @@ dev_env = Environment(
 
 endpoint_stack = DeployEndpointStack(
     app, 
-    "sagemaker-endpoint-stack", 
+    stack_name, 
     env=dev_env
 )
 
