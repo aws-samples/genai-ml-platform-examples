@@ -144,6 +144,18 @@ jobs:
             --trust ${DEPLOY_ACCOUNT} \
             --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess 
         fi
+
+    - name: Extract model package info
+      id: extract_info
+      run: |
+        MODEL_PACKAGE_ARN="${{ github.event.inputs.model_package_arn }}"
+        SAGEMAKER_PROJECT_NAME="${{ github.event.inputs.sagemaker_project_name }}"
+    
+        MODEL_PACKAGE_GROUP=$(echo "$MODEL_PACKAGE_ARN" | cut -d'/' -f2 | tr '_' '-')
+        MODEL_VERSION=$(echo "$MODEL_PACKAGE_ARN" | cut -d'/' -f3 | tr '_' '-')
+        SAGEMAKER_PROJECT_NAME=$(echo "$SAGEMAKER_PROJECT_NAME" | tr '_' '-')
+        COMBINED="${SAGEMAKER_PROJECT_NAME}-${MODEL_PACKAGE_GROUP}-${MODEL_VERSION}"
+        echo "combined=$COMBINED" >> $GITHUB_OUTPUT
           
     - name: CDK Deploy
       env:
@@ -159,6 +171,7 @@ jobs:
         AMAZON_DATAZONE_PROJECT: ${{ github.event.inputs.sagemaker_project_id || secrets.AMAZON_DATAZONE_PROJECT }}
         SAGEMAKER_DOMAIN_ARN: ${{ secrets.SAGEMAKER_DOMAIN_ARN }}
         SAGEMAKER_SPACE_ARN: ${{ secrets.SAGEMAKER_SPACE_ARN }}
+        stack_name: ${{ steps.extract_info.outputs.combined || 'sagemaker-endpoint-stack' }}
       run: |
         cdk deploy \
           --require-approval never \
