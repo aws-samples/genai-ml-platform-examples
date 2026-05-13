@@ -210,7 +210,7 @@ class DeployEndpointStack(Stack):
         )
 
         # Define endpoint name
-        endpoint_name = f"{MODEL_PACKAGE_GROUP_NAME}-endpoint"
+        endpoint_name = f"{MODEL_PACKAGE_GROUP_NAME}-endpoint-{timestamp}"
 
         endpoint_config = sagemaker.CfnEndpointConfig(
             self,
