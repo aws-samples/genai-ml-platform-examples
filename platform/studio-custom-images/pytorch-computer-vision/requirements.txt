@@ -1,0 +1,7 @@
+albumentations==1.4.3
+timm==1.0.3
+ultralytics==8.3.40
+
+# Pin numpy to the version in the base image to avoid breaking
+# sagemaker SDK, autogluon, catboost, and other pre-installed packages
+numpy==1.26.4
