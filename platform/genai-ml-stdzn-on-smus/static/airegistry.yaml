@@ -1,0 +1,447 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AI Registry Workshop Stack - CDK Generated'
+
+Parameters:
+  S3AssetsBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+
+  S3AssetsPrefix:
+    Type: String
+    Description: S3 Prefix for assets
+  
+  ModelPackageHandlerKey:
+    Type: String
+    Description: S3 key for model package handler Lambda zip
+    Default: aireg_event_model_package_handler.zip
+  
+  ProjectCreationHandlerKey:
+    Type: String
+    Description: S3 key for project creation handler Lambda zip
+    Default: aireg_event_project_creation_handler.zip
+  
+  ModelDeploymentHandlerKey:
+    Type: String
+    Description: S3 key for model deployment handler Lambda zip
+    Default: aireg_ddb_model_deployment_handler.zip
+  
+  ModelEndpointHandlerKey:
+    Type: String
+    Description: S3 key for model endpoint handler Lambda zip
+    Default: aireg_event_model_endpoint_handler.zip
+    
+  RequestsLayerKey:
+    Type: String
+    Description: S3 key for requests lambda layer
+    Default: requests_layer.zip
+
+Resources:
+
+  # Dependency Layer - Contains Python dependencies
+  RequestsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: 'requests'
+      Description: 'Python dependencies layer requests'
+      Content:
+        S3Bucket: !Ref S3AssetsBucket
+        S3Key: !Sub '${S3AssetsPrefix}airegistry/lambda-assets/${RequestsLayerKey}'
+      CompatibleRuntimes:
+        - python3.13
+        - python3.14
+      CompatibleArchitectures:
+        - x86_64
+
+  ModelRegistryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: model_registry_table
+      AttributeDefinitions:
+        - AttributeName: model_package_group_name
+          AttributeType: S
+        - AttributeName: model_package_version
+          AttributeType: S
+      KeySchema:
+        - AttributeName: model_package_group_name
+          KeyType: HASH
+        - AttributeName: model_package_version
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  ProjectRegistryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: project_registry_table
+      AttributeDefinitions:
+        - AttributeName: dz_domain_id
+          AttributeType: S
+        - AttributeName: dz_project_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: dz_domain_id
+          KeyType: HASH
+        - AttributeName: dz_project_id
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  # IAM Role for Model Package Handler Lambda
+  ModelPackageHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt ModelRegistryTable.Arn
+        - PolicyName: SageMakerDescribePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:DescribeModelPackage
+                  - sagemaker:ListTags
+                  - sagemaker:DescribeTrainingJob
+                Resource: '*'
+        - PolicyName: MLflowAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker-mlflow:GetRun
+                  - sagemaker-mlflow:SearchRuns
+                Resource: '*'
+        - PolicyName: S3GetObject
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: '*'
+        # - PolicyName: ProdParameterSSMRead
+        #   PolicyDocument:
+        #     Version: '2012-10-17'
+        #     Statement:
+        #       - Effect: Allow
+        #         Action:
+        #           - ssm:GetParameter
+        #         Resource: '*'
+
+  # Model Package Handler Lambda
+  ModelPackageHandler:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: aireg_event_model_package_handler
+      Runtime: python3.14
+      Handler: aireg_event_model_package_handler.lambda_handler
+      Code:
+        S3Bucket: !Ref S3AssetsBucket
+        S3Key: !Sub '${S3AssetsPrefix}airegistry/lambda-assets/${ModelPackageHandlerKey}'
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref ModelRegistryTable
+      Timeout: 30
+      MemorySize: 1024
+      Layers:
+        - !Ref RequestsLayer
+      Role: !GetAtt ModelPackageHandlerRole.Arn
+
+  # Permission for EventBridge to invoke Model Package Handler
+  ModelPackageHandlerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ModelPackageHandler
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SmModelPackageEventRule.Arn
+
+  # EventBridge Rule for SageMaker Model Package Events
+  SmModelPackageEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: sm_model_package_event_rule
+      EventPattern:
+        source:
+          - aws.sagemaker
+        detail-type:
+          - SageMaker Model Package State Change
+        # detail:
+        #   ModelApprovalStatus:
+        #     - Approved
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ModelPackageHandler.Arn
+          Id: ModelPackageHandlerTarget
+
+  # IAM Role for Model Deployment Handler Lambda
+  ModelDeploymentHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBStreamReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:DescribeStream
+                  - dynamodb:ListStreams
+                Resource: !GetAtt ModelRegistryTable.StreamArn
+        - PolicyName: SecretsReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: '*'
+        - PolicyName: SageMakerUpdatePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:UpdateModelPackage
+                Resource: '*'
+
+  # Model Deployment Handler Lambda
+  ModelDeploymentHandler:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: aireg_ddb_model_deployment_handler
+      Runtime: python3.14
+      Handler: aireg_ddb_model_deployment_handler.lambda_handler
+      Code:
+        S3Bucket: !Ref S3AssetsBucket
+        S3Key: !Sub '${S3AssetsPrefix}airegistry/lambda-assets/${ModelDeploymentHandlerKey}'
+      Layers:
+        - !Ref RequestsLayer
+      Environment:
+        Variables:
+          PRIVATE_GITHUB_ORGANIZATION: ""
+          GITHUB_TOKEN_SECRET_NAME: "smus-aiops-github-token"
+      Timeout: 60
+      MemorySize: 1024
+      Role: !GetAtt ModelDeploymentHandlerRole.Arn
+
+  # DynamoDB Stream Event Source Mapping for Deployment
+  ModelDeploymentHandlerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ModelRegistryTable.StreamArn
+      FunctionName: !Ref ModelDeploymentHandler
+      StartingPosition: TRIM_HORIZON
+      BatchSize: 1
+      MaximumRetryAttempts: 3
+      # FilterCriteria:
+      #   Filters:
+      #     - Pattern: '{"eventName":["UPDATE"],"dynamodb":{"NewImage":{"model_deployment_approval_status":{"S":["Approved"]}}}}'
+      #     - Pattern: '{"eventName":["INSERT"],"dynamodb":{"NewImage":{"model_deployment_approval_status":{"S":["Approved"]}}}}'
+      #     - Pattern: '{"eventName":["MODIFY"],"dynamodb":{"NewImage":{"model_deployment_approval_status":{"S":["Approved"]}}}}'
+
+  # IAM Role for Model Endpoint Handler Lambda
+  ModelEndpointHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt ModelRegistryTable.Arn
+        - PolicyName: SageMakerDescribePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:DescribeEndpointConfig
+                  - sagemaker:DescribeEndpoint
+                  - sagemaker:DescribeModel
+                Resource: '*'
+
+  # Model Endpoint Handler Lambda
+  ModelEndpointHandler:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: aireg_event_model_endpoint_handler
+      Runtime: python3.14
+      Handler: aireg_event_model_endpoint_handler.lambda_handler
+      Code:
+        S3Bucket: !Ref S3AssetsBucket
+        S3Key: !Sub '${S3AssetsPrefix}airegistry/lambda-assets/${ModelEndpointHandlerKey}'
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref ModelRegistryTable
+      Timeout: 10
+      MemorySize: 1024
+      Role: !GetAtt ModelEndpointHandlerRole.Arn
+
+  # Permission for EventBridge to invoke Model Endpoint Handler
+  ModelEndpointHandlerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ModelEndpointHandler
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SmEndpointEventRule.Arn
+
+  # EventBridge Rule for SageMaker Endpoint Events
+  SmEndpointEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: endpoint_event_rule
+      EventPattern:
+        source:
+          - aws.sagemaker
+        detail-type:
+          - SageMaker Endpoint State Change
+        detail:
+          EndpointStatus:
+            - IN_SERVICE
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ModelEndpointHandler.Arn
+          Id: ModelEndpointHandlerTarget
+
+  # IAM Role for Project Creation Handler Lambda
+  ProjectCreationHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt ProjectRegistryTable.Arn
+        - PolicyName: DataZoneDescribePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - datazone:GetProject
+                Resource: '*'
+
+  # Project Creation Handler Lambda
+  ProjectCreationHandler:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: aireg_event_project_creation_handler
+      Runtime: python3.14
+      Handler: aireg_event_project_creation_handler.lambda_handler
+      Code:
+        S3Bucket: !Ref S3AssetsBucket
+        S3Key: !Sub '${S3AssetsPrefix}airegistry/lambda-assets/${ProjectCreationHandlerKey}'
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref ProjectRegistryTable
+      Timeout: 10
+      MemorySize: 1024
+      Role: !GetAtt ProjectCreationHandlerRole.Arn
+
+  # Permission for EventBridge to invoke Project Creation Handler
+  ProjectCreationHandlerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProjectCreationHandler
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DzProjectCreationEventRule.Arn
+
+  # EventBridge Rule for Datazone Create Project event
+  DzProjectCreationEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: dz_project_creation_event_rule
+      EventPattern:
+        source:
+          - aws.datazone
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - datazone.amazonaws.com
+          eventName:
+            - CreateProject
+            - DeleteProject
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ProjectCreationHandler.Arn
+          Id: ProjectCreationHandlerTarget
+
+
+Outputs:
+  ModelRegistryTableName:
+    Description: AI Model Registry Table Name
+    Value: !Ref ModelRegistryTable
+    Export:
+      Name: !Sub ${AWS::StackName}-ModelRegistryTableName
+
+  ProjectRegistryTableName:
+    Description: Project Registry Table Name
+    Value: !Ref ProjectRegistryTable
+    Export:
+      Name: !Sub ${AWS::StackName}-ProjectRegistryTableName
+      

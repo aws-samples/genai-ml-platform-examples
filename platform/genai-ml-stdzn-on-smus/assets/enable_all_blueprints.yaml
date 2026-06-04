@@ -1,0 +1,423 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Enables all blueprint for SMUS domain
+
+Parameters:
+  DomainId:
+    Description: Domain for which blueprint needs to be enabled
+    Type: String
+  AmazonSageMakerManageAccessRole:
+    Type: String
+    Description: IAM role to manage access to SageMaker environments
+  AmazonSageMakerProvisioningRole:
+    Description: IAM role to provision SageMaker environments
+    Type: String
+  DZS3Bucket:
+    Type: String
+    Description: S3 location for Tooling environment
+  SageMakerSubnets:
+    Type: String
+    Description: Subnet IDs for SageMaker
+  AmazonSageMakerVpcId:
+    Type: String
+    Description: VPC ID for SageMaker
+
+
+Resources:
+  LakehouseCatalog:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "LakehouseCatalog"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: { }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+  AmazonBedrockGuardrail:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: LakehouseCatalog
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockGuardrail"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+  MLExperiments:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockGuardrail
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "MLExperiments"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  Tooling:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: MLExperiments
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "Tooling"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  RedshiftServerless:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "RedshiftServerless"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  EmrServerless:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: RedshiftServerless
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "EmrServerless"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  Workflows:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: EmrServerless
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "Workflows"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockPrompt:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: Workflows
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockPrompt"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  DataLake:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockPrompt
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "DataLake"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockEvaluation:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: DataLake
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockEvaluation"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockKnowledgeBase:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockEvaluation
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockKnowledgeBase"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  PartnerApps:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockKnowledgeBase
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "PartnerApps"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockChatAgent:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: PartnerApps
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockChatAgent"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockFunction:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockChatAgent
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockFunction"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  QuickSight:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "QuickSight"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  AmazonBedrockFlow:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockFunction
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "AmazonBedrockFlow"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+
+  EmrOnEc2:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    DependsOn: AmazonBedrockFlow
+    Properties:
+      DomainIdentifier: !Ref DomainId
+      EnvironmentBlueprintIdentifier: "EmrOnEc2"
+      ManageAccessRoleArn: !Ref AmazonSageMakerManageAccessRole
+      ProvisioningRoleArn: !Ref AmazonSageMakerProvisioningRole
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: {
+            "S3Location": !Ref DZS3Bucket,
+            "Subnets": !Ref SageMakerSubnets,
+            "VpcId": !Ref AmazonSageMakerVpcId
+          }
+        }
+      ]
+      EnabledRegions: [ !Ref 'AWS::Region' ]
+
+Outputs:
+  LakehouseCatalogId:
+    Value: !GetAtt LakehouseCatalog.EnvironmentBlueprintId
+
+  AmazonBedrockGuardrailId:
+    Value: !GetAtt AmazonBedrockGuardrail.EnvironmentBlueprintId
+
+  MLExperimentsId:
+    Value: !GetAtt MLExperiments.EnvironmentBlueprintId
+
+  ToolingId:
+    Value: !GetAtt Tooling.EnvironmentBlueprintId
+
+  RedshiftServerlessId:
+    Value: !GetAtt RedshiftServerless.EnvironmentBlueprintId
+
+  EmrServerlessId:
+    Value: !GetAtt EmrServerless.EnvironmentBlueprintId
+
+  WorkflowsId:
+    Value: !GetAtt Workflows.EnvironmentBlueprintId
+
+  AmazonBedrockPromptId:
+    Value: !GetAtt AmazonBedrockPrompt.EnvironmentBlueprintId
+
+  DataLakeId:
+    Value: !GetAtt DataLake.EnvironmentBlueprintId
+
+  AmazonBedrockEvaluationId:
+    Value: !GetAtt AmazonBedrockEvaluation.EnvironmentBlueprintId
+
+  AmazonBedrockKnowledgeBaseId:
+    Value: !GetAtt AmazonBedrockKnowledgeBase.EnvironmentBlueprintId
+
+  PartnerAppsId:
+    Value: !GetAtt PartnerApps.EnvironmentBlueprintId
+
+  AmazonBedrockChatAgentId:
+    Value: !GetAtt AmazonBedrockChatAgent.EnvironmentBlueprintId
+
+  AmazonBedrockFunctionId:
+    Value: !GetAtt AmazonBedrockFunction.EnvironmentBlueprintId
+
+  AmazonBedrockFlowId:
+    Value: !GetAtt AmazonBedrockFlow.EnvironmentBlueprintId
+
+  EmrOnEc2Id:
+    Value: !GetAtt EmrOnEc2.EnvironmentBlueprintId
+
+  QuickSightId:
+    Value: !GetAtt QuickSight.EnvironmentBlueprintId

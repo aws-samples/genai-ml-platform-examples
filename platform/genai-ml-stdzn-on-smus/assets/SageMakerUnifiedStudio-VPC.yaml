@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Creates a VPC with 3 private subnets across 3 availability zones and 1 public subnet
+  for SageMaker Unified Studio. Includes NAT Gateway for internet connectivity from private subnets.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Description: CIDR block for the VPC (must be /16)
+    Default: "10.38.0.0/16"
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/16'
+    ConstraintDescription: Must be a valid /16 CIDR block (e.g., 10.38.0.0/16)
+
+Resources:
+  # VPC
+  SageMakerUnifiedStudioVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioVPC
+        - Key: CreatedForUseWithSageMakerUnifiedStudio
+          Value: true
+
+  # Internet Gateway
+  SageMakerUnifiedStudioVpcInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  SageMakerUnifiedStudioVpcInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref SageMakerUnifiedStudioVpcInternetGateway
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+
+  # Public Subnet
+  SageMakerUnifiedStudioPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 32, "11"]]
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPublicSubnet
+        - Key: CreatedForUseWithSageMakerUnifiedStudio
+          Value: true
+
+  # Private Subnets
+  SageMakerUnifiedStudioPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 32, "11"]]
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPrivateSubnet1
+        - Key: CreatedForUseWithSageMakerUnifiedStudio
+          Value: true
+
+  SageMakerUnifiedStudioPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 32, "11"]]
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPrivateSubnet2
+        - Key: CreatedForUseWithSageMakerUnifiedStudio
+          Value: true
+
+  SageMakerUnifiedStudioPrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 32, "11"]]
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPrivateSubnet3
+        - Key: CreatedForUseWithSageMakerUnifiedStudio
+          Value: true
+
+  # NAT Gateway
+  SageMakerUnifiedStudioEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  SageMakerUnifiedStudioPublicSubnetNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt SageMakerUnifiedStudioEIP.AllocationId
+      SubnetId: !Ref SageMakerUnifiedStudioPublicSubnet
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SageMakerUnifiedStudioVpc
+      Tags:
+        - Key: Name
+          Value: SageMakerUnifiedStudioPrivateRouteTable
+
+  # Routes
+  PublicRouteTableIGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SageMakerUnifiedStudioVpcInternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SageMakerUnifiedStudioPublicSubnetNATGateway
+
+  # Route Table Associations
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SageMakerUnifiedStudioPublicSubnet
+
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SageMakerUnifiedStudioPrivateSubnet1
+
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SageMakerUnifiedStudioPrivateSubnet2
+
+  PrivateSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SageMakerUnifiedStudioPrivateSubnet3
+
+Outputs:
+  VpcId:
+    Description: ID of the SageMaker Unified Studio VPC
+    Value: !Ref SageMakerUnifiedStudioVpc
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+  
+  PublicSubnetId:
+    Description: ID of the public subnet
+    Value: !Ref SageMakerUnifiedStudioPublicSubnet
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetId"
+  
+  PrivateSubnet1Id:
+    Description: ID of private subnet 1
+    Value: !Ref SageMakerUnifiedStudioPrivateSubnet1
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnet1Id"
+  
+  PrivateSubnet2Id:
+    Description: ID of private subnet 2
+    Value: !Ref SageMakerUnifiedStudioPrivateSubnet2
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnet2Id"
+  
+  PrivateSubnet3Id:
+    Description: ID of private subnet 3
+    Value: !Ref SageMakerUnifiedStudioPrivateSubnet3
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnet3Id"
+
+  PrivateSubnetIds:
+    Description: Comma-separated list of private subnet IDs
+    Value: !Join 
+      - ','
+      - - !Ref SageMakerUnifiedStudioPrivateSubnet1
+        - !Ref SageMakerUnifiedStudioPrivateSubnet2
+        - !Ref SageMakerUnifiedStudioPrivateSubnet3
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetIds"

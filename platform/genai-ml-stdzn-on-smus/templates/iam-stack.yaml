@@ -1,0 +1,417 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MLOps SMUS - IAM Roles and Policies'
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: 'mlops-smus'
+    Description: 'Prefix for all resource names'
+
+
+  GitHubOrganization:
+    Type: String
+    Default: 'sachinh'
+    Description: 'GitHub organization name'
+
+  GitHubTokenSecretArn:
+    Type: String
+    Description: 'ARN of the GitHub Token Secret'
+
+  CreateOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Set to false if your account already has a GitHub OIDC provider
+      (token.actions.githubusercontent.com). Only one can exist per account.
+
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an existing GitHub OIDC provider. Required when CreateOidcProvider
+      is false. Format: arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+
+Conditions:
+  ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  # GitHub OIDC Provider for GitHub Actions integration
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidcProvider
+    Properties:
+      Url: 'https://token.actions.githubusercontent.com'
+      ClientIdList:
+        - 'sts.amazonaws.com'
+      ThumbprintList:
+        - '6938fd4d98bab03faadb97b34396831e3780aea1'  # GitHub's thumbprint
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # GitHub Workflow Role for CI/CD operations
+  GitHubWorkflowRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-github-workflow-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Allow GitHub Actions OIDC
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com'
+              StringLike:
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubOrganization}/*'
+          # Allow cross-account access if needed
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSCloudFormationFullAccess'
+      Policies:
+        - PolicyName: 'SageMakerOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:CreatePipeline'
+                  - 'sagemaker:UpdatePipeline'
+                  - 'sagemaker:StartPipelineExecution'
+                  - 'sagemaker:DescribePipeline'
+                  - 'sagemaker:DescribePipelineExecution'
+                  - 'sagemaker:ListPipelineExecutions'
+                  - 'sagemaker:AddTags'
+                  - 'sagemaker:ListTags'
+                  - 'sagemaker:ListProcessingJobs'
+                  - 'sagemaker:DescribeProcessingJob'
+                  - 'sagemaker:DescribeImageVersion'
+                  - 'sagemaker:CreateProcessingJob'
+                  - 'sagemaker:ListPipelineExecutionSteps'
+                  - 'sagemaker:ListModelPackages'
+                  - 'sagemaker:StopProcessingJob'
+                  - 'sagemaker:UpdateModelPackage'
+                Resource: '*'
+        - PolicyName: 'ECROperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:CreateRepository'
+                  - 'ecr:DeleteRepository'
+                  - 'ecr:DescribeRepositories'
+                  - 'ecr:PutLifecyclePolicy'
+                  - 'ecr:SetRepositoryPolicy'
+                Resource: '*'
+        - PolicyName: 'IAMOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'iam:CreateRole'
+                  - 'iam:DeleteRole'
+                  - 'iam:DeleteRolePolicy'
+                  - 'iam:DeletePolicy'
+                  - 'iam:DeletePolicyVersion'
+                  - 'iam:GetRole'
+                  - 'iam:GetRolePolicy'
+                  - 'iam:GetPolicy'
+                  - 'iam:GetPolicyVersion'
+                  - 'iam:ListRoles'
+                  - 'iam:ListRolePolicies'
+                  - 'iam:ListAttachedRolePolicies'
+                  - 'iam:ListPolicies'
+                  - 'iam:ListPolicyVersions'
+                  - 'iam:PutRolePolicy'
+                  - 'iam:TagRole'
+                  - 'iam:TagPolicy'
+                  - 'iam:AttachRolePolicy'
+                  - 'iam:DetachRolePolicy'
+                  - 'iam:UpdateRole'
+                  - 'iam:UpdateAssumeRolePolicy'
+                  - 'iam:CreatePolicy'
+                  - 'iam:CreatePolicyVersion'
+                Resource: '*'
+        - PolicyName: 'S3Operations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:Put*'
+                  - 's3:Get*'
+                  - 's3:List*'
+                  - 's3:Create*'
+                  - 's3:Delete*'
+                Resource: '*'
+        - PolicyName: 'CDKOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'sts:AssumeRole'
+                Resource:
+                  - 'arn:aws:iam::*:role/cdk-*'
+                  - 'arn:aws:iam::*:role/cdk-gitactions-*'
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter'
+                  - 'ssm:GetParameters'
+                  - 'ssm:PutParameter'
+                  - 'ssm:DeleteParameter'
+                Resource: 'arn:aws:ssm:*:*:parameter/cdk-bootstrap/*'
+        - PolicyName: 'GlueOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'glue:GetTable'
+                  - 'glue:GetDatabase'
+                  - 'glue:GetPartitions'
+                Resource: '*'
+        - PolicyName: 'PassRoleOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'iam:PassRole'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': 'sagemaker.amazonaws.com'
+        - PolicyName: 'LogsOperations'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # EventBridge Role for triggering Step Functions
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-eventbridge-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'events.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # Common Lambda Execution Role
+  LambdaCommonRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: 'SecretsManagerAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:DescribeSecret'
+                Resource: !Ref GitHubTokenSecretArn
+        - PolicyName: 'DataZoneAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'datazone:GetProjectProfile'
+                  - 'datazone:GetDomain'
+                  - 'datazone:GetProject'
+                  - 'datazone:ListProjects'
+                Resource: !Sub 'arn:aws:datazone:${AWS::Region}:${AWS::AccountId}:domain/*'
+        - PolicyName: 'SageMakerAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:ListDomains'
+                  - 'sagemaker:DescribeDomain'
+                  - 'sagemaker:ListSpaces'
+                  - 'sagemaker:DescribeSpace'
+                  - 'sagemaker:DescribeUserProfile'
+                  - 'sagemaker:ListTags'
+                Resource:
+                  - !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/*'
+                  - !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*'
+                  - !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:space/*'
+        - PolicyName: 'CodeStarConnectionsAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codestar-connections:GetConnection'
+                  - 'codestar-connections:GetHostAccessToken'
+                Resource: !Sub 'arn:aws:codestar-connections:${AWS::Region}:${AWS::AccountId}:connection/*'
+        - PolicyName: 'IAMRoleAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'iam:PutRolePolicy'
+                  - 'iam:GetRolePolicy'
+                  - 'iam:DeleteRolePolicy'
+                  - 'iam:ListRolePolicies'
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/datazone_usr_role*'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # Step Functions State Machine Role
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-stepfunctions-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'states.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # Model Approval Lambda Role
+  ModelApprovalLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-model-approval-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: 'DataZoneAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'datazone:ListProjects'
+                  - 'datazone:GetProject'
+                  - 'datazone:GetDomain'
+                  - 'sagemaker:ListTags'
+                Resource: '*'
+        - PolicyName: 'SecretsManagerAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:DescribeSecret'
+                Resource: !Ref GitHubTokenSecretArn
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+  # EventBridge Invoke Lambda Role
+  EventBridgeInvokeLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-eventbridge-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'events.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+
+Outputs:
+  GitHubOidcProviderArn:
+    Description: 'ARN of the GitHub OIDC Provider'
+    Value: !If
+      - ShouldCreateOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingOidcProviderArn
+    Export:
+      Name: !Sub '${ProjectPrefix}-github-oidc-provider-arn'
+
+  GitHubWorkflowRoleArn:
+    Description: 'ARN of the GitHub Workflow Role'
+    Value: !GetAtt GitHubWorkflowRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-github-workflow-role-arn'
+
+  EventBridgeRoleArn:
+    Description: 'ARN of the EventBridge Role'
+    Value: !GetAtt EventBridgeRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-eventbridge-role-arn'
+
+  LambdaCommonRoleArn:
+    Description: 'ARN of the Lambda Common Role'
+    Value: !GetAtt LambdaCommonRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-lambda-common-role-arn'
+
+  StepFunctionsRoleArn:
+    Description: 'ARN of the Step Functions Role'
+    Value: !GetAtt StepFunctionsRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-stepfunctions-role-arn'
+
+  ModelApprovalLambdaRoleArn:
+    Description: 'ARN of the Model Approval Lambda Role'
+    Value: !GetAtt ModelApprovalLambdaRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-model-approval-role-arn'
+
+  EventBridgeInvokeLambdaRoleArn:
+    Description: 'ARN of the EventBridge Invoke Lambda Role'
+    Value: !GetAtt EventBridgeInvokeLambdaRole.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-eventbridge-lambda-role-arn'

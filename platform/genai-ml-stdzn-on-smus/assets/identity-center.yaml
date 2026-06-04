@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy identity center.
+
+Resources:
+
+  IdentityCenterCustomResource:
+    Type: Custom::S3CustomResource
+    Properties:
+      ServiceToken: !GetAtt DeployIdentityCenter.Arn
+
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess'
+
+  DeployIdentityCenter:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Deploy Identity Center"
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.11
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import sys
+          import time
+          import urllib3
+
+          # Temporary hack to get latest version of pip needed for espresso
+          from pip._internal import main
+          main(['install', '-I', '-q', 'boto3', '--target', '/tmp/', '--no-cache-dir', '--disable-pip-version-check'])
+          sys.path.insert(0,'/tmp/')
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+            #Log the event
+            print("Request Message -> " + json.dumps(event))
+            
+            type = event['RequestType']
+            region = os.environ['AWS_REGION']
+            session = boto3.Session(region_name=region)
+            admin = session.client('sso-admin')
+            id = session.client('identitystore')
+
+            try: 
+              if type == 'Delete':
+                response = admin.list_instances()
+                for instance in response['Instances']:
+                    if(instance['Name'] == 'workshop-identity-center'):
+                        response = admin.delete_instance(InstanceArn=instance['InstanceArn'])
+                cfnresponse.send(
+                  event,
+                  context,
+                  cfnresponse.SUCCESS,
+                  {'Type': 'Delete'}
+                )
+
+              if type == 'Create':
+
+                print('Creating new instance workshop-identity-center')
+                response = admin.create_instance(Name='workshop-identity-center')
+                instanceArn = response['InstanceArn']
+
+                # wait for instance to be active
+                while admin.describe_instance(InstanceArn=instanceArn)['Status'] != 'ACTIVE':
+                  time.sleep(2)
+
+                # Get the IdentityStoreId
+                identityStoreId = admin.describe_instance(InstanceArn=instanceArn)['IdentityStoreId']
+
+                # Create a group 
+                response = id.create_group(
+                  IdentityStoreId=identityStoreId,
+                  DisplayName='Developers',
+                  Description='Users that have access to Amazon Q and CodeWhisperer in their IDE.'
+                )
+                groupId = response['GroupId']
+
+                cfnresponse.send(
+                  event,
+                  context,
+                  cfnresponse.SUCCESS,
+                  {
+                    'Type': 'Create',
+                    'InstanceArn': instanceArn,
+                    'IdentityStoreId': identityStoreId,
+                    'GroupId': groupId
+                  }
+                )
+
+            except Exception as e:
+              print(str(e))
+              cfnresponse.send(
+                event,
+                context,
+                cfnresponse.FAILED,
+                {'Data': str(e)}
+              )

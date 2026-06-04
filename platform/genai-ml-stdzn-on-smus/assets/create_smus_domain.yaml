@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create a SMUS domain and configure resources - V1 adapted for orchestrator
+Transform: AWS::LanguageExtensions
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Name of the DataZone domain
+    Default: smus-domain-orchestrated
+
+  DomainExecutionRoleArn:
+    Type: String
+    Description: IAM role for domain execution
+
+  DomainServiceRoleArn:
+    Type: String
+    Description: IAM service role for the domain
+
+  ManageAccessRoleArn:
+    Type: String
+    Description: IAM role to manage access to SageMaker environments
+
+  ProvisioningRoleArn:
+    Type: String
+    Description: IAM role to provision SageMaker environments
+
+  S3BucketName:
+    Type: String
+    Description: S3 bucket name for domain resources
+
+  S3AssetsBucket:
+    Type: String
+    Description: S3 bucket containing CloudFormation templates
+
+  S3AssetsPrefix:
+    Type: String
+    Description: S3 prefix for CloudFormation templates
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: Private Subnet 1 ID from VPC stack
+    
+  PrivateSubnet2Id:
+    Type: String
+    Description: Private Subnet 2 ID from VPC stack
+    
+  PrivateSubnet3Id:
+    Type: String
+    Description: Private Subnet 3 ID from VPC stack
+
+  VPCId:
+    Type: String
+    Description: VPC ID for SageMaker
+
+Resources:
+  Domain:
+    Type: AWS::DataZone::Domain
+    Properties:
+      Name: !Ref DomainName
+      Description: "SMUS Domain - Orchestrated Deployment"
+      DomainExecutionRole: !Ref DomainExecutionRoleArn
+      DomainVersion: "V2"
+      ServiceRole: !Ref DomainServiceRoleArn
+      SingleSignOn: {
+        Type: "IAM_IDC",
+        UserAssignment: "AUTOMATIC"
+      }
+
+  EnableBlueprintsStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: Domain
+    Properties:
+      TemplateURL: !Sub "https://${S3AssetsBucket}.s3.amazonaws.com/${S3AssetsPrefix}enable_all_blueprints.yaml"
+      Parameters:
+        DomainId: !GetAtt Domain.Id
+        AmazonSageMakerManageAccessRole: !Ref ManageAccessRoleArn
+        AmazonSageMakerProvisioningRole: !Ref ProvisioningRoleArn
+        DZS3Bucket: !Sub "s3://${S3BucketName}"
+        SageMakerSubnets: !Join [',', [!Ref PrivateSubnet1Id, !Ref PrivateSubnet2Id, !Ref PrivateSubnet3Id]]
+        AmazonSageMakerVpcId: !Ref VPCId
+
+  ProjectProfileStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - Domain
+      - EnableBlueprintsStack
+    Properties:
+      TemplateURL: !Sub "https://${S3AssetsBucket}.s3.amazonaws.com/${S3AssetsPrefix}create_project_profiles.yaml"
+      Parameters:
+        DomainId: !GetAtt Domain.Id
+        DomainUnitId: !GetAtt Domain.RootDomainUnitId
+        AccountId: !Ref AWS::AccountId
+        Region: !Ref AWS::Region
+
+        LakehouseCatalogId: !GetAtt EnableBlueprintsStack.Outputs.LakehouseCatalogId
+        AmazonBedrockGuardrailId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockGuardrailId
+        MLExperimentsId: !GetAtt EnableBlueprintsStack.Outputs.MLExperimentsId
+        ToolingId: !GetAtt EnableBlueprintsStack.Outputs.ToolingId
+        RedshiftServerlessId: !GetAtt EnableBlueprintsStack.Outputs.RedshiftServerlessId
+        EmrServerlessId: !GetAtt EnableBlueprintsStack.Outputs.EmrServerlessId
+        WorkflowsId: !GetAtt EnableBlueprintsStack.Outputs.WorkflowsId
+        AmazonBedrockPromptId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockPromptId
+        DataLakeId: !GetAtt EnableBlueprintsStack.Outputs.DataLakeId
+        AmazonBedrockEvaluationId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockEvaluationId
+        AmazonBedrockKnowledgeBaseId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockKnowledgeBaseId
+        PartnerAppsId: !GetAtt EnableBlueprintsStack.Outputs.PartnerAppsId
+        AmazonBedrockChatAgentId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockChatAgentId
+        AmazonBedrockFunctionId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockFunctionId
+        AmazonBedrockFlowId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockFlowId
+        EmrOnEc2Id: !GetAtt EnableBlueprintsStack.Outputs.EmrOnEc2Id
+        QuickSightId: !GetAtt EnableBlueprintsStack.Outputs.QuickSightId
+
+  PolicyGrantStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - Domain
+      - EnableBlueprintsStack
+      - ProjectProfileStack
+    Properties:
+      TemplateURL: !Sub "https://${S3AssetsBucket}.s3.amazonaws.com/${S3AssetsPrefix}policy_grant.yaml"
+      Parameters:
+        DomainId: !GetAtt Domain.Id
+        DomainUnitId: !GetAtt Domain.RootDomainUnitId
+        AccountId: !Ref AWS::AccountId
+
+        LakehouseCatalogId: !GetAtt EnableBlueprintsStack.Outputs.LakehouseCatalogId
+        AmazonBedrockGuardrailId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockGuardrailId
+        MLExperimentsId: !GetAtt EnableBlueprintsStack.Outputs.MLExperimentsId
+        ToolingId: !GetAtt EnableBlueprintsStack.Outputs.ToolingId
+        RedshiftServerlessId: !GetAtt EnableBlueprintsStack.Outputs.RedshiftServerlessId
+        EmrServerlessId: !GetAtt EnableBlueprintsStack.Outputs.EmrServerlessId
+        WorkflowsId: !GetAtt EnableBlueprintsStack.Outputs.WorkflowsId
+        AmazonBedrockPromptId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockPromptId
+        DataLakeId: !GetAtt EnableBlueprintsStack.Outputs.DataLakeId
+        AmazonBedrockEvaluationId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockEvaluationId
+        AmazonBedrockKnowledgeBaseId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockKnowledgeBaseId
+        PartnerAppsId: !GetAtt EnableBlueprintsStack.Outputs.PartnerAppsId
+        AmazonBedrockChatAgentId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockChatAgentId
+        AmazonBedrockFunctionId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockFunctionId
+        AmazonBedrockFlowId: !GetAtt EnableBlueprintsStack.Outputs.AmazonBedrockFlowId
+        EmrOnEc2Id: !GetAtt EnableBlueprintsStack.Outputs.EmrOnEc2Id
+        QuickSightId: !GetAtt EnableBlueprintsStack.Outputs.QuickSightId
+
+        SQLAnalyticsProfileId: !GetAtt ProjectProfileStack.Outputs.SQLAnalyticsProfileId
+        AllCapabilitiesProjectProfileId: !GetAtt ProjectProfileStack.Outputs.AllCapabilitiesProjectProfileId
+
+Outputs:
+  DomainId:
+    Description: ID of the created DataZone domain
+    Value: !GetAtt Domain.Id
+    Export:
+      Name: !Sub "${AWS::StackName}-DomainId"
+      
+  DomainArn:
+    Description: ARN of the created DataZone domain
+    Value: !GetAtt Domain.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DomainArn"
+      
+  DomainPortalUrl:
+    Description: Portal URL of the created DataZone domain
+    Value: !GetAtt Domain.PortalUrl
+    Export:
+      Name: !Sub "${AWS::StackName}-DomainPortalUrl"

@@ -1,0 +1,472 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create Project profile for SMUS Domain
+
+Parameters:
+  DomainId:
+    Description: Domain for which blueprint needs to be enabled
+    Type: String
+  DomainUnitId:
+    Description: Domain unit for which blueprint needs to be enabled
+    Type: String
+  AccountId:
+    Type: String
+  Region:
+    Type: String
+
+  # Blueprint ID Parameters
+  LakehouseCatalogId:
+    Type: String
+  AmazonBedrockGuardrailId:
+    Type: String
+  MLExperimentsId:
+    Type: String
+  ToolingId:
+    Type: String
+  RedshiftServerlessId:
+    Type: String
+  EmrServerlessId:
+    Type: String
+  WorkflowsId:
+    Type: String
+  AmazonBedrockPromptId:
+    Type: String
+  DataLakeId:
+    Type: String
+  AmazonBedrockEvaluationId:
+    Type: String
+  AmazonBedrockKnowledgeBaseId:
+    Type: String
+  PartnerAppsId:
+    Type: String
+  AmazonBedrockChatAgentId:
+    Type: String
+  AmazonBedrockFunctionId:
+    Type: String
+  AmazonBedrockFlowId:
+    Type: String
+  EmrOnEc2Id:
+    Type: String
+  QuickSightId:
+    Type: String
+
+Resources:
+  SQLAnalytics:
+    Type: AWS::DataZone::ProjectProfile
+    Properties:
+      Name: "SQL analytics"
+      Description: "Analyze your data in SageMaker Lakehouse using SQL"
+      DomainIdentifier: !Ref DomainId
+      DomainUnitIdentifier: !Ref DomainUnitId
+      Status: "ENABLED"
+      EnvironmentConfigurations:
+        - Name: "Tooling"
+          EnvironmentBlueprintId: !Ref ToolingId
+          Description: "Configuration for the Tooling"
+          DeploymentMode: "ON_CREATE"
+          DeploymentOrder: 0
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: "enableSpaces"
+                Value: "false"
+                IsEditable: false
+              - Name: "maxEbsVolumeSize"
+                IsEditable: false
+              - Name: "idleTimeoutInMinutes"
+                IsEditable: false
+              - Name: "lifecycleManagement"
+                IsEditable: false
+              - Name: "enableNetworkIsolation"
+                IsEditable: false
+              - Name: "gitConnectionArn"
+        - Name: "Lakehouse Database"
+          EnvironmentBlueprintId: !Ref DataLakeId
+          Description: "Creates databases in SageMaker Lakehouse for S3 tables and Athena"
+          DeploymentMode: "ON_CREATE"
+          DeploymentOrder: 1
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: "glueDbName"
+                Value: "glue_db"
+                IsEditable: true
+        - Name: "Redshift Serverless"
+          EnvironmentBlueprintId: !Ref RedshiftServerlessId
+          Description: "Creates an Amazon Redshift Serverless workgroup"
+          DeploymentMode: "ON_CREATE"
+          DeploymentOrder: 1
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: "redshiftDbName"
+                Value: "dev"
+                IsEditable: true
+              - Name: "connectToRMSCatalog"
+                Value: "true"
+                IsEditable: false
+              - Name: "redshiftMaxCapacity"
+                Value: "512"
+                IsEditable: false
+        - Name: "OnDemand Redshift Serverless"
+          EnvironmentBlueprintId: !Ref RedshiftServerlessId
+          Description: "Additional Redshift Serverless workgroup"
+          DeploymentMode: "ON_DEMAND"
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: "redshiftDbName"
+                Value: "dev"
+                IsEditable: true
+              - Name: "redshiftMaxCapacity"
+                Value: "512"
+                IsEditable: true
+              - Name: "redshiftWorkgroupName"
+                Value: "redshift-serverless-workgroup"
+                IsEditable: true
+              - Name: "redshiftBaseCapacity"
+                Value: "128"
+                IsEditable: true
+              - Name: "connectionName"
+                Value: "redshift.serverless"
+                IsEditable: true
+              - Name: "connectToRMSCatalog"
+                Value: "false"
+                IsEditable: false
+        - Name: "OnDemand Catalog for RMS"
+          EnvironmentBlueprintId: !Ref LakehouseCatalogId
+          Description: "Catalog for Redshift Managed Storage"
+          DeploymentMode: "ON_DEMAND"
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: "catalogName"
+                IsEditable: true
+              - Name: "catalogDescription"
+                Value: "RMS catalog"
+                IsEditable: true
+        - Name: "OnDemand QuickSight"
+          EnvironmentBlueprintId: !Ref QuickSightId
+          Description: "Amazon QuickSight for data visualization"
+          DeploymentMode: "ON_DEMAND"
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+
+  AllCapabilitiesProjectProfile:
+    Type: AWS::DataZone::ProjectProfile
+    Properties:
+      Name: 'All capabilities'
+      Description: 'Analyze data and build machine learning and generative AI models and applications powered by Amazon Bedrock, Amazon EMR, AWS Glue, Amazon Athena, Amazon SageMaker AI and Amazon SageMaker Lakehouse'
+      Status: 'ENABLED'
+      DomainIdentifier: !Ref DomainId
+      DomainUnitIdentifier: !Ref DomainUnitId
+      EnvironmentConfigurations:
+        - Name: 'Tooling'
+          EnvironmentBlueprintId: !Ref ToolingId
+          Description: 'Configuration for the Tooling'
+          DeploymentOrder: 0
+          DeploymentMode: 'ON_CREATE'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'enableSpaces'
+                Value: 'true'
+                IsEditable: false
+              - Name: 'maxEbsVolumeSize'
+                IsEditable: false
+              - Name: 'idleTimeoutInMinutes'
+                IsEditable: false
+              - Name: 'lifecycleManagement'
+                IsEditable: false
+              - Name: 'enableNetworkIsolation'
+                IsEditable: false
+              - Name: 'enableAmazonBedrockPermissions'
+                Value: 'true'
+                IsEditable: false
+              - Name: 'gitConnectionArn'
+
+        - Name: 'Lakehouse Database'
+          EnvironmentBlueprintId: !Ref DataLakeId
+          Description: 'Creates databases in Amazon SageMaker Lakehouse for storing tables in S3 and Amazon Athena resources for your SQL workloads'
+          DeploymentOrder: 1
+          DeploymentMode: 'ON_CREATE'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'glueDbName'
+                Value: 'glue_db'
+                IsEditable: true
+
+        - Name: 'RedshiftServerless'
+          EnvironmentBlueprintId: !Ref RedshiftServerlessId
+          Description: 'Creates an Amazon Redshift Serverless workgroup for your SQL workloads'
+          DeploymentOrder: 1
+          DeploymentMode: 'ON_CREATE'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'redshiftDbName'
+                Value: 'dev'
+                IsEditable: true
+              - Name: 'connectToRMSCatalog'
+                Value: 'true'
+                IsEditable: false
+              - Name: 'redshiftMaxCapacity'
+                Value: '512'
+                IsEditable: false
+
+        - Name: 'OnDemand Workflows'
+          EnvironmentBlueprintId: !Ref WorkflowsId
+          Description: 'Enables you to create Airflow workflows to be executed on MWAA environments'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'environmentClass'
+                Value: 'mw1.micro'
+                IsEditable: false
+
+        - Name: 'OnDemand MLExperiments'
+          EnvironmentBlueprintId: !Ref MLExperimentsId
+          Description: 'Enables you to create Amazon Sagemaker mlflow in the project'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'mlflowTrackingServerSize'
+                Value: 'Small'
+                IsEditable: true
+              - Name: 'mlflowTrackingServerName'
+                Value: 'tracking-server'
+                IsEditable: true
+
+        - Name: 'OnDemand EMR on EC2 Memory-Optimized'
+          EnvironmentBlueprintId: !Ref EmrOnEc2Id
+          Description: 'Enables you to create an additional memory optimized Amazon EMR on Amazon EC2'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'emrRelease'
+                Value: 'emr-7.5.0'
+                IsEditable: true
+              - Name: 'connectionDescription'
+                Value: 'Spark connection for EMR EC2 cluster'
+                IsEditable: true
+              - Name: 'clusterName'
+                Value: 'emr-ec2-cluster'
+                IsEditable: true
+              - Name: 'primaryInstanceType'
+                Value: 'r6g.xlarge'
+                IsEditable: true
+              - Name: 'coreInstanceType'
+                Value: 'r6g.xlarge'
+                IsEditable: true
+              - Name: 'taskInstanceType'
+                Value: 'r6g.xlarge'
+                IsEditable: true
+
+        - Name: 'OnDemand EMR on EC2 General-Purpose'
+          EnvironmentBlueprintId: !Ref EmrOnEc2Id
+          Description: 'Enables you to create an additional general purpose Amazon EMR on Amazon EC2'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'emrRelease'
+                Value: 'emr-7.5.0'
+                IsEditable: true
+              - Name: 'connectionDescription'
+                Value: 'Spark connection for EMR EC2 cluster'
+                IsEditable: true
+              - Name: 'clusterName'
+                Value: 'emr-ec2-cluster'
+                IsEditable: true
+              - Name: 'primaryInstanceType'
+                Value: 'm6g.xlarge'
+                IsEditable: true
+              - Name: 'coreInstanceType'
+                Value: 'm6g.xlarge'
+                IsEditable: true
+              - Name: 'taskInstanceType'
+                Value: 'm6g.xlarge'
+                IsEditable: true
+
+        - Name: 'OnDemand RedshiftServerless'
+          EnvironmentBlueprintId: !Ref RedshiftServerlessId
+          Description: 'Enables you to create an additional Amazon Redshift Serverless workgroup for your SQL workloads'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'redshiftDbName'
+                Value: 'dev'
+                IsEditable: true
+              - Name: 'redshiftMaxCapacity'
+                Value: '512'
+                IsEditable: true
+              - Name: 'redshiftWorkgroupName'
+                Value: 'redshift-serverless-workgroup'
+                IsEditable: true
+              - Name: 'redshiftBaseCapacity'
+                Value: '128'
+                IsEditable: true
+              - Name: 'connectionName'
+                Value: 'redshift.serverless'
+                IsEditable: true
+              - Name: 'connectToRMSCatalog'
+                Value: 'false'
+                IsEditable: false
+
+        - Name: 'OnDemand Catalog for Redshift Managed Storage'
+          EnvironmentBlueprintId: !Ref LakehouseCatalogId
+          Description: 'Enables you to create additional catalogs in Amazon SageMaker Lakehouse for storing data in Redshift Managed Storage'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'catalogName'
+                IsEditable: true
+              - Name: 'catalogDescription'
+                Value: 'RMS catalog'
+                IsEditable: true
+
+        - Name: 'OnDemand EMRServerless'
+          EnvironmentBlueprintId: !Ref EmrServerlessId
+          Description: 'Enables you to create an additional Amazon EMR Serverless application for running Spark workloads'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+          ConfigurationParameters:
+            ParameterOverrides:
+              - Name: 'connectionDescription'
+                IsEditable: true
+              - Name: 'connectionName'
+                IsEditable: true
+              - Name: 'releaseLabel'
+                Value: 'emr-7.5.0'
+                IsEditable: true
+
+        - Name: 'Amazon Bedrock Chat Agent'
+          EnvironmentBlueprintId: !Ref AmazonBedrockChatAgentId
+          Description: 'A configurable generative AI app with a conversational interface'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Knowledge Base'
+          EnvironmentBlueprintId: !Ref AmazonBedrockKnowledgeBaseId
+          Description: 'A reusable component for providing your own data to apps'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Guardrail'
+          EnvironmentBlueprintId: !Ref AmazonBedrockGuardrailId
+          Description: 'A reusable component for implementing safeguards on model outputs'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Function'
+          EnvironmentBlueprintId: !Ref AmazonBedrockFunctionId
+          Description: 'A reusable component for including dynamic information in model outputs'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Flow'
+          EnvironmentBlueprintId: !Ref AmazonBedrockFlowId
+          Description: 'A configurable generative AI workflow'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Prompt'
+          EnvironmentBlueprintId: !Ref AmazonBedrockPromptId
+          Description: 'A reusable set of inputs that guide model outputs'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'Amazon Bedrock Evaluation'
+          EnvironmentBlueprintId: !Ref AmazonBedrockEvaluationId
+          Description: 'Enables evaluation features to compare Bedrock models'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+        - Name: 'QuickSight'
+          EnvironmentBlueprintId: !Ref QuickSightId
+          Description: 'Amazon QuickSight for data visualization and business intelligence'
+          DeploymentMode: 'ON_DEMAND'
+          AwsAccount:
+            AwsAccountId: !Ref AccountId
+          AwsRegion:
+            RegionName: !Ref Region
+
+Outputs:
+  SQLAnalyticsProfileId:
+    Value: !GetAtt SQLAnalytics.Id
+  AllCapabilitiesProjectProfileId:
+    Value: !GetAtt AllCapabilitiesProjectProfile.Id
