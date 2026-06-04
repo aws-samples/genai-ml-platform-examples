@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MLOps SMUS - EventBridge Rules and Targets'
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: 'mlops-smus'
+    Description: 'Prefix for all resource names'
+
+
+  # IAM Role ARNs from IAM stack
+  EventBridgeRoleArn:
+    Type: String
+    Description: 'ARN of the EventBridge Role'
+
+  EventBridgeInvokeLambdaRoleArn:
+    Type: String
+    Description: 'ARN of the EventBridge Invoke Lambda Role'
+
+  # Resource ARNs from other stacks
+  StateMachineArn:
+    Type: String
+    Description: 'ARN of the Step Functions state machine'
+
+  ModelApprovalFunctionArn:
+    Type: String
+    Description: 'ARN of the Model Approval Lambda function'
+
+Resources:
+  # EventBridge Role Policy for Step Functions execution
+  EventBridgeRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${ProjectPrefix}-eventbridge-stepfunctions-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'states:StartExecution'
+            Resource: !Ref StateMachineArn
+      Roles:
+        - !Select [1, !Split ['/', !Select [5, !Split [':', !Ref EventBridgeRoleArn]]]]
+
+  # EventBridge Lambda Role Policy for Lambda invocation
+  EventBridgeLambdaRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${ProjectPrefix}-eventbridge-lambda-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource: !Ref ModelApprovalFunctionArn
+      Roles:
+        - !Select [1, !Split ['/', !Select [5, !Split [':', !Ref EventBridgeInvokeLambdaRoleArn]]]]
+
+  # DataZone Project Creation Rule
+  DataZoneProjectRule:
+    Type: AWS::Events::Rule
+    DependsOn: EventBridgeRolePolicy
+    Properties:
+      Name: !Sub '${ProjectPrefix}-datazone-project-rule'
+      Description: 'Triggers Step Functions on DataZone Project Creation'
+      State: ENABLED
+      EventPattern:
+        detail:
+          eventSource:
+            - 'datazone.amazonaws.com'
+          eventName:
+            - 'CreateProject'
+        detail-type:
+          - 'AWS API Call via CloudTrail'
+        source:
+          - 'aws.datazone'
+      Targets:
+        - Arn: !Ref StateMachineArn
+          Id: 'StepFunctionsTarget'
+          RoleArn: !Ref EventBridgeRoleArn
+
+  # Model Approval Rule
+  ModelApprovalRule:
+    Type: AWS::Events::Rule
+    DependsOn: EventBridgeLambdaRolePolicy
+    Properties:
+      Name: !Sub '${ProjectPrefix}-model-approval-rule'
+      Description: 'Triggers GitHub workflow when a model is approved in SageMaker'
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.sagemaker'
+        detail-type:
+          - 'SageMaker Model Package State Change'
+        detail:
+          ModelApprovalStatus:
+            - 'Approved'
+      Targets:
+        - Arn: !Ref ModelApprovalFunctionArn
+          Id: 'ModelApprovalLambda'
+          RoleArn: !Ref EventBridgeInvokeLambdaRoleArn
+
+  # Lambda permission for EventBridge to invoke Model Approval function
+  ModelApprovalLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ModelApprovalFunctionArn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt ModelApprovalRule.Arn
+
+Outputs:
+  DataZoneProjectRuleName:
+    Description: 'Name of the DataZone Project EventBridge rule'
+    Value: !Ref DataZoneProjectRule
+    Export:
+      Name: !Sub '${ProjectPrefix}-datazone-rule-name'
+
+  DataZoneProjectRuleArn:
+    Description: 'ARN of the DataZone Project EventBridge rule'
+    Value: !GetAtt DataZoneProjectRule.Arn
+
+  ModelApprovalRuleName:
+    Description: 'Name of the Model Approval EventBridge rule'
+    Value: !Ref ModelApprovalRule
+    Export:
+      Name: !Sub '${ProjectPrefix}-model-approval-rule-name'
+
+  ModelApprovalRuleArn:
+    Description: 'ARN of the Model Approval EventBridge rule'
+    Value: !GetAtt ModelApprovalRule.Arn
+
+  EventBridgeConfiguration:
+    Description: 'EventBridge configuration summary'
+    Value: !Sub |
+      DataZone Rule: ${DataZoneProjectRule} -> Step Functions
+      Model Approval Rule: ${ModelApprovalRule} -> Lambda Function

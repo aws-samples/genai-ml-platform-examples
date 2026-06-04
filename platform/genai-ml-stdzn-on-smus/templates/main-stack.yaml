@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MLOps SMUS - Main Stack orchestrating all nested stacks'
+
+Parameters:
+  # Project Configuration
+  ProjectPrefix:
+    Type: String
+    Default: 'smus-aiops'
+    Description: 'Prefix for all resource names'
+
+  # Public Repository Configuration (Source)
+  PublicSmusAiopsOrg:
+    Type: String
+    Default: 'aws-samples'
+    Description: 'Public GitHub organization containing the seed code'
+
+  PublicSmusAiopsOrgRepo:
+    Type: String
+    Default: 'genai-ml-platform-examples'
+    Description: 'Public GitHub repository name containing the seed code'
+
+  PublicSmusAiopsOrgRepoFolder:
+    Type: String
+    Default: 'platform/genai-ml-stdzn-on-smus/seed-code'
+    Description: 'Folder within the public repository containing seed code'
+
+  PublicRepoBranch:
+    Type: String
+    Default: 'main'
+    Description: 'Branch to use from the public repository'
+    
+  # Private Repository Configuration (Target)
+  PrivateGitHubOrganization:
+    Type: String
+    Default: 'sachinh'
+    Description: 'Private GitHub organization where repositories will be created'
+    ConstraintDescription: 'Must match the GitHub organization configured in AWS CodeStar Connections'
+
+  PrivateDeployRepoDefaultBranch:
+    Type: String
+    Default: 'main'
+    Description: 'Default branch name for created deployment repositories'
+
+  # GitHub Integration Configuration
+
+  # Asset Storage Configuration (External S3 Bucket)
+  AssetsBucket:
+    Type: String
+    Default: 'smus-aiops-assets'
+    Description: 'S3 bucket containing CloudFormation templates and Lambda assets'
+
+  TemplateS3KeyPrefix:
+    Type: String
+    Default: 'templates'
+    Description: 'S3 key prefix for nested stack templates'
+
+  LambdaAssetsKeyPrefix:
+    Type: String
+    Default: 'lambda-assets'
+    Description: 'S3 key prefix for Lambda function assets'
+
+  CreateOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Set to false if your account already has a GitHub OIDC provider
+      (token.actions.githubusercontent.com). Only one can exist per account.
+
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an existing GitHub OIDC provider. Required when CreateOidcProvider
+      is false. Format: arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+
+Resources:
+  # 1. Secrets Stack - Must be first as others depend on it
+  SecretsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://${AssetsBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateS3KeyPrefix}/secrets-stack.yaml'
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'secrets'
+
+  # 2. IAM Stack - Depends on Secrets Stack
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecretsStack
+    Properties:
+      TemplateURL: !Sub 'https://${AssetsBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateS3KeyPrefix}/iam-stack.yaml'
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        GitHubOrganization: !Ref PrivateGitHubOrganization
+        GitHubTokenSecretArn: !GetAtt SecretsStack.Outputs.GitHubTokenSecretArn
+        CreateOidcProvider: !Ref CreateOidcProvider
+        ExistingOidcProviderArn: !Ref ExistingOidcProviderArn
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'iam'
+
+  # 3. Lambda Stack - Depends on IAM Stack
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub 'https://${AssetsBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateS3KeyPrefix}/lambda-stack.yaml'
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        PublicSmusAiopsOrg: !Ref PublicSmusAiopsOrg
+        PublicSmusAiopsOrgRepo: !Ref PublicSmusAiopsOrgRepo
+        PublicSmusAiopsOrgRepoFolder: !Ref PublicSmusAiopsOrgRepoFolder
+        PrivateGitHubOrganization: !Ref PrivateGitHubOrganization
+        PrivateDeployRepoDefaultBranch: !Ref PrivateDeployRepoDefaultBranch
+        GitHubTokenSecretName: !GetAtt SecretsStack.Outputs.GitHubTokenSecretName
+        LambdaCommonRoleArn: !GetAtt IAMStack.Outputs.LambdaCommonRoleArn
+        ModelApprovalLambdaRoleArn: !GetAtt IAMStack.Outputs.ModelApprovalLambdaRoleArn
+        GitHubWorkflowRoleArn: !GetAtt IAMStack.Outputs.GitHubWorkflowRoleArn
+        AssetsBucket: !Ref AssetsBucket
+        AssetsKeyPrefix: !Ref LambdaAssetsKeyPrefix
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'lambda'
+
+  # 4. Step Functions Stack - Depends on Lambda Stack
+  StepFunctionsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaStack
+    Properties:
+      TemplateURL: !Sub 'https://${AssetsBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateS3KeyPrefix}/stepfunctions-stack.yaml'
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        StepFunctionsRoleArn: !GetAtt IAMStack.Outputs.StepFunctionsRoleArn
+        CheckProjectStatusFunctionArn: !GetAtt LambdaStack.Outputs.CheckProjectStatusFunctionArn
+        SyncRepositoriesFunctionArn: !GetAtt LambdaStack.Outputs.SyncRepositoriesFunctionArn
+        CreateDeployRepositoryFunctionArn: !GetAtt LambdaStack.Outputs.CreateDeployRepositoryFunctionArn
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'stepfunctions'
+
+  # 5. EventBridge Stack - Depends on Step Functions and Lambda Stacks
+  EventBridgeStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - StepFunctionsStack
+      - LambdaStack
+    Properties:
+      TemplateURL: !Sub 'https://${AssetsBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateS3KeyPrefix}/eventbridge-stack.yaml'
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        EventBridgeRoleArn: !GetAtt IAMStack.Outputs.EventBridgeRoleArn
+        EventBridgeInvokeLambdaRoleArn: !GetAtt IAMStack.Outputs.EventBridgeInvokeLambdaRoleArn
+        StateMachineArn: !GetAtt StepFunctionsStack.Outputs.StateMachineArn
+        ModelApprovalFunctionArn: !GetAtt LambdaStack.Outputs.ModelApprovalFunctionArn
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'eventbridge'
+
+Outputs:
+  # Stack ARNs for reference
+  SecretsStackArn:
+    Description: 'ARN of the Secrets nested stack'
+    Value: !Ref SecretsStack
+
+  IAMStackArn:
+    Description: 'ARN of the IAM nested stack'
+    Value: !Ref IAMStack
+
+  LambdaStackArn:
+    Description: 'ARN of the Lambda nested stack'
+    Value: !Ref LambdaStack
+
+  StepFunctionsStackArn:
+    Description: 'ARN of the Step Functions nested stack'
+    Value: !Ref StepFunctionsStack
+
+  EventBridgeStackArn:
+    Description: 'ARN of the EventBridge nested stack'
+    Value: !Ref EventBridgeStack
+
+  # Key Resource ARNs (passed through from nested stacks)
+  GitHubWorkflowRoleArn:
+    Description: 'ARN of the GitHub Workflow Role'
+    Value: !GetAtt IAMStack.Outputs.GitHubWorkflowRoleArn
+
+  StateMachineArn:
+    Description: 'ARN of the Step Functions state machine'
+    Value: !GetAtt StepFunctionsStack.Outputs.StateMachineArn
+
+  ModelApprovalFunctionArn:
+    Description: 'ARN of the Model Approval Lambda function'
+    Value: !GetAtt LambdaStack.Outputs.ModelApprovalFunctionArn
+
+  DataZoneProjectRuleName:
+    Description: 'Name of the DataZone Project EventBridge rule'
+    Value: !GetAtt EventBridgeStack.Outputs.DataZoneProjectRuleName
+
+  ModelApprovalRuleName:
+    Description: 'Name of the Model Approval EventBridge rule'
+    Value: !GetAtt EventBridgeStack.Outputs.ModelApprovalRuleName
+
+  GitHubTokenSecretName:
+    Description: 'Name of the GitHub Token Secret'
+    Value: !GetAtt SecretsStack.Outputs.GitHubTokenSecretName
+
+  # Configuration Summary for reference
+  ConfigurationSummary:
+    Description: 'Configuration summary'
+    Value: !Sub |
+      ProjectPrefix: ${ProjectPrefix}
+      Public Source: ${PublicSmusAiopsOrg}/${PublicSmusAiopsOrgRepo}/${PublicSmusAiopsOrgRepoFolder}
+      Private GitHub Org: ${PrivateGitHubOrganization}
+      Default Branch: ${PrivateDeployRepoDefaultBranch}

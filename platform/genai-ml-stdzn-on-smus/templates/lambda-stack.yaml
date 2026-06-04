@@ -1,0 +1,298 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MLOps SMUS - Lambda Functions and Layers'
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: 'mlops-smus'
+    Description: 'Prefix for all resource names'
+
+
+  # GitHub Configuration Parameters
+  PublicSmusAiopsOrg:
+    Type: String
+    Default: 'aws-samples'
+    Description: 'Public GitHub organization containing the seed code'
+
+  PublicSmusAiopsOrgRepo:
+    Type: String
+    Default: 'sample-smus-aiops'
+    Description: 'Public GitHub repository name containing the seed code'
+
+  PublicSmusAiopsOrgRepoFolder:
+    Type: String
+    Default: 'aiops-seed-code'
+    Description: 'Folder within the public repository containing seed code'
+
+  PrivateGitHubOrganization:
+    Type: String
+    Default: 'sachinh'
+    Description: 'Private GitHub organization where repositories will be created'
+
+  PrivateDeployRepoDefaultBranch:
+    Type: String
+    Default: 'main'
+    Description: 'Default branch name for created deployment repositories'
+
+  GitHubTokenSecretName:
+    Type: String
+    Description: 'Name of the Secrets Manager secret containing GitHub token'
+
+  # IAM Role ARNs from IAM stack
+  LambdaCommonRoleArn:
+    Type: String
+    Description: 'ARN of the Lambda Common Role'
+
+  ModelApprovalLambdaRoleArn:
+    Type: String
+    Description: 'ARN of the Model Approval Lambda Role'
+
+  GitHubWorkflowRoleArn:
+    Type: String
+    Description: 'ARN of the GitHub Workflow Role'
+
+  # Asset Configuration
+  AssetsBucket:
+    Type: String
+    Description: 'S3 bucket containing Lambda function assets'
+
+  AssetsKeyPrefix:
+    Type: String
+    Default: 'lambda-assets'
+    Description: 'S3 key prefix for Lambda assets'
+
+Resources:
+  # Git Layer - Provides Git binary for Lambda functions
+  GitLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub '${ProjectPrefix}-git-layer'
+      Description: 'Minimal Git binary layer for Lambda functions'
+      Content:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/git-layer.zip'
+      CompatibleRuntimes:
+        - python3.9
+        - python3.10
+        - python3.11
+      CompatibleArchitectures:
+        - x86_64
+
+  # Dependency Layer - Contains Python dependencies
+  DependencyLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub '${ProjectPrefix}-dependency-layer'
+      Description: 'Python dependencies layer (boto3, requests, etc.)'
+      Content:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/dependency-layer.zip'
+      CompatibleRuntimes:
+        - python3.9
+        - python3.10
+        - python3.11
+      CompatibleArchitectures:
+        - x86_64
+
+  # Check Project Status Lambda Function
+  CheckProjectStatusFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectPrefix}-check-project-status'
+      Description: 'Monitors DataZone project creation status'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Code:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/check-project-status-function.zip'
+      Role: !Ref LambdaCommonRoleArn
+      Timeout: 900
+      MemorySize: 1024
+      Layers:
+        - !Ref DependencyLayer
+        - !Ref GitLayer
+      Environment:
+        Variables:
+          PUBLIC_SMUS_AIOPS_ORG: !Ref PublicSmusAiopsOrg
+          PUBLIC_SMUS_AIOPS_ORG_REPO: !Ref PublicSmusAiopsOrgRepo
+          PUBLIC_SMUS_AIOPS_ORG_REPO_FOLDER: !Ref PublicSmusAiopsOrgRepoFolder
+          OIDC_ROLE_GITHUB_WORKFLOW: !Ref GitHubWorkflowRoleArn
+          GITHUB_TOKEN_SECRET_NAME: !Ref GitHubTokenSecretName
+          PRIVATE_GITHUB_ORGANIZATION: !Ref PrivateGitHubOrganization
+          PRIVATE_DEPLOY_REPO_DEFAULT_BRANCH: !Ref PrivateDeployRepoDefaultBranch
+          PATH: '/opt/gh:/opt/git/bin:/var/task:/opt:/var/lang/bin:/usr/local/bin:/usr/bin/:/bin'
+          LD_LIBRARY_PATH: '/opt/git/lib'
+          GIT_EXEC_PATH: '/opt/git/lib/git-core'
+          GIT_TEMPLATE_DIR: '/opt/git/share/git-core/templates'
+          GIT: '/opt/git/bin/git'
+          GH_PATH: '/opt/gh/gh'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'lambda'
+
+  # Sync Repositories Lambda Function
+  SyncRepositoriesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectPrefix}-sync-repositories'
+      Description: 'Syncs seed code from public repo to private repos'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Code:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/sync-repositories-function.zip'
+      Role: !Ref LambdaCommonRoleArn
+      Timeout: 900
+      MemorySize: 1024
+      Layers:
+        - !Ref DependencyLayer
+        - !Ref GitLayer
+      Environment:
+        Variables:
+          PUBLIC_SMUS_AIOPS_ORG: !Ref PublicSmusAiopsOrg
+          PUBLIC_SMUS_AIOPS_ORG_REPO: !Ref PublicSmusAiopsOrgRepo
+          PUBLIC_SMUS_AIOPS_ORG_REPO_FOLDER: !Ref PublicSmusAiopsOrgRepoFolder
+          OIDC_ROLE_GITHUB_WORKFLOW: !Ref GitHubWorkflowRoleArn
+          GITHUB_TOKEN_SECRET_NAME: !Ref GitHubTokenSecretName
+          PRIVATE_GITHUB_ORGANIZATION: !Ref PrivateGitHubOrganization
+          PRIVATE_DEPLOY_REPO_DEFAULT_BRANCH: !Ref PrivateDeployRepoDefaultBranch
+          PATH: '/opt/gh:/opt/git/bin:/var/task:/opt:/var/lang/bin:/usr/local/bin:/usr/bin/:/bin'
+          LD_LIBRARY_PATH: '/opt/git/lib'
+          GIT_EXEC_PATH: '/opt/git/lib/git-core'
+          GIT_TEMPLATE_DIR: '/opt/git/share/git-core/templates'
+          GIT: '/opt/git/bin/git'
+          GH_PATH: '/opt/gh/gh'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'lambda'
+
+  # Create Deploy Repository Lambda Function
+  CreateDeployRepositoryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectPrefix}-create-deploy-repo'
+      Description: 'Creates deployment repositories with CI/CD workflows'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Code:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/create-deploy-repository-function.zip'
+      Role: !Ref LambdaCommonRoleArn
+      Timeout: 900
+      MemorySize: 1024
+      Layers:
+        - !Ref DependencyLayer
+        - !Ref GitLayer
+      Environment:
+        Variables:
+          PUBLIC_SMUS_AIOPS_ORG: !Ref PublicSmusAiopsOrg
+          PUBLIC_SMUS_AIOPS_ORG_REPO: !Ref PublicSmusAiopsOrgRepo
+          PUBLIC_SMUS_AIOPS_ORG_REPO_FOLDER: !Ref PublicSmusAiopsOrgRepoFolder
+          OIDC_ROLE_GITHUB_WORKFLOW: !Ref GitHubWorkflowRoleArn
+          GITHUB_TOKEN_SECRET_NAME: !Ref GitHubTokenSecretName
+          PRIVATE_GITHUB_ORGANIZATION: !Ref PrivateGitHubOrganization
+          PRIVATE_DEPLOY_REPO_DEFAULT_BRANCH: !Ref PrivateDeployRepoDefaultBranch
+          PATH: '/opt/gh:/opt/git/bin:/var/task:/opt:/var/lang/bin:/usr/local/bin:/usr/bin/:/bin'
+          LD_LIBRARY_PATH: '/opt/git/lib'
+          GIT_EXEC_PATH: '/opt/git/lib/git-core'
+          GIT_TEMPLATE_DIR: '/opt/git/share/git-core/templates'
+          GIT: '/opt/git/bin/git'
+          GH_PATH: '/opt/gh/gh'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'lambda'
+
+  # Model Approval Lambda Function
+  ModelApprovalFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectPrefix}-model-approval-trigger'
+      Description: 'Triggers GitHub workflow when a model is approved in SageMaker'
+      Runtime: python3.9
+      Handler: deploy_on_model_approval.lambda_handler
+      Code:
+        S3Bucket: !Ref AssetsBucket
+        S3Key: !Sub '${AssetsKeyPrefix}/model-approval-function.zip'
+      Role: !Ref ModelApprovalLambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Layers:
+        - !Ref DependencyLayer
+        - !Ref GitLayer
+      Environment:
+        Variables:
+          GITHUB_TOKEN_SECRET_NAME: !Ref GitHubTokenSecretName
+          PRIVATE_GITHUB_ORGANIZATION: !Ref PrivateGitHubOrganization
+          PATH: '/opt/gh:/opt/git/bin:/var/task:/opt:/var/lang/bin:/usr/local/bin:/usr/bin/:/bin'
+          LD_LIBRARY_PATH: '/opt/git/lib'
+          GIT_EXEC_PATH: '/opt/git/lib/git-core'
+          GIT_TEMPLATE_DIR: '/opt/git/share/git-core/templates'
+          GIT: '/opt/git/bin/git'
+          GH_PATH: '/opt/gh/gh'
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'lambda'
+
+Outputs:
+  # Layer ARNs
+  GitLayerArn:
+    Description: 'ARN of the Git Layer'
+    Value: !Ref GitLayer
+    Export:
+      Name: !Sub '${ProjectPrefix}-git-layer-arn'
+
+  DependencyLayerArn:
+    Description: 'ARN of the Dependency Layer'
+    Value: !Ref DependencyLayer
+    Export:
+      Name: !Sub '${ProjectPrefix}-dependency-layer-arn'
+
+  # Function ARNs
+  CheckProjectStatusFunctionArn:
+    Description: 'ARN of the Check Project Status Lambda function'
+    Value: !GetAtt CheckProjectStatusFunction.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-check-project-status-arn'
+
+  SyncRepositoriesFunctionArn:
+    Description: 'ARN of the Sync Repositories Lambda function'
+    Value: !GetAtt SyncRepositoriesFunction.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-sync-repositories-arn'
+
+  CreateDeployRepositoryFunctionArn:
+    Description: 'ARN of the Create Deploy Repository Lambda function'
+    Value: !GetAtt CreateDeployRepositoryFunction.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-create-deploy-repo-arn'
+
+  ModelApprovalFunctionArn:
+    Description: 'ARN of the Model Approval Lambda function'
+    Value: !GetAtt ModelApprovalFunction.Arn
+    Export:
+      Name: !Sub '${ProjectPrefix}-model-approval-arn'
+
+  # Function Names
+  CheckProjectStatusFunctionName:
+    Description: 'Name of the Check Project Status Lambda function'
+    Value: !Ref CheckProjectStatusFunction
+
+  SyncRepositoriesFunctionName:
+    Description: 'Name of the Sync Repositories Lambda function'
+    Value: !Ref SyncRepositoriesFunction
+
+  CreateDeployRepositoryFunctionName:
+    Description: 'Name of the Create Deploy Repository Lambda function'
+    Value: !Ref CreateDeployRepositoryFunction
+
+  ModelApprovalFunctionName:
+    Description: 'Name of the Model Approval Lambda function'
+    Value: !Ref ModelApprovalFunction

@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create IAM roles for SageMaker Unified Studio domain
+
+Resources:
+  DomainExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+              - sts:SetContext
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ForAllValues:StringLike:
+                aws:TagKeys: datazone*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/SageMakerStudioDomainExecutionRolePolicy
+      MaxSessionDuration: 3600
+
+  DomainServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/SageMakerStudioDomainServiceRolePolicy
+      MaxSessionDuration: 3600
+
+  ProvisioningRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/SageMakerStudioProjectProvisioningRolePolicy
+      MaxSessionDuration: 3600
+
+  ManageAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: "arn:aws:datazone:REPLACE-REGION-CODE-HERE:REPLACE-AWS-ACCOUNT-ID-HERE:domain/REPLACE-SMUS-DOMAIN-NAME-HERE"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonDataZoneRedshiftManageAccessRolePolicy
+        - arn:aws:iam::aws:policy/service-role/AmazonDataZoneGlueManageAccessRolePolicy
+        - arn:aws:iam::aws:policy/AmazonDataZoneSageMakerManageAccessRolePolicy
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-ManageAccessPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RedshiftSecretStatement
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    secretsmanager:ResourceTag/AmazonDataZoneDomain: "REPLACE-SMUS-DOMAIN-NAME-HERE"
+      MaxSessionDuration: 3600
+
+Outputs:
+  DomainExecutionRoleArn:
+    Description: ARN of the Domain Execution Role
+    Value: !GetAtt DomainExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DomainExecutionRoleArn"
+
+  DomainServiceRoleArn:
+    Description: ARN of the Domain Service Role
+    Value: !GetAtt DomainServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DomainServiceRoleArn"
+
+  ProvisioningRoleArn:
+    Description: ARN of the Provisioning Role
+    Value: !GetAtt ProvisioningRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ProvisioningRoleArn"
+
+  ManageAccessRoleArn:
+    Description: ARN of the Manage Access Role
+    Value: !GetAtt ManageAccessRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ManageAccessRoleArn"

@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MLOps SMUS - Step Functions State Machine'
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: 'mlops-smus'
+    Description: 'Prefix for all resource names'
+
+
+  # IAM Role ARN from IAM stack
+  StepFunctionsRoleArn:
+    Type: String
+    Description: 'ARN of the Step Functions Role'
+
+  # Lambda Function ARNs from Lambda stack
+  CheckProjectStatusFunctionArn:
+    Type: String
+    Description: 'ARN of the Check Project Status Lambda function'
+
+  SyncRepositoriesFunctionArn:
+    Type: String
+    Description: 'ARN of the Sync Repositories Lambda function'
+
+  CreateDeployRepositoryFunctionArn:
+    Type: String
+    Description: 'ARN of the Create Deploy Repository Lambda function'
+
+Resources:
+  # Step Functions Role Policy for Lambda invocation
+  StepFunctionsRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${ProjectPrefix}-stepfunctions-lambda-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource:
+              - !Ref CheckProjectStatusFunctionArn
+              - !Sub '${CheckProjectStatusFunctionArn}:*'
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource:
+              - !Ref SyncRepositoriesFunctionArn
+              - !Sub '${SyncRepositoriesFunctionArn}:*'
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource:
+              - !Ref CreateDeployRepositoryFunctionArn
+              - !Sub '${CreateDeployRepositoryFunctionArn}:*'
+      Roles:
+        - !Select [1, !Split ['/', !Select [5, !Split [':', !Ref StepFunctionsRoleArn]]]]
+
+  # Project Setup State Machine
+  ProjectSetupStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    DependsOn: StepFunctionsRolePolicy
+    Properties:
+      StateMachineName: !Sub '${ProjectPrefix}-project-setup'
+      StateMachineType: STANDARD
+      RoleArn: !Ref StepFunctionsRoleArn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "Wait Initial",
+          "States": {
+            "Wait Initial": {
+              "Type": "Wait",
+              "Seconds": 10,
+              "Next": "Invoke Check Status"
+            },
+            "Invoke Check Status": {
+              "Next": "Is Project Ready?",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ClientExecutionTimeoutException",
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Type": "Task",
+              "OutputPath": "$.Payload",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CheckProjectStatusFunctionArn}",
+                "Payload.$": "$"
+              }
+            },
+            "Wait For Project": {
+              "Type": "Wait",
+              "Seconds": 60,
+              "Next": "Invoke Check Status"
+            },
+            "Is Project Ready?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.status",
+                  "StringEquals": "SUCCESSFUL",
+                  "Next": "Invoke Sync Repos"
+                },
+                {
+                  "Variable": "$.status",
+                  "StringEquals": "FAILED",
+                  "Next": "Project Creation Failed"
+                }
+              ],
+              "Default": "Wait For Project"
+            },
+            "Invoke Sync Repos": {
+              "Next": "Check Space Status",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ClientExecutionTimeoutException",
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Type": "Task",
+              "OutputPath": "$.Payload",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${SyncRepositoriesFunctionArn}",
+                "Payload.$": "$"
+              }
+            },
+            "Preserve Context": {
+              "Type": "Pass",
+              "Parameters": {
+                "projectId.$": "$.projectId",
+                "domainId.$": "$.domainId",
+                "status.$": "$.status",
+                "buildRepo.$": "$.buildRepo",
+                "additionalInfo.$": "$.additionalInfo"
+              },
+              "Next": "Invoke Sync Repos"
+            },
+            "Wait For Space": {
+              "Type": "Wait",
+              "Seconds": 180,
+              "Next": "Preserve Context"
+            },
+            "Check Space Status": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.status",
+                  "StringEquals": "WAITING_FOR_SPACE",
+                  "Next": "Wait For Space"
+                },
+                {
+                  "Variable": "$.status",
+                  "StringEquals": "SUCCESSFUL",
+                  "Next": "Invoke Create Deploy Repo"
+                }
+              ],
+              "Default": "Sync Repos Failed"
+            },
+            "Sync Repos Failed": {
+              "Type": "Fail",
+              "Cause": "$.error"
+            },
+            "Invoke Create Deploy Repo": {
+              "Next": "Create Deploy Repo Success?",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ClientExecutionTimeoutException",
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Type": "Task",
+              "OutputPath": "$.Payload",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CreateDeployRepositoryFunctionArn}",
+                "Payload.$": "$"
+              }
+            },
+            "Create Deploy Repo Success?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.status",
+                  "StringEquals": "SUCCESSFUL",
+                  "Next": "Project Setup Successful"
+                }
+              ],
+              "Default": "Deploy Repo Creation Failed"
+            },
+            "Deploy Repo Creation Failed": {
+              "Type": "Fail",
+              "Cause": "$.error"
+            },
+            "Project Setup Successful": {
+              "Type": "Succeed"
+            },
+            "Project Creation Failed": {
+              "Type": "Fail",
+              "Cause": "$.error"
+            }
+          },
+          "TimeoutSeconds": 10800
+        }
+      Tags:
+        - Key: 'Project'
+          Value: !Ref ProjectPrefix
+        - Key: 'Component'
+          Value: 'stepfunctions'
+
+Outputs:
+  StateMachineArn:
+    Description: 'ARN of the Step Functions state machine'
+    Value: !Ref ProjectSetupStateMachine
+    Export:
+      Name: !Sub '${ProjectPrefix}-statemachine-arn'
+
+  StateMachineName:
+    Description: 'Name of the Step Functions state machine'
+    Value: !Ref ProjectSetupStateMachine
+
+  StateMachineDefinition:
+    Description: 'State machine definition summary'
+    Value: 'Project setup workflow with check status -> sync repos -> create deploy repo'

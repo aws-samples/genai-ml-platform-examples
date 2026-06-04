@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create resource share for domain
+Transform: AWS::LanguageExtensions
+
+Parameters:
+    DomainId:
+        Description: Domain for which blueprint needs to be enabled
+        Type: String
+    AccountId:
+        Type: String
+    DomainUnitId:
+        Description: Domain unit for which blueprint needs to be enabled
+        Type: String
+
+    LakehouseCatalogId:
+        Type: String
+    AmazonBedrockGuardrailId:
+        Type: String
+    MLExperimentsId:
+        Type: String
+    ToolingId:
+        Type: String
+    RedshiftServerlessId:
+        Type: String
+    EmrServerlessId:
+        Type: String
+    WorkflowsId:
+        Type: String
+    AmazonBedrockPromptId:
+        Type: String
+    DataLakeId:
+        Type: String
+    AmazonBedrockEvaluationId:
+        Type: String
+    AmazonBedrockKnowledgeBaseId:
+        Type: String
+    PartnerAppsId:
+        Type: String
+    AmazonBedrockChatAgentId:
+        Type: String
+    AmazonBedrockFunctionId:
+        Type: String
+    AmazonBedrockFlowId:
+        Type: String
+    EmrOnEc2Id:
+        Type: String
+    QuickSightId:
+        Type: String
+
+    SQLAnalyticsProfileId:
+        Type: String
+    AllCapabilitiesProjectProfileId:
+        Type: String
+
+
+Resources:
+    'Fn::ForEach::PolicyGrants':
+        - Blueprint
+        -
+            - !Ref LakehouseCatalogId
+            - !Ref AmazonBedrockGuardrailId
+            - !Ref MLExperimentsId
+            - !Ref ToolingId
+            - !Ref RedshiftServerlessId
+            - !Ref EmrServerlessId
+            - !Ref WorkflowsId
+            - !Ref AmazonBedrockPromptId
+            - !Ref DataLakeId
+            - !Ref AmazonBedrockEvaluationId
+            - !Ref AmazonBedrockKnowledgeBaseId
+            - !Ref PartnerAppsId
+            - !Ref AmazonBedrockChatAgentId
+            - !Ref AmazonBedrockFunctionId
+            - !Ref AmazonBedrockFlowId
+            - !Ref EmrOnEc2Id
+        - 'AddPolicyGrantFor&{Blueprint}':
+              Type: AWS::DataZone::PolicyGrant
+              Properties:
+                  DomainIdentifier: !Ref DomainId
+                  EntityType: ENVIRONMENT_BLUEPRINT_CONFIGURATION
+                  EntityIdentifier: !Sub '${AccountId}:${Blueprint}'
+                  PolicyType: CREATE_ENVIRONMENT_FROM_BLUEPRINT
+                  Detail:
+                      CreateEnvironmentFromBlueprint: {}
+                  Principal:
+                      Project:
+                          ProjectDesignation: CONTRIBUTOR
+                          ProjectGrantFilter:
+                              DomainUnitFilter:
+                                  DomainUnit: !Ref DomainUnitId
+                                  IncludeChildDomainUnits: true
+                                  
+    AddPolicyGrantForProfiles:
+        Type: AWS::DataZone::PolicyGrant
+        Properties:
+            DomainIdentifier: !Ref DomainId
+            EntityType: DOMAIN_UNIT
+            EntityIdentifier: !Ref DomainUnitId
+            PolicyType: CREATE_PROJECT_FROM_PROJECT_PROFILE
+            Detail:
+                CreateProjectFromProjectProfile:
+                    IncludeChildDomainUnits: true
+                    ProjectProfiles:
+                        - !Ref SQLAnalyticsProfileId
+                        - !Ref AllCapabilitiesProjectProfileId
+            Principal:
+                User:
+                    AllUsersGrantFilter: {}
