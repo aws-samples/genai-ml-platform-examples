@@ -155,6 +155,9 @@ jobs:
         MODEL_VERSION=$(echo "$MODEL_PACKAGE_ARN" | cut -d'/' -f3 | tr '_' '-')
         SAGEMAKER_PROJECT_NAME=$(echo "$SAGEMAKER_PROJECT_NAME" | tr '_' '-')
         COMBINED="${SAGEMAKER_PROJECT_NAME}-${MODEL_PACKAGE_GROUP}-${MODEL_VERSION}"
+        if [[ "$COMBINED" =~ ^-+$ ]] || [[ -z "$COMBINED" ]]; then
+          COMBINED=""
+        fi
         echo "combined=$COMBINED" >> $GITHUB_OUTPUT
           
     - name: CDK Deploy
