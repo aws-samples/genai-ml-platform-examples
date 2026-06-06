@@ -1,0 +1,86 @@
+# Triton Inference Server with ONNX Sortformer + sequence_batching
+#
+# Build:  docker compose --profile onnx build triton-onnx
+# Run:    docker compose --profile onnx up triton-onnx gateway
+#
+# The ONNX model is exported during the build via convert_onnx.py
+# (no pre-exported file needed in the build context).
+FROM nvcr.io/nvidia/tritonserver:26.02-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 ffmpeg sox \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin the container's existing torch so NeMo can't clobber it
+RUN pip freeze | grep -iE '^(torch|torchaudio|torchvision)==' > /tmp/constraints.txt || true
+
+# Install NeMo (needed for export AND runtime preprocessor / sortformer_modules)
+# plus onnxruntime-gpu for the ONNX inference path.
+RUN pip install --no-cache-dir \
+        -c /tmp/constraints.txt \
+        "nemo_toolkit[asr]>=2.0.0" \
+        soundfile \
+        onnxruntime-gpu \
+        onnxscript \
+        "cuda-toolkit[cublas,cudart,cufft]" \
+        nvidia-cudnn-cu12
+
+# Reinstall numpy from PyPI so version metadata is clean
+RUN pip install --no-cache-dir --force-reinstall numpy
+
+# PyTorch CUDA memory allocator: expand pool aggressively, don't release back to driver
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
+
+# TF32 for matmuls — 8x faster than FP32 on Ampere+, negligible accuracy loss
+ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+# Reduce torch compile overhead on restarts
+ENV TORCHINDUCTOR_CACHE_DIR=/opt/torch_cache
+ENV TORCHINDUCTOR_FX_GRAPH_CACHE=1
+# Reduce-overhead mode uses CUDA graphs — allow graph pool to grow
+ENV TORCH_CUDAGRAPHS_MEMORY_POOL_SIZE=4096
+# MPS gives each instance ~12% of SMs — not enough for GEMM autotuning benchmarks.
+# Heuristic kernel selection is already what's happening (the warning confirms this),
+# so this just silences the warning without any latency change.
+ENV TORCHINDUCTOR_MAX_AUTOTUNE=0
+
+# Enable CUDA MPS for better multi-process GPU sharing
+ENV CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+ENV CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log
+# Per-client thread limit: each of 8 instances gets guaranteed 12% of SMs
+# but can burst higher when other clients are idle
+ENV CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=12
+# Pre-pin 2GB per MPS client — avoids per-request cudaMalloc through the MPS server
+ENV CUDA_MPS_PINNED_DEVICE_MEM_LIMIT=0=2048M
+
+# ── Set up Triton model repository ─────────────────────────────────────
+COPY triton_model_repo/ /models/
+COPY auto_config.py /opt/auto_config.py
+COPY triton_model_repo/sortformer_diar/config_onnx.pbtxt /models/sortformer_diar/config.pbtxt
+RUN mkdir -p /models/sortformer_diar/trt_cache
+
+# ── Export the ONNX model ───────────────────────────────────────────────
+COPY convert_onnx_dynamo.py /models/sortformer_diar/1/
+WORKDIR /models/sortformer_diar/1/
+ARG ONNX_MODEL=diar_streaming_sortformer_4spk-v2.onnx
+RUN python3 convert_onnx_dynamo.py
+
+EXPOSE 8000 8001 8002
+
+RUN useradd --shell /bin/false --create-home tritonuser \
+    && chown -R tritonuser:tritonuser /models /opt/auto_config.py
+
+USER tritonuser
+ENV HOME=/home/tritonuser
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+WORKDIR /
+
+ENTRYPOINT ["python3", "/opt/auto_config.py"]
+CMD ["--model-repository=/models", \
+     "--log-verbose=0", \
+     "--strict-model-config=true", \
+     "--backend-config=python,shm-default-byte-size=4194304"]

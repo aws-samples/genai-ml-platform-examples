@@ -1,0 +1,63 @@
+# Triton Inference Server with Parakeet TDT ASR (ONNX Runtime backend)
+#
+# Build:  docker compose -f docker-compose-onnx.yml build triton-onnx
+# Run:    docker compose -f docker-compose-onnx.yml up triton-onnx
+FROM nvcr.io/nvidia/tritonserver:26.02-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 ffmpeg sox \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip freeze | grep -iE '^(torch|torchaudio|torchvision)==' > /tmp/constraints.txt || true
+RUN pip install --no-cache-dir \
+        -c /tmp/constraints.txt \
+        "nemo_toolkit[asr]>=2.0.0" \
+        soundfile \
+        onnxruntime-gpu \
+        onnxscript \
+        "cuda-toolkit[cublas,cudart,cufft]" \
+        nvidia-cudnn-cu12
+
+RUN pip install --no-cache-dir --force-reinstall numpy
+
+ENV HF_HOME=/opt/hf_cache
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
+ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+ENV TORCHINDUCTOR_CACHE_DIR=/opt/torch_cache
+ENV TORCHINDUCTOR_FX_GRAPH_CACHE=1
+ENV TORCHINDUCTOR_MAX_AUTOTUNE=0
+
+# CUDA MPS
+ENV CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+ENV CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log
+ENV CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=25
+
+# Copy export scripts, run export, then clean up download artifacts
+COPY patch_local_attn.py    /opt/export/patch_local_attn.py
+COPY export_onnx_dynamo_docker.py  /opt/export/export_onnx_dynamo_docker.py
+## NOTE: use export_onnx_docker.py for the deprecated non-dynamo export (not recommended)
+
+RUN python3 /opt/export/export_onnx_dynamo_docker.py
+
+# Copy Triton model repo + ONNX config override
+COPY triton_model_repo/ /models/
+COPY triton_model_repo/parakeet_asr/config_onnx.pbtxt /models/parakeet_asr/config.pbtxt
+COPY auto_config.py /opt/auto_config.py
+
+RUN useradd --shell /bin/false --create-home tritonuser \
+    && chown -R tritonuser:tritonuser /models /opt/auto_config.py /opt/hf_cache
+
+USER tritonuser
+ENV HOME=/home/tritonuser
+
+EXPOSE 8000 8001 8002
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=120s \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+ENTRYPOINT ["python3", "/opt/auto_config.py"]
+CMD ["--model-repository=/models", \
+     "--log-verbose=0", \
+     "--strict-model-config=true", \
+     "--backend-config=python,shm-default-byte-size=4194304"]

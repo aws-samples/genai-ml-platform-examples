@@ -1,0 +1,60 @@
+name: "parakeet_asr"
+backend: "python"
+max_batch_size: 16
+
+input [
+  {
+    name: "audio"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  },
+  {
+    name: "timestamps"
+    data_type: TYPE_BOOL
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "text"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "word_timestamps"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
+  {
+    name: "num_words"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
+]
+
+instance_group [
+  { count: 2, kind: KIND_GPU }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 4, 8, 16 ]
+  max_queue_delay_microseconds: 50000
+}
+
+parameters: {
+  key: "use_onnx"
+  value: { string_value: "true" }
+}
+parameters: {
+  key: "onnx_dir"
+  value: { string_value: "/opt/onnx_out" }
+}
+parameters: {
+  key: "tokenizer_path"
+  value: { string_value: "/opt/parakeet_tokenizer.model" }
+}
+parameters: {
+  key: "use_orig_decoder_joint"
+  value: { string_value: "true" }
+}

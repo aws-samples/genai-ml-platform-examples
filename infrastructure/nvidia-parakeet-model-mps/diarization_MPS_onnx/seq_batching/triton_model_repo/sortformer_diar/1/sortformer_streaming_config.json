@@ -1,0 +1,13 @@
+{
+    "default_collar_sec": 0.25,
+    "default_min_speech_prob": 0.3,
+    "online_segmentation_mode": "argmax",
+    "online_tail_sec": 1.5,
+    "sortformer_modules_config": {
+        "chunk_len": 120,
+        "chunk_right_context": 1,
+        "fifo_len": 60,
+        "spkcache_update_period": 124,
+        "spkcache_len": 254
+    }
+}

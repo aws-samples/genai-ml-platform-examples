@@ -1,0 +1,56 @@
+# Copyright Amazon.com, Inc. or its affiliates. This material is AWS Content under the AWS Enterprise Agreement
+# or AWS Customer Agreement (as applicable) and is provided under the AWS Intellectual Property License.
+
+version: "3.8"
+
+services:
+  triton-onnx:
+    build:
+      context: .
+      dockerfile: Dockerfile.triton-onnx
+    container_name: triton
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: "2g"
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mkdir -p /tmp/nvidia-mps /tmp/nvidia-log
+        export CUDA_VISIBLE_DEVICES=0
+        nvidia-cuda-mps-control -d
+        for i in $(seq 1 10); do
+          echo get_server_list | nvidia-cuda-mps-control 2>/dev/null && break
+          sleep 0.5
+        done
+        echo "MPS daemon ready"
+        exec python3 /opt/auto_config.py \
+          --model-repository=/models \
+          --log-verbose=0 \
+          --strict-model-config=true \
+          --backend-config=python,shm-default-byte-size=4194304
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    ports:
+      - "8002:8002"
+    environment:
+      - TRITON_URL=triton:8001
+    depends_on:
+      triton-onnx:
+        condition: service_healthy
