@@ -44,7 +44,9 @@ jobs:
     - run: echo "The job was automatically triggered by a ${{ github.event_name }} event."
     - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub!"
     - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-    - run: echo "The commit message for the event -\n ${{ github.event.head_commit.message }}"
+    - env:
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
+      run: echo "The commit message for the event - $COMMIT_MSG"
     - uses: actions/checkout@v4
     - name: Check out repository code
       uses: actions/checkout@v4
