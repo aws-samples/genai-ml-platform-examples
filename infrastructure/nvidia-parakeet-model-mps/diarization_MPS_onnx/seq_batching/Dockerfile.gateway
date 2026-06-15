@@ -1,0 +1,32 @@
+# Thin FastAPI gateway — no GPU, no NeMo, just HTTP + Triton gRPC client
+#
+# Build:  docker compose build gateway
+# Run:    docker compose up gateway
+FROM python:3.13-slim
+
+RUN pip install --no-cache-dir \
+        fastapi \
+        uvicorn[standard] \
+        tritonclient[grpc] \
+        numpy \
+        pydantic \
+        python-multipart
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY server.py /app/server.py
+WORKDIR /app
+
+EXPOSE 8002
+
+RUN useradd --shell /bin/false --create-home appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+ENV HOME=/home/appuser
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8002/health || exit 1
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8002"]

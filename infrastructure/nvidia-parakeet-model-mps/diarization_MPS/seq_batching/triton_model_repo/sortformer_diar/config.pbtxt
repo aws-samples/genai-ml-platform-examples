@@ -1,0 +1,76 @@
+name: "sortformer_diar"
+backend: "python"
+max_batch_size: 16
+
+input [
+  {
+    name: "audio_chunk"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  },
+  {
+    name: "segmentation_mode"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "segments"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
+  {
+    name: "is_final"
+    data_type: TYPE_BOOL
+    dims: [ 1 ]
+  },
+  {
+    name: "num_segments"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
+]
+
+instance_group [
+  { count: 8, kind: KIND_GPU }
+]
+
+# 8 instances × 1.8GB = ~14GB + 2GB overhead = ~16GB
+# Leaves ~30GB free on L40S. Sweet spot between parallelism and contention.
+sequence_batching {
+  max_sequence_idle_microseconds: 600000000
+
+  oldest {
+    max_candidate_sequences: 64
+    preferred_batch_size: [ 1, 2 ]
+    max_queue_delay_microseconds: 0
+  }
+
+  control_input [
+    {
+      name: "START"
+      control [
+        { kind: CONTROL_SEQUENCE_START, fp32_false_true: [ 0, 1 ] }
+      ]
+    },
+    {
+      name: "END"
+      control [
+        { kind: CONTROL_SEQUENCE_END, fp32_false_true: [ 0, 1 ] }
+      ]
+    },
+    {
+      name: "CORRID"
+      control [
+        { kind: CONTROL_SEQUENCE_CORRID, data_type: TYPE_STRING }
+      ]
+    }
+  ]
+}
+
+parameters: {
+  key: "model_name"
+  value: { string_value: "nvidia/diar_streaming_sortformer_4spk-v2" }
+}

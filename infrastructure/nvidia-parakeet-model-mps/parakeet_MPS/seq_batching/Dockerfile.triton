@@ -1,0 +1,67 @@
+# Triton Inference Server with NeMo Parakeet TDT ASR
+#
+# Build:  docker compose build triton
+# Run:    docker compose up triton
+FROM nvcr.io/nvidia/tritonserver:26.02-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 ffmpeg sox \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin the container's existing torch so NeMo can't clobber it
+RUN pip freeze | grep -iE '^(torch|torchaudio|torchvision)==' > /tmp/constraints.txt || true
+
+RUN pip install --no-cache-dir \
+        -c /tmp/constraints.txt \
+        "nemo_toolkit[asr]>=2.0.0" \
+        soundfile
+
+# Reinstall numpy from PyPI so version metadata is clean
+RUN pip install --no-cache-dir --force-reinstall numpy
+
+# Pre-download model weights
+ENV HF_HOME=/opt/hf_cache
+
+# PyTorch CUDA memory allocator tuning
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
+
+# TF32 for matmuls — 8x faster than FP32 on Ampere+
+ENV NVIDIA_TF32_OVERRIDE=1
+ENV TORCHINDUCTOR_CACHE_DIR=/opt/torch_cache
+ENV TORCHINDUCTOR_FX_GRAPH_CACHE=1
+ENV TORCHINDUCTOR_MAX_AUTOTUNE=0
+
+# CUDA MPS — enables true concurrent GPU execution across instances
+ENV CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+ENV CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log
+# 4 instances: each gets 25% of SMs, can burst when others idle
+ENV CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=25
+
+RUN python3 -c "\
+from nemo.collections.asr.models import ASRModel; \
+m = ASRModel.from_pretrained('nvidia/parakeet-tdt-0.6b-v2'); \
+m.change_attention_model('rel_pos_local_attn', [128, 128]); \
+m.change_subsampling_conv_chunking_factor(1); \
+m.save_to('/opt/parakeet_optimized.nemo')"
+
+COPY triton_model_repo/ /models/
+COPY auto_config.py /opt/auto_config.py
+
+# Run as non-root; auto_config.py starts MPS daemon so triton user needs GPU access
+RUN useradd -r -m -s /bin/false -G video triton \
+    && mkdir -p /tmp/nvidia-mps /tmp/nvidia-log \
+    && chown -R triton:triton /tmp/nvidia-mps /tmp/nvidia-log /models /opt/auto_config.py
+USER triton
+
+EXPOSE 8000 8001 8002
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+ENTRYPOINT ["python3", "/opt/auto_config.py"]
+CMD ["--model-repository=/models", \
+     "--log-verbose=0", \
+     "--strict-model-config=true", \
+     "--backend-config=python,shm-default-byte-size=4194304"]
