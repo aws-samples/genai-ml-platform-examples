@@ -2,7 +2,7 @@ strands-agents[otel]==1.13.0
 strands-agents-tools==0.2.12
 boto3==1.40.53
 python-dotenv==1.1.1
-mcp==1.18.0
+mcp==1.23.0
 awslabs-aws-documentation-mcp-server==1.1.9
 langfuse==2.60.9
 opentelemetry-exporter-otlp==1.38.0
