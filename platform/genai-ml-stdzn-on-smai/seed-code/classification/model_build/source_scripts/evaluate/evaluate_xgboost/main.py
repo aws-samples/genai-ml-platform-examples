@@ -24,12 +24,20 @@ import tarfile
 import os
 import sys
 import subprocess
+import glob
+import shutil
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
-# Dependencies are installed via requirements.txt (mlflow, sagemaker-mlflow, boto3)
+# Fix Debian-installed PyJWT in SageMaker containers and install mlflow
+for path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(path, ignore_errors=True)
+for path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(path, ignore_errors=True)
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q"])
 
 import numpy as np
 import pandas as pd
