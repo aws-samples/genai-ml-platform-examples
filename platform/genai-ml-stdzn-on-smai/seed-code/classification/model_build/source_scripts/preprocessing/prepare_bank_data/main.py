@@ -2,11 +2,27 @@
 # SPDX-License-Identifier: MIT-0
 
 """Feature engineers the bank marketing dataset using AWS Data Wrangler for Glue integration."""
+
+# Fix Debian-installed PyJWT in SageMaker containers and install mlflow
+import subprocess
+import sys
+import os
+import glob
+import shutil
+
+# Remove broken Debian PyJWT dist-info so pip can manage it
+for path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(path, ignore_errors=True)
+for path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(path, ignore_errors=True)
+
+# Force reinstall PyJWT then install mlflow and sagemaker-mlflow
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q"])
+
 import argparse
 import logging
-import os
 import pathlib
-import sys
 import boto3
 import numpy as np
 import pandas as pd
