@@ -4,10 +4,11 @@ boto3>=1.40.65
 botocore>=1.40.65
 
 # MLflow for experiment tracking
-mlflow>=3.0.0
+mlflow==3.4.0
+sagemaker-mlflow
 
 # Data processing and ML
-pandas>=2.2.0
+pandas>=2.2.0   
 numpy>=1.26.0
 scikit-learn>=1.5.0
 
