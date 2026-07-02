@@ -34,16 +34,21 @@ except ImportError:
 try:
     import mlflow
 except ImportError:
-    logger.info("Installing MLflow with SageMaker plugin...")
+    logger.info("Installing MLflow (version compatible with container's Python 3.10 env)...")
+    # The SageMaker PyTorch 2.1 container has a typing_extensions that lacks 'Sentinel'.
+    # mlflow 3.x requires pydantic v2 which needs pydantic-core which needs Sentinel.
+    # Solution: Use mlflow 2.x which works with pydantic v1 and doesn't need Sentinel.
     subprocess.check_call([
         sys.executable, "-m", "pip", "install",
+        "--no-cache-dir",
         "--timeout=300",
         "--retries=5",
-        "mlflow",
-        "sagemaker-mlflow",
+        "mlflow==2.16.2",
+        "sagemaker-mlflow==0.1.0",
         "-q"
     ])
     import mlflow
+    logger.info(f"Installed mlflow {mlflow.__version__}")
 
 def preprocess():
     """Preprocess the Dolly dataset for fine-tuning"""
@@ -52,22 +57,30 @@ def preprocess():
     # Set up MLflow tracking for SageMaker (matching Lab 2/3 notebook approach)
     # Use ARN directly - SageMaker SDK handles authentication automatically
     mlflow_tracking_arn = os.getenv("MLFLOW_TRACKING_ARN")
+    mlflow_enabled = False
     
     if mlflow_tracking_arn:
         logger.info(f"Setting MLflow tracking URI to ARN: {mlflow_tracking_arn}")
-        mlflow.set_tracking_uri(mlflow_tracking_arn)
+        try:
+            mlflow.set_tracking_uri(mlflow_tracking_arn)
+            # Set experiment name
+            experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "llama-finetuning-pipeline")
+            mlflow.set_experiment(experiment_name)
+            mlflow_enabled = True
+            logger.info(f"MLflow tracking enabled, experiment: {experiment_name}")
+        except Exception as e:
+            logger.warning(f"MLflow setup failed (will continue without tracking): {e}")
     else:
         logger.warning("No MLFLOW_TRACKING_ARN found, MLflow tracking disabled")
     
-    # Set experiment name
-    experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "llama-finetuning-pipeline")
-    mlflow.set_experiment(experiment_name)
-    
-    # Start MLflow run for preprocessing
+    # Start MLflow run for preprocessing (or run without tracking)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    with mlflow.start_run(run_name=f"preprocessing-{timestamp}"):
-        logger.info(f"Started MLflow run: preprocessing-{timestamp}")
-        
+    if mlflow_enabled:
+        with mlflow.start_run(run_name=f"preprocessing-{timestamp}"):
+            logger.info(f"Started MLflow run: preprocessing-{timestamp}")
+            return _preprocess_data()
+    else:
+        logger.info("Running preprocessing without MLflow tracking")
         return _preprocess_data()
 
 def _preprocess_data():
@@ -124,12 +137,15 @@ def _preprocess_data():
         logger.info("Dataset split completed successfully")
         
         # Log dataset statistics to MLflow
-        mlflow.log_param("dataset_name", "databricks-dolly-15k")
-        mlflow.log_param("task_filter", "summarization")
-        mlflow.log_param("test_size", 0.1)
-        mlflow.log_metric("total_samples", len(summarization_dataset))
-        mlflow.log_metric("train_samples", len(train_and_test_dataset["train"]))
-        mlflow.log_metric("test_samples", len(train_and_test_dataset["test"]))
+        try:
+            mlflow.log_param("dataset_name", "databricks-dolly-15k")
+            mlflow.log_param("task_filter", "summarization")
+            mlflow.log_param("test_size", 0.1)
+            mlflow.log_metric("total_samples", len(summarization_dataset))
+            mlflow.log_metric("train_samples", len(train_and_test_dataset["train"]))
+            mlflow.log_metric("test_samples", len(train_and_test_dataset["test"]))
+        except Exception as e:
+            logger.warning(f"MLflow logging skipped: {e}")
         
     except Exception as e:
         logger.error(f"Failed to split dataset: {e}")
@@ -194,15 +210,21 @@ def _preprocess_data():
             size = os.path.getsize(file_path)
             logger.info(f"✓ {file_path} created successfully ({size} bytes)")
             # Log file sizes to MLflow
-            file_name = os.path.basename(file_path)
-            mlflow.log_metric(f"{file_name}_size_bytes", size)
+            try:
+                file_name = os.path.basename(file_path)
+                mlflow.log_metric(f"{file_name}_size_bytes", size)
+            except Exception:
+                pass
         else:
             logger.error(f"✗ {file_path} was not created!")
             raise FileNotFoundError(f"Expected output file not found: {file_path}")
     
     # Log template as artifact
-    mlflow.log_dict(template, "preprocessing/template.json")
-    logger.info("Logged template to MLflow")
+    try:
+        mlflow.log_dict(template, "preprocessing/template.json")
+        logger.info("Logged template to MLflow")
+    except Exception as e:
+        logger.warning(f"MLflow artifact logging skipped: {e}")
 
 
 if __name__ == "__main__":

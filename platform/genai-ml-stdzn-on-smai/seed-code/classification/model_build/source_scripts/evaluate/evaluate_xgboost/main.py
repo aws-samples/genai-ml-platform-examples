@@ -36,6 +36,12 @@ for path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
     shutil.rmtree(path, ignore_errors=True)
 for path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
     shutil.rmtree(path, ignore_errors=True)
+# Also remove the actual jwt module so pip doesn't try to uninstall it
+for path in glob.glob("/usr/lib/python3/dist-packages/jwt*"):
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+    elif os.path.isfile(path):
+        os.remove(path)
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q"])
 

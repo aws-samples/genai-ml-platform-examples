@@ -15,9 +15,18 @@ for path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
     shutil.rmtree(path, ignore_errors=True)
 for path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
     shutil.rmtree(path, ignore_errors=True)
+# Also remove the actual PyJWT module files so pip doesn't try to uninstall
+for path in glob.glob("/usr/lib/python3/dist-packages/jwt"):
+    shutil.rmtree(path, ignore_errors=True)
+for path in glob.glob("/usr/lib/python3/dist-packages/jwt*"):
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        os.remove(path)
 
 # Force reinstall PyJWT then install mlflow and sagemaker-mlflow
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler==2.16.1", "-q"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q"])
 
 import argparse
