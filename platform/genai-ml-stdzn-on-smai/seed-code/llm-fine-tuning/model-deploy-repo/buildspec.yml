@@ -92,6 +92,13 @@ phases:
         # Add environment variables if present (important for Meta models)
         if 'Environment' in container:
             primary_container["Environment"] = container['Environment']
+        else:
+            primary_container["Environment"] = {}
+        
+        # Set max_model_len to avoid OOM on KV cache allocation
+        # The model defaults to 131072 seq len which exceeds GPU memory on g5.2xlarge
+        primary_container["Environment"]["OPTION_MAX_MODEL_LEN"] = "8192"
+        primary_container["Environment"]["OPTION_GPU_MEMORY_UTILIZATION"] = "0.95"
         
         # Generate CloudFormation template
         cfn_template = {
