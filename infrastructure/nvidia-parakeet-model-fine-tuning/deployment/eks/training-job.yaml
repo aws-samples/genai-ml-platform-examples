@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: parakeet-fine-tuning
+  namespace: parakeet-demo
+  labels:
+    auto-delete: "no"
+    auto-stop: "no"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 21600
+  template:
+    metadata:
+      labels:
+        app: parakeet-fine-tuning
+        auto-delete: "no"
+        auto-stop: "no"
+    spec:
+      restartPolicy: Never
+      securityContext: {fsGroup: 1000}
+      nodeSelector:
+        workload: parakeet-training
+        kubernetes.io/arch: amd64
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: parakeet-training
+          effect: NoSchedule
+      containers:
+        - name: trainer
+          image: REPLACE_WITH_ECR_IMAGE
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              exec > >(tee -a /workspace/training.log) 2>&1
+              export DATA_DIR=/workspace/dataset/fleurs_french
+              export EXPERIMENT_DIR=/workspace/experiments
+              export MODEL_PATH=/workspace/experiments/trained_models/French_ASR_Parakeet_Finetuning.nemo
+              if [[ ! -s "$DATA_DIR/train_manifest.jsonl" ]]; then
+                ./download-and-prepare-fleurs.sh
+              fi
+              ./run-train.sh
+          env:
+            - {name: NUM_GPUS, value: "4"}
+            - {name: MAX_EPOCHS, value: "1"}
+            - {name: BATCH_SIZE, value: "3"}
+            - {name: HF_HOME, value: /workspace/huggingface-cache}
+          resources:
+            requests: {cpu: "32", memory: 128Gi, nvidia.com/gpu: "4"}
+            limits: {cpu: "44", memory: 176Gi, nvidia.com/gpu: "4"}
+          volumeMounts:
+            - {name: workspace, mountPath: /workspace}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: workspace
+          persistentVolumeClaim: {claimName: parakeet-workspace}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi

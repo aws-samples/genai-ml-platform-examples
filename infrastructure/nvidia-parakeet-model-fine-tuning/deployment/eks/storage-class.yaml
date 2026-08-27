@@ -1,0 +1,16 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: parakeet-gp3
+  labels:
+    auto-delete: "no"
+    auto-stop: "no"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  encrypted: "true"
+  fsType: ext4
+  tagSpecification_1: "auto-delete=no"
+  tagSpecification_2: "auto-stop=no"

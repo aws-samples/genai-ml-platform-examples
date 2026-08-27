@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: parakeet-demo
+  labels:
+    auto-delete: "no"
+    auto-stop: "no"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parakeet-workspace
+  namespace: parakeet-demo
+  labels:
+    auto-delete: "no"
+    auto-stop: "no"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: parakeet-gp3
+  resources:
+    requests:
+      storage: 200Gi
