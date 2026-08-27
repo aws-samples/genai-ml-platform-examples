@@ -1,8 +1,9 @@
 # Main configuration name for this fine-tuning experiment
 name: "French_ASR_Parakeet_Finetuning"
-train_manifest: "/home/ubuntu/dataset/fleurs_french/train_manifest.jsonl"
-validation_manifest: "/home/ubuntu/dataset/fleurs_french/validation_manifest.jsonl"
-test_manifest: "/home/ubuntu/dataset/fleurs_french/test_manifest.jsonl"
+dataset_dir: "${oc.env:DATA_DIR,/home/ubuntu/dataset/fleurs_french}"
+train_manifest: "${dataset_dir}/train_manifest.jsonl"
+validation_manifest: "${dataset_dir}/validation_manifest.jsonl"
+test_manifest: "${dataset_dir}/test_manifest.jsonl"
 
 # Initial model settings - use only one of these
 init_from_nemo_model: null # Path to existing .nemo model file to continue training from
@@ -231,7 +232,7 @@ model:
 
 trainer:
   devices: 4  # Number of GPUs to use (-1 would use all available)
-  num_nodes: 4  # Number of compute nodes (servers) for distributed training
+  num_nodes: 1  # This workflow launches all four GPUs on one g6e.12xlarge node
   max_epochs: 40  # Maximum number of training epochs
   max_steps: -1  # Maximum number of training steps (-1 means compute from epochs)
   val_check_interval: 1.0  # Validation frequency: 1.0 = once per epoch, 0.25 = 4 times per epoch
@@ -263,7 +264,7 @@ trainer:
   benchmark: false  # Don't use cudnn benchmark (needed for variable-length inputs)
 
 trainer_strategy:
-  strategy: deepspeed
+  strategy: ddp
 
 exp_manager:
   exp_dir: null  # Experiment output directory (null = auto-generate)
@@ -286,7 +287,7 @@ exp_manager:
     project: null  # W&B project name
 
   # MLflow logger configuration
-  create_mlflow_logger: true  # Enable MLflow logging
+  create_mlflow_logger: false  # Disabled: NeMo 2.7.2 duplicates MLFlowLogger run_name with current Lightning
   mlflow_logger_kwargs: {"tracking_uri" : mlruns }  # MLflow tracking URI
   
   # Checkpoint loading for resuming training

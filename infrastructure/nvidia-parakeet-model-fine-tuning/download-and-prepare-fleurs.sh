@@ -10,7 +10,7 @@ NC='\033[0m'
 
 SCRIPT_DIR=$(pwd)
 CONFIG_FILE="$SCRIPT_DIR/configs/fine_tuning_config.yaml"
-DATA_DIR="/home/ubuntu/dataset/fleurs_french"
+DATA_DIR="${DATA_DIR:-/home/ubuntu/dataset/fleurs_french}"
 AUDIO_DIR="$DATA_DIR/audio"
 
 echo -e "${BLUE}${BOLD}[STEP]${NC} Creating directories..."

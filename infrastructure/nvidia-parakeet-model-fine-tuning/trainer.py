@@ -190,8 +190,9 @@ class ASRTrainer:
         """
         
         trainer = Trainer(
-            strategy=self.config.trainer_strategy.strategy, # ddp or deepspeed
+            strategy=self.config.trainer_strategy.strategy,  # ddp or deepspeed
             devices=self.config.trainer.devices,
+            num_nodes=self.config.trainer.num_nodes,
             accelerator=self.config.trainer.accelerator,
             max_epochs=self.config.trainer.max_epochs,
             max_steps=self.config.trainer.max_steps,
@@ -262,6 +263,14 @@ def main():
                         help='Path to save the trained model')
     parser.add_argument('--tokenizer_path', type=str, default=None,
                         help='Path to the tokenizer directory')
+    parser.add_argument('--devices', type=int, default=None,
+                        help='Override the number of GPUs from the config')
+    parser.add_argument('--max_epochs', type=int, default=None,
+                        help='Override the maximum epochs from the config')
+    parser.add_argument('--batch_size', type=int, default=None,
+                        help='Override train, validation, and test batch sizes')
+    parser.add_argument('--experiment_dir', type=str, default=None,
+                        help='Directory for checkpoints and experiment logs')
     
     args = parser.parse_args()
     
@@ -270,6 +279,17 @@ def main():
         config_path=args.config_path,
         tokenizer_path=args.tokenizer_path
     )
+
+    if args.devices is not None:
+        trainer.config.trainer.devices = args.devices
+    if args.max_epochs is not None:
+        trainer.config.trainer.max_epochs = args.max_epochs
+    if args.batch_size is not None:
+        trainer.config.model.train_ds.batch_size = args.batch_size
+        trainer.config.model.validation_ds.batch_size = args.batch_size
+        trainer.config.model.test_ds.batch_size = args.batch_size
+    if args.experiment_dir is not None:
+        trainer.config.exp_manager.exp_dir = args.experiment_dir
     
     # Set model output path if not specified
     if args.model_path is None:

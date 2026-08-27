@@ -1,0 +1,12 @@
+failOnInitError: false
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  - key: dedicated
+    operator: Equal
+    value: parakeet-training
+    effect: NoSchedule

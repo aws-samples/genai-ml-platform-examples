@@ -1,0 +1,65 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: parakeet-demo
+  region: ap-northeast-2
+  version: "1.35"
+  tags:
+    auto-delete: "no"
+    auto-stop: "no"
+
+vpc:
+  id: vpc-0f511f839d3d6c26c
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+  publicAccessCIDRs: ["0.0.0.0/0"]
+  subnets:
+    public:
+      ap-northeast-2a: {id: subnet-0d22d47cf7217d7bd}
+      ap-northeast-2b: {id: subnet-0dbc3c08d41b6c9f6}
+
+iam:
+  withOIDC: true
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies:
+      ebsCSIController: true
+
+managedNodeGroups:
+  - name: system
+    amiFamily: AmazonLinux2023
+    instanceType: m7i.large
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 2
+    subnets: [subnet-0d22d47cf7217d7bd, subnet-0dbc3c08d41b6c9f6]
+    volumeSize: 50
+    volumeType: gp3
+    volumeEncrypted: true
+    disableIMDSv1: true
+    tags:
+      auto-delete: "no"
+      auto-stop: "no"
+  - name: gpu-g6e
+    amiFamily: AmazonLinux2023
+    instanceType: g6e.12xlarge
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 1
+    subnets: [subnet-0d22d47cf7217d7bd, subnet-0dbc3c08d41b6c9f6]
+    volumeSize: 200
+    volumeType: gp3
+    volumeEncrypted: true
+    disableIMDSv1: true
+    tags:
+      auto-delete: "no"
+      auto-stop: "no"
+    labels: {workload: parakeet-training}
+    taints:
+      - {key: dedicated, value: parakeet-training, effect: NoSchedule}

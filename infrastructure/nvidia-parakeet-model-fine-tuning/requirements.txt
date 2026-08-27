@@ -4,7 +4,7 @@ numpy>=1.22
 setuptools>=70.0.0
 
 # Stage 2: Basic dependencies
-protobuf~=4.24.4
+protobuf~=5.29.5
 python-dateutil
 ruamel.yaml
 scikit-learn
@@ -14,11 +14,11 @@ tqdm>=4.41.0
 wget
 wrapt
 cloudpickle
-numba
+numba==0.61.2
 pyrubberband
 
 # Stage 3: ML/AI packages
-transformers==4.52.0
+transformers==4.57.1
 accelerate==1.7.0
 torchmetrics>=0.11.0
 onnx>=1.7.0
@@ -40,6 +40,5 @@ fsspec==2024.12.0
 cuda-python>=12.3
 
 
-# Stage 7: Complex packages
-nemo_toolkit[all]
-deepspeed
+# Stage 7: ASR training packages
+nemo_toolkit[asr]==2.7.2

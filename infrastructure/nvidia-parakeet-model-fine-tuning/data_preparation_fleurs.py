@@ -4,7 +4,11 @@ import soundfile as sf
 import argparse
 from pathlib import Path
 from tqdm import tqdm
-from datasets import load_dataset
+from functools import partial
+
+from datasets import load_dataset as datasets_load_dataset
+
+load_dataset = partial(datasets_load_dataset, trust_remote_code=True)
 
 def process_fleurs_dataset(split_name, output_dir, audio_dir, full_dataset=None):
     """Process FLEURS dataset split and create manifest."""
