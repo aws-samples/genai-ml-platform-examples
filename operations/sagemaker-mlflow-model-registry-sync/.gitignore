@@ -1,0 +1,24 @@
+# Python virtual environments
+.venv/
+.venv*/
+venv/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Agent/session scratch files
+building-session.json
+
+# Sample run artifacts (also covered by per-topology .gitignore files)
+**/scripts/.sample_state.json
+requirements.txt.lock
+
+# Local logs
+*.log

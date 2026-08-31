@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Provisions a SageMaker AI Studio domain, a Studio user profile, a scoped
+  execution role, and a managed MLflow app with Model Registry sync enabled
+  (AutoModelRegistrationEnabled). This is the shared substrate for the MLflow
+  Model Registry sync governance samples. Deploy one stack per account that
+  participates in a topology (development/spoke and, for hub-and-spoke, the hub).
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: mlflow-governance-domain
+    Description: Name for the SageMaker AI Studio domain.
+  UserProfileName:
+    Type: String
+    Default: sagemakeruser
+    Description: Name for the Studio user profile created in the domain.
+  MLflowAppName:
+    Type: String
+    Default: mlflow-app
+    Description: >-
+      Name of the managed MLflow app. Parameterized so each account/topology can
+      use a distinct name (for example, mlflow-hub and mlflow-spoke).
+  MLflowVersion:
+    Type: String
+    Default: '3.10.1'
+    Description: MLflow version for the managed MLflow app.
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Helper Lambda: discover the default VPC and its subnets so the domain can be
+  # created without asking the operator to look up networking values by hand.
+  # ---------------------------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: describe-default-vpc
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The finder Lambda only reads VPC and subnet metadata. These
+              # Describe actions do not support resource-level scoping.
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                Resource: '*'
+
+  DefaultVpcLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Returns the default VPC ID and its subnet IDs.
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          ec2 = boto3.client("ec2")
+
+          def lambda_handler(event, context):
+              try:
+                  if event["RequestType"] == "Delete":
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  vpcs = ec2.describe_vpcs(
+                      Filters=[{"Name": "is-default", "Values": ["true"]}]
+                  )["Vpcs"]
+                  if not vpcs:
+                      raise RuntimeError(
+                          "No default VPC found. Create one or deploy this stack "
+                          "into an account/region that has a default VPC."
+                      )
+                  vpc_id = vpcs[0]["VpcId"]
+                  subnets = ec2.describe_subnets(
+                      Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+                  )["Subnets"]
+                  subnet_ids = [s["SubnetId"] for s in subnets]
+                  cfnresponse.send(
+                      event, context, cfnresponse.SUCCESS,
+                      {"VpcId": vpc_id, "Subnets": subnet_ids},
+                  )
+              except Exception as exc:  # surface the failure to CloudFormation
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, reason=str(exc)
+                  )
+
+  DefaultVpcFinder:
+    Type: Custom::DefaultVpcFinder
+    Properties:
+      ServiceToken: !GetAtt DefaultVpcLambda.Arn
+
+  # ---------------------------------------------------------------------------
+  # SageMaker AI execution role.
+  #
+  # AmazonSageMakerFullAccess covers Training Jobs, model/endpoint management,
+  # and the Model Registry actions (CreateModelPackageGroup, CreateModelPackage,
+  # UpdateModelPackage, AddTags) plus the lineage associations that automatic
+  # model registration writes on your behalf. The inline policies add only what
+  # SageMakerFullAccess does not: the MLflow app interaction actions (a separate
+  # `sagemaker-mlflow` service prefix) and read/write to the artifact-store
+  # bucket.
+  #
+  # This role is used for three things in the single-account sample:
+  #   1. the MLflow app's service role (performs the sync into the registry),
+  #   2. the Studio user profile execution role,
+  #   3. the endpoint execution role at deploy time.
+  # In production, separate these responsibilities and scope each to least
+  # privilege. See the topology README for the persona-role split.
+  # ---------------------------------------------------------------------------
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: mlflow-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # MLflow tracking/registry operations against the app (log runs,
+              # models, metrics, set lifecycle aliases) plus opening the UI and
+              # calling the app API. These are NOT covered by
+              # AmazonSageMakerFullAccess (different service prefix).
+              - Effect: Allow
+                Action:
+                  - sagemaker-mlflow:*
+                  - sagemaker:CreatePresignedMlflowAppUrl
+                  - sagemaker:CallMlflowAppApi
+                Resource: '*'
+        - PolicyName: artifact-store-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
+                  - !Sub arn:${AWS::Partition}:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
+
+  # ---------------------------------------------------------------------------
+  # Artifact store bucket. Name matches the SageMaker convention so the console
+  # and SDK defaults resolve to it. The MLflow app writes model artifacts here.
+  # ---------------------------------------------------------------------------
+  StudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub sagemaker-${AWS::Region}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['https://*.sagemaker.aws']
+            ExposedHeaders:
+              - ETag
+              - x-amz-delete-marker
+              - x-amz-id-2
+              - x-amz-request-id
+              - x-amz-server-side-encryption
+              - x-amz-version-id
+
+  # ---------------------------------------------------------------------------
+  # SageMaker AI Studio domain + user profile.
+  # ---------------------------------------------------------------------------
+  StudioDomain:
+    Type: AWS::SageMaker::Domain
+    Properties:
+      DomainName: !Ref DomainName
+      AuthMode: IAM
+      AppNetworkAccessType: PublicInternetOnly
+      VpcId: !GetAtt DefaultVpcFinder.VpcId
+      SubnetIds: !GetAtt DefaultVpcFinder.Subnets
+      DefaultUserSettings:
+        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+      DefaultSpaceSettings:
+        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+
+  UserProfile:
+    Type: AWS::SageMaker::UserProfile
+    Properties:
+      DomainId: !GetAtt StudioDomain.DomainId
+      UserProfileName: !Ref UserProfileName
+      UserSettings:
+        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+
+  # ---------------------------------------------------------------------------
+  # Managed MLflow app with Model Registry sync enabled.
+  # AutoModelRegistrationEnabled is the switch that makes a mlflow.register_model
+  # call create a corresponding Model Package Group and version in the SageMaker
+  # AI Model Registry, carrying metrics, evaluation results, the inference
+  # specification, and lineage.
+  # ---------------------------------------------------------------------------
+  MlflowApp:
+    Type: AWS::SageMaker::MlflowApp
+    DependsOn: StudioBucket
+    Properties:
+      Name: !Ref MLflowAppName
+      ArtifactStoreUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/mlflow
+      RoleArn: !GetAtt SageMakerExecutionRole.Arn
+      MlflowVersion: !Ref MLflowVersion
+      ModelRegistrationMode: AutoModelRegistrationEnabled
+
+Outputs:
+  DomainId:
+    Description: SageMaker AI Studio domain ID.
+    Value: !GetAtt StudioDomain.DomainId
+  StudioUrl:
+    Description: Studio domain URL.
+    Value: !GetAtt StudioDomain.Url
+  UserProfileName:
+    Description: Studio user profile name.
+    Value: !Ref UserProfileName
+  SageMakerExecutionRoleArn:
+    Description: >-
+      Execution role ARN. Use this as EXECUTION_ROLE when running the sample
+      scripts outside Studio (for example, from a laptop).
+    Value: !GetAtt SageMakerExecutionRole.Arn
+  MLflowAppArn:
+    Description: >-
+      MLflow app ARN. Use this as MLFLOW_APP_ARN (the MLflow tracking URI) in the
+      sample scripts.
+    Value: !GetAtt MlflowApp.Arn
+  ArtifactStoreUri:
+    Description: MLflow artifact store S3 URI.
+    Value: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/mlflow
