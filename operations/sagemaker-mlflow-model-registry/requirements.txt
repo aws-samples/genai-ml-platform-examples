@@ -1,2 +1,6 @@
-mlflow==2.16.0
-sagemaker-mlflow==0.1.0
+numpy==2.1.0
+mlflow>=3,<4
+sagemaker>=3,<4
+sagemaker-mlflow>=0.5.0,<1
+xgboost==3.2.0
+scikit-learn==1.4.2
