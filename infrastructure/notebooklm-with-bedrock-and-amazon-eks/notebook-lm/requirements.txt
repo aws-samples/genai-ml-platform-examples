@@ -18,7 +18,7 @@ einops==0.8.0
 encodec==0.1.1
 fastapi==0.115.0
 ffmpy==0.4.0
-filelock==3.16.1
+filelock==3.20.3
 fireworks-ai==0.15.6
 fonttools==4.54.1
 frozenlist==1.4.1
