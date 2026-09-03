@@ -1,7 +1,7 @@
 strands-agents==1.15.0
 bedrock-agentcore==1.0.6
 boto3==1.40.70
-mcp==1.21.0
+mcp==1.23.0
 bedrock-agentcore-starter-toolkit==0.1.32
 requests==2.32.5
 python-dotenv==1.2.1
