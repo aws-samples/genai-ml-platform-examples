@@ -282,7 +282,7 @@ Example unit tests:
 
 ### Property-Based Testing Strategy
 
-Property-based tests validate universal behaviors across many inputs using a property-based testing library (pytest-hypothesis for Python):
+Property-based tests validate universal behaviors across many inputs using a property-based testing library (hypothesis for Python):
 
 **Configuration**: Each property test runs minimum 100 iterations with randomized inputs
 **Tagging**: Each test references its design document property using the format:
@@ -322,7 +322,7 @@ tests/
 ### Testing Dependencies
 
 - **pytest**: Main testing framework
-- **pytest-hypothesis**: Property-based testing library
+- **hypothesis**: Property-based testing library
 - **moto**: AWS service mocking for unit tests
 - **boto3-stubs**: Type hints for AWS SDK
 - **pytest-mock**: Mocking utilities
