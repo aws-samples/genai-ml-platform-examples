@@ -31,7 +31,7 @@ Requires-Dist: typing-extensions>=4.0.0
 Requires-Dist: cryptography>=41.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
-Requires-Dist: pytest-hypothesis>=6.0.0; extra == "dev"
+Requires-Dist: hypothesis>=6.0.0; extra == "dev"
 Requires-Dist: pytest-mock>=3.10.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
@@ -42,7 +42,7 @@ Requires-Dist: moto[sagemaker]>=4.2.0; extra == "dev"
 Requires-Dist: boto3-stubs[sagemaker]>=1.26.0; extra == "dev"
 Provides-Extra: test
 Requires-Dist: pytest>=7.0.0; extra == "test"
-Requires-Dist: pytest-hypothesis>=6.0.0; extra == "test"
+Requires-Dist: hypothesis>=6.0.0; extra == "test"
 Requires-Dist: pytest-mock>=3.10.0; extra == "test"
 Requires-Dist: pytest-cov>=4.0.0; extra == "test"
 Requires-Dist: moto[sagemaker]>=4.2.0; extra == "test"
