@@ -316,6 +316,10 @@ Resources:
                     - !Sub 'arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*'
                   - - !Sub 'arn:aws:s3:::${DataBucketName}'
                     - !Sub 'arn:aws:s3:::${DataBucketName}/*'
+              # Scoped to the workshop catalog/database/tables this Lambda
+              # creates - not "*" - to satisfy CKV_AWS_111 (no unconstrained
+              # write). Glue database/table actions require the catalog ARN plus
+              # the specific database and its tables.
               - Effect: Allow
                 Action:
                   - 'glue:GetDatabase'
@@ -323,7 +327,10 @@ Resources:
                   - 'glue:CreateTable'
                   - 'glue:UpdateTable'
                   - 'glue:DeleteTable'
-                Resource: '*'
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${AthenaDatabase}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${AthenaDatabase}/*'
 
   TableCreatorFunction:
     Type: AWS::Lambda::Function

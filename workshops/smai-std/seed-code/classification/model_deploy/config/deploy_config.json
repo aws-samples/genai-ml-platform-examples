@@ -3,6 +3,8 @@
   "deploy_account": "",
   "model_package_group_name": "bank-classification-model-group",
   "DataBucketName": "",
+  "project_name": "",
+  "enable_inference_capture": true,
   "endpoint_config": {
     "initial_instance_count": 1,
     "initial_variant_weight": 1.0,

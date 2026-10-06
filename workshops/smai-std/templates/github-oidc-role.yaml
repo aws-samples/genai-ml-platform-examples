@@ -1,0 +1,255 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub OIDC Role for SageMaker MLOps Deployment.
+  This template creates an OIDC provider and IAM role that allows GitHub Actions
+  to deploy SageMaker models without storing AWS credentials.
+
+  HARDENED COPY: the trust policy `sub` condition is scoped to the two specific
+  workshop repositories (build + deploy), while still tolerating the org/repo-ID
+  subject format GitHub emits when the org enables "include enterprise/org and
+  repo IDs in the OIDC subject claim" (subject looks like
+  `repo:my-org@311556544/my-repo@1318718333:ref:refs/heads/main`). The `@*` after
+  the org name and after each repo name matches the optional `@<id>` segments;
+  default (non-ID) subjects also match. Without the `@*` tolerance,
+  `aws-actions/configure-aws-credentials` fails with
+  "Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity".
+
+Parameters:
+  GitHubOrgName:
+    Type: String
+    Description: Your GitHub username or organization name (e.g., smai-testing)
+    AllowedPattern: ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$
+    ConstraintDescription: Must be a valid GitHub username or organization name
+  GitHubBuildRepoName:
+    Type: String
+    Default: bank-classification-mlops-project-build-repo
+    Description: Name of the model build repository created in Prerequisites Step 2
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+  GitHubDeployRepoName:
+    Type: String
+    Default: bank-classification-mlops-project-deploy-repo
+    Description: Name of the model deploy repository created in Prerequisites Step 2
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+  GitHubPAT:
+    Type: String
+    NoEcho: true
+    Description: GitHub Personal Access Token with 'repo' and 'workflow' scopes
+    MinLength: 40
+Resources:
+  GitHubPATSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: github/pat-for-workflow-trigger
+      Description: GitHub PAT for triggering workflows from Lambda
+      SecretString: !Ref GitHubPAT
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+  GitHubActionsOIDCRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActionsOIDCRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Scoped to ONLY the two workshop repositories (build + deploy), so
+                # no other repo in the org - a fork or an unrelated test repo - can
+                # assume this role. Each `@*` tolerates the optional `@<id>` segment
+                # GitHub adds to the org and repo names when "include enterprise/org
+                # and repo IDs in the OIDC subject claim" is enabled; default
+                # (non-ID) subjects match too. The trailing `:*` allows any ref.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOrgName}@*/${GitHubBuildRepoName}@*:*
+                  - !Sub repo:${GitHubOrgName}@*/${GitHubDeployRepoName}@*:*
+                  - !Sub repo:${GitHubOrgName}/${GitHubBuildRepoName}:*
+                  - !Sub repo:${GitHubOrgName}/${GitHubDeployRepoName}:*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        # AmazonSageMakerFullAccess (attached above) already covers sagemaker:*,
+        # the sagemaker-* S3 buckets, ECR image pulls and iam:PassRole to
+        # sagemaker.amazonaws.com, so the inline policies below only add what it
+        # does not cover - and add nothing on a bare '*'.
+        - PolicyName: SageMakerDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Replaces the previous 'iam:*' grant, which let this role make
+              # itself an administrator. The PassedToService condition closes that
+              # path: a role may only ever be handed to SageMaker, so it cannot be
+              # passed to Lambda or EC2 to escalate.
+              #
+              # Deliberately NOT scoped by role name. Lab 4A passes userA's role
+              # (${ProjectName}-usera-role), so a name pattern here would break for
+              # any student who chose a different ProjectName in Lab 1C.
+              - Sid: PassRoleToSageMakerOnly
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/*'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+
+              - Sid: ReadRolesInThisAccount
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/*'
+
+              # Any bucket, but only inside this account. Deliberately not scoped
+              # by bucket name: Lab 4A uses <ProjectName>-data-<acct>-<region>,
+              # which varies per student. The ResourceAccount condition blocks
+              # reading from or writing to buckets in any other AWS account, so
+              # data cannot be moved out.
+              - Sid: WorkshopBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - 'arn:aws:s3:::*'
+                  - 'arn:aws:s3:::*/*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+
+              - Sid: DeploymentLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/sagemaker/*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/sagemaker/*:log-stream:*'
+        - PolicyName: CloudFormationAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The deploy seed code creates the endpoint via CloudFormation.
+              # Scoped to the stacks this workshop creates instead of every stack
+              # in the account.
+              - Sid: ProjectStackLifecycle
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:TagResource
+                  - cloudformation:UntagResource
+                Resource:
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*/*'
+
+              # Read-only calls that have no resource-level permissions.
+              - Sid: CloudFormationReadOnly
+                Effect: Allow
+                Action:
+                  - cloudformation:ListStacks
+                  - cloudformation:ListExports
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Read-only, and only the parameter paths this workshop uses.
+              - Sid: ReadProjectParameters
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetAuthorizationToken does not support resource-level permissions,
+              # so it must be granted on '*'. It is a read-only call.
+              - Sid: ECRLogin
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+
+              - Sid: ECRPullPush
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource:
+                  - !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*'
+        # The deploy stack looks up the inference-capture queue at synth time to
+        # wire it into the endpoint. Without these, SQS answers the denied lookup
+        # as QueueDoesNotExist, and the endpoint deploys with capture silently
+        # DISABLED, which leaves Lab 5 with no predictions to analyse.
+        - PolicyName: InferenceCaptureQueueLookup
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:GetQueueUrl
+                  - sqs:GetQueueAttributes
+                Resource: !Sub 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:*-inference-capture'
+Outputs:
+  GitHubPATSecretArn:
+    Description: ARN of the GitHub PAT secret in Secrets Manager
+    Value: !Ref GitHubPATSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubPATSecretArn'
+  GitHubActionsOIDCRoleArn:
+    # NOTE: the walkthrough stores this in each repo's Actions secret named
+    # OIDC_ROLE_GITHUB_WORKFLOW (that is the name build.yml/deploy.yml read),
+    # NOT AWS_ROLE_ARN. Description corrected accordingly.
+    Description: ARN of the GitHub Actions OIDC Role - add to each repo's Actions secret named OIDC_ROLE_GITHUB_WORKFLOW
+    Value: !GetAtt GitHubActionsOIDCRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubActionsOIDCRoleArn'
+  OIDCProviderArn:
+    Description: ARN of the GitHub OIDC Provider
+    Value: !Ref GitHubOIDCProvider
+    Export:
+      Name: !Sub '${AWS::StackName}-OIDCProviderArn'

@@ -29,12 +29,16 @@ from aws_cdk import (
 import constructs
 
 from .get_approved_package import get_approved_package
+from .inference_capture import build_container_environment
 
 from config.constants import (
     MODEL_PACKAGE_GROUP_NAME,
     DEPLOY_ACCOUNT,
     DEFAULT_DEPLOYMENT_REGION,
     MODEL_BUCKET_ARN,
+    ARTIFACT_BUCKET,
+    PROJECT_NAME,
+    ENABLE_INFERENCE_CAPTURE,
 )
 
 from datetime import datetime, timezone
@@ -164,6 +168,38 @@ class DeployEndpointStack(Stack):
         # get latest approved model package from the model registry (only from a specific model package group)
         latest_approved_model_package = get_approved_package()
 
+        # The endpoint name is needed BEFORE the model, because the container
+        # environment tags every captured prediction with it.
+        endpoint_name = f"{MODEL_PACKAGE_GROUP_NAME}-endpoint"
+
+        # Resolve the container environment: script-mode flags so the container
+        # runs the handler baked into the artifact at code/inference.py, plus the
+        # inference-capture wiring the handler reads with os.getenv. Without the
+        # script-mode flags the stock XGBoost container ignores the handler and
+        # serves bare probabilities, with nothing in the logs to explain it.
+        container_environment, capture_queue_arn = build_container_environment(
+            endpoint_name=endpoint_name,
+            region=DEFAULT_DEPLOYMENT_REGION,
+            model_package_arn=latest_approved_model_package,
+            data_bucket=ARTIFACT_BUCKET,
+            account=DEPLOY_ACCOUNT,
+            explicit_project_name=PROJECT_NAME,
+            enable_capture=ENABLE_INFERENCE_CAPTURE,
+        )
+
+        # The handler publishes one message per prediction. This role is created
+        # here with a generated name, so the grant cannot be pre-attached by the
+        # workshop's inference-capture template -- it has to be added here.
+        if capture_queue_arn:
+            model_execution_role.add_to_policy(
+                iam.PolicyStatement(
+                    sid="PublishInferenceCapture",
+                    actions=["sqs:SendMessage", "sqs:GetQueueAttributes"],
+                    effect=iam.Effect.ALLOW,
+                    resources=[capture_queue_arn],
+                )
+            )
+
         # Sagemaker Model
         model_name = f"{MODEL_PACKAGE_GROUP_NAME}-{timestamp}"
 
@@ -174,7 +210,8 @@ class DeployEndpointStack(Stack):
             model_name=model_name,
             containers=[
                 sagemaker.CfnModel.ContainerDefinitionProperty(
-                    model_package_name=latest_approved_model_package
+                    model_package_name=latest_approved_model_package,
+                    environment=container_environment,
                 )
             ],
         )
@@ -201,9 +238,6 @@ class DeployEndpointStack(Stack):
                 ]
             ),
         )
-
-        # Define endpoint name
-        endpoint_name = f"{MODEL_PACKAGE_GROUP_NAME}-endpoint"
 
         endpoint_config = sagemaker.CfnEndpointConfig(
             self,

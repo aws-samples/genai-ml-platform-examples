@@ -1,2 +1,8 @@
-boto3
-pymysql
+# Deliberately minimal. pandas, numpy, scikit-learn and boto3 already ship in
+# the SageMaker sklearn container this step runs in, and mlflow /
+# sagemaker-mlflow are installed from inside main.py -- FrameworkProcessor
+# installs this file BEFORE running the script, but mlflow drags in PyJWT, whose
+# Debian-managed copy in the container has to be remediated first. See the
+# comment block at the top of main.py.
+#
+# awswrangler is intentionally NOT used: Athena is queried with boto3 + pandas.

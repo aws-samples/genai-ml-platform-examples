@@ -1,2 +1,5 @@
 sagemaker==2.257.0
 boto3
+# Read by ml_pipelines/_dataset_schema.py to resolve the feature contract from
+# config/dataset_schema.yaml at pipeline-definition time.
+PyYAML

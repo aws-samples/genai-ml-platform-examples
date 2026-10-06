@@ -1,2 +1,9 @@
 boto3
-xgboost
+# Pinned to the exact XGBoost inside the SageMaker 1.7-1 container used for
+# training and serving (XGBOOST_VERSION in ml_pipelines/training/pipeline.py;
+# the image installs xgboost==1.7.4, see aws/sagemaker-xgboost-container
+# docker/1.7-1/base/Dockerfile.cpu). train.py saves
+# to an extensionless file, which XGBoost 1.7 writes in the legacy binary
+# format; XGBoost >= 3.1 can no longer load it. Bump this together with
+# XGBOOST_VERSION, never on its own.
+xgboost==1.7.4

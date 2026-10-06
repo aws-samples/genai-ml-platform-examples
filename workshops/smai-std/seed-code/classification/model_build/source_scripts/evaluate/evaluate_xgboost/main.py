@@ -1,160 +1,289 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
 # SPDX-License-Identifier: MIT-0
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this
-# software and associated documentation files (the "Software"), to deal in the Software
-# without restriction, including without limitation the rights to use, copy, modify,
-# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-# permit persons to whom the Software is furnished to do so.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-"""Evaluation script for measuring classification metrics."""
+"""Score the trained booster on the held-out evaluation split.
+
+Writes TWO artifacts, for two different consumers:
+
+``evaluation.json``
+    Read by the pipeline's ConditionStep via a PropertyFile
+    (``classification_metrics.accuracy.value``) to gate model registration.
+
+``baseline.json``
+    Read by Lab 5's drift monitor. The pipeline attaches it to the registered
+    model package as ``ModelMetrics.ModelQuality.Statistics``, and Lab 5 resolves
+    it by walking: endpoint -> endpoint config -> model ->
+    Containers[].ModelPackageName -> describe_model_package -> that S3 URI.
+
+    The key names in baseline.json are an API. They are consumed by
+    ``load_baseline_from_registry()`` in
+    ``lab5-monitoring/src/drift_monitoring/baseline.py``, and they match what
+    Lab 3A writes so that a model built by this pipeline and a model built by
+    the Lab 3A notebook are monitored identically. Renaming a key does not fail
+    loudly -- the monitor just silently falls back to live data.
+
+    Snapshot IDs are written as STRINGS: they are 19-digit int64 values that
+    lose precision if a JSON reader parses them as floats.
+
+    Three keys Lab 3A writes are deliberately NOT written here, because nothing
+    reads them and inventing values would be worse than omitting them:
+
+    ``model_package_arn``
+        Not knowable yet -- registration happens after this step. Lab 5 injects
+        the ARN itself after loading the file
+        (``baseline["model_package_arn"] = arn``), so the stored value is dead
+        weight even in Lab 3A.
+    ``mlflow_model_id`` / ``mlflow_artifact_location``
+        Artifacts of Lab 3A's MLflow-registry flow. Grepped: no consumer
+        anywhere in the repo outside the notebook that writes them.
+"""
+import argparse
+import glob
 import json
 import logging
-import pathlib
-import pickle
-import tarfile
 import os
-import sys
-import subprocess
-import glob
+import pathlib
 import shutil
+import subprocess
+import sys
+import tarfile
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
-# Fix Debian-installed PyJWT in SageMaker containers and install mlflow
-for path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
-    shutil.rmtree(path, ignore_errors=True)
-for path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
-    shutil.rmtree(path, ignore_errors=True)
-# Also remove the actual jwt module so pip doesn't try to uninstall it
-for path in glob.glob("/usr/lib/python3/dist-packages/jwt*"):
-    if os.path.isdir(path):
-        shutil.rmtree(path, ignore_errors=True)
-    elif os.path.isfile(path):
-        os.remove(path)
-subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q"])
-subprocess.check_call([sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q"])
+# ---------------------------------------------------------------------------
+# MLflow install, before any mlflow import. See the equivalent comment in the
+# preprocessing step: mlflow pulls in PyJWT, which collides with the
+# Debian-managed copy in this container, so the remediation cannot live in
+# requirements.txt (FrameworkProcessor installs that file first).
+# ---------------------------------------------------------------------------
+for _path in glob.glob("/usr/local/lib/python*/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(_path, ignore_errors=True)
+for _path in glob.glob("/usr/lib/python3/dist-packages/PyJWT-*.dist-info"):
+    shutil.rmtree(_path, ignore_errors=True)
+for _path in glob.glob("/usr/lib/python3/dist-packages/jwt*"):
+    if os.path.isdir(_path):
+        shutil.rmtree(_path, ignore_errors=True)
+    elif os.path.isfile(_path):
+        os.remove(_path)
 
-import numpy as np
-import pandas as pd
-import xgboost
-import mlflow
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
-from time import gmtime, strftime
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install",
+    "--force-reinstall", "--no-deps", "PyJWT>=2.8.0", "-q",
+])
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "mlflow==3.4.0", "sagemaker-mlflow", "-q",
+])
+
+import pandas as pd  # noqa: E402
+import xgboost as xgb  # noqa: E402
+import mlflow  # noqa: E402
+from sklearn.metrics import (  # noqa: E402
+    accuracy_score,
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+
+BASE_DIR = "/opt/ml/processing"
+THRESHOLD = 0.5
+
+# Mirrors model_fn's candidate list in source_scripts/inference/inference.py, so
+# the baseline is scored by the same file the endpoint will load.
+MODEL_FILE_CANDIDATES = (
+    "xgboost-model.json",
+    "xgboost-model",
+    "model.xgb",
+    "model.ubj",
+)
+
 
 def is_within_directory(directory, target):
-    """Check if the target is within the given directory."""
     abs_directory = os.path.abspath(directory)
     abs_target = os.path.abspath(target)
-    prefix = os.path.commonprefix([abs_directory, abs_target])
-    return prefix == abs_directory
+    return os.path.commonprefix([abs_directory, abs_target]) == abs_directory
 
 
 def safe_extract(tar, path="."):
-    """Extract tarfile members safely."""
+    """Extract tarfile members, refusing path traversal."""
     for member in tar.getmembers():
-        member_path = os.path.join(path, member.name)
-        if not is_within_directory(path, member_path):
-            raise Exception("Attempted Path Traversal in Tar File")
+        if not is_within_directory(path, os.path.join(path, member.name)):
+            raise Exception("Attempted path traversal in tar file")
     tar.extractall(path)
 
-if __name__ == "__main__":
-    logger.debug("Starting evaluation.")
-    
-    # MLflow setup
+
+def load_booster(model_dir):
+    """Load the booster the same way the inference handler will.
+
+    The training step writes the model with `Booster.save_model()` to an
+    extensionless `xgboost-model`. An earlier version of the training step
+    pickled it to that same name, which this function would fail to load -- the
+    same failure the endpoint would hit at container start.
+    """
+    for name in MODEL_FILE_CANDIDATES:
+        candidate = os.path.join(model_dir, name)
+        if os.path.exists(candidate):
+            logger.info("Loading booster from %s", candidate)
+            booster = xgb.Booster()
+            booster.load_model(candidate)
+            return booster
+    raise FileNotFoundError(
+        "No XGBoost model file found in %s (looked for %s). If the training step "
+        "pickled the model, switch it to Booster.save_model()."
+        % (model_dir, ", ".join(MODEL_FILE_CANDIDATES))
+    )
+
+
+def read_json_if_present(path, default=None):
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    logger.warning("%s not found", path)
+    return {} if default is None else default
+
+
+def read_text_if_present(path, default=""):
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read().strip()
+    return default
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--training-job-name", type=str, default="")
+    parser.add_argument("--model-package-group", type=str, default="")
+    parser.add_argument("--feature-schema-version", type=int, default=1)
+    parser.add_argument("--code-commit-sha", type=str, default="",
+                        help="Commit that produced this model (GITHUB_SHA in CI).")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
     experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME")
-    parent_run_id = os.environ.get("MLFLOW_PARENT_RUN_ID")
-    
-    # Try to read parent run ID from preprocessing output if not in env
-    if not parent_run_id or parent_run_id == "":
-        try:
-            mlflow_file = '/opt/ml/processing/mlflow/parent_run_id.txt'
-            if os.path.exists(mlflow_file):
-                with open(mlflow_file, 'r') as f:
-                    parent_run_id = f.read().strip()
-                logger.info(f"Read parent run ID from preprocessing output: {parent_run_id}")
-        except Exception as e:
-            logger.warning(f"Could not read parent run ID from file: {e}")
-    
+    parent_run_id = os.environ.get("MLFLOW_PARENT_RUN_ID") or read_text_if_present(
+        "%s/mlflow/parent_run_id.txt" % BASE_DIR)
+
     if tracking_uri:
-        suffix = strftime('%d-%H-%M-%S', gmtime())
+        suffix = datetime.utcnow().strftime("%d-%H-%M-%S")
         mlflow.set_tracking_uri(tracking_uri)
-        experiment = mlflow.set_experiment(experiment_name=experiment_name if experiment_name else f"evaluation-{suffix}")
+        mlflow.set_experiment(
+            experiment_name=experiment_name if experiment_name else "evaluation-%s" % suffix)
         if parent_run_id:
-            run = mlflow.start_run(run_name=f"evaluate-{suffix}", parent_run_id=parent_run_id)
+            mlflow.start_run(run_name="evaluate-%s" % suffix, parent_run_id=parent_run_id)
         else:
-            run = mlflow.start_run(run_name=f"evaluate-{suffix}")
-    
+            mlflow.start_run(run_name="evaluate-%s" % suffix)
+
     try:
-        model_path = "/opt/ml/processing/model/model.tar.gz"
-        with tarfile.open(model_path) as tar:
-            safe_extract(tar, path=".")
+        # --- Unpack the trained model
+        extract_dir = os.path.join(BASE_DIR, "extracted")
+        pathlib.Path(extract_dir).mkdir(parents=True, exist_ok=True)
+        with tarfile.open("%s/model/model.tar.gz" % BASE_DIR) as tar:
+            safe_extract(tar, path=extract_dir)
+        booster = load_booster(extract_dir)
 
-        logger.debug("Loading xgboost model.")
-        model = pickle.load(open("xgboost-model", "rb"))
+        # --- Score the held-out evaluation split.
+        # test.csv is the FULL evaluation_data table read through its pinned
+        # Iceberg snapshot, so these metrics describe exactly the rows
+        # evaluation_snapshot_id names -- which is what makes them a valid
+        # reference for Lab 5's model-drift check.
+        df = pd.read_csv("%s/test/test.csv" % BASE_DIR, header=None)
+        y_true = df.iloc[:, 0].astype(int).to_numpy()
+        X = df.iloc[:, 1:]
 
-        logger.debug("Reading test data.")
-        test_path = "/opt/ml/processing/test/test.csv"
-        df = pd.read_csv(test_path, header=None)
+        # DMatrix from a bare numpy array: the booster was trained on header-less
+        # CSV so it carries positional names (f0..f19). A named DataFrame here
+        # would raise a feature-name mismatch -- same reason inference.py does it.
+        y_proba = booster.predict(xgb.DMatrix(X.values))
+        y_pred = (y_proba > THRESHOLD).astype(int)
 
-        logger.debug("Reading test data.")
-        y_test = df.iloc[:, 0].to_numpy()
-        df.drop(df.columns[0], axis=1, inplace=True)
-        X_test = xgboost.DMatrix(df, feature_names=[str(i) for i in range(df.shape[1])])
-
-        logger.info("Performing predictions against test data.")
-        predictions_prob = model.predict(X_test)
-        predictions = (predictions_prob > 0.5).astype(int)
-
-        logger.debug("Calculating classification metrics.")
-        accuracy = accuracy_score(y_test, predictions)
-        precision = precision_score(y_test, predictions)
-        recall = recall_score(y_test, predictions)
-        f1 = f1_score(y_test, predictions)
-        auc = roc_auc_score(y_test, predictions_prob)
-        
-        # Log metrics to MLflow
-        if tracking_uri:
-            mlflow.log_metrics({
-                "accuracy": accuracy,
-                "precision": precision,
-                "recall": recall,
-                "f1_score": f1,
-                "auc": auc
-            })
-        
-        report_dict = {
-            "classification_metrics": {
-                "accuracy": {"value": accuracy},
-                "precision": {"value": precision},
-                "recall": {"value": recall},
-                "f1_score": {"value": f1},
-                "auc": {"value": auc},
-            },
+        metrics = {
+            "roc_auc": float(roc_auc_score(y_true, y_proba)),
+            "pr_auc": float(average_precision_score(y_true, y_proba)),
+            "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+            "f1_score": float(f1_score(y_true, y_pred, zero_division=0)),
+            "accuracy": float(accuracy_score(y_true, y_pred)),
         }
+        logger.info("Evaluated %d rows (%d positive)", len(y_true), int(y_true.sum()))
+        for name, value in metrics.items():
+            logger.info("  %-10s %.4f", name, value)
 
-        output_dir = "/opt/ml/processing/evaluation"
+        output_dir = "%s/evaluation" % BASE_DIR
         pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-        logger.info("Writing out evaluation report with accuracy: %f", accuracy)
-        evaluation_path = f"{output_dir}/evaluation.json"
+        # --- evaluation.json: the ConditionStep's gate.
+        # The nested {"value": x} shape is what JsonGet reads via the PropertyFile
+        # path classification_metrics.accuracy.value -- do not flatten it.
+        report = {
+            "classification_metrics": {
+                "accuracy": {"value": metrics["accuracy"]},
+                "precision": {"value": metrics["precision"]},
+                "recall": {"value": metrics["recall"]},
+                "f1_score": {"value": metrics["f1_score"]},
+                "auc": {"value": metrics["roc_auc"]},
+            },
+        }
+        evaluation_path = os.path.join(output_dir, "evaluation.json")
         with open(evaluation_path, "w") as f:
-            f.write(json.dumps(report_dict))
-            
+            json.dump(report, f)
+        logger.info("Wrote %s", evaluation_path)
+
+        # --- baseline.json: Lab 5's contract.
+        lineage = read_json_if_present("%s/lineage/lineage.json" % BASE_DIR)
+        mlflow_run_id = read_text_if_present(
+            os.path.join(extract_dir, "mlflow_run_id.txt"), "unresolved") or "unresolved"
+
+        baseline = {
+            "schema_version": 2,
+            "created_at": datetime.now().isoformat(),
+            "model_package_group": args.model_package_group,
+            "code_commit_sha": args.code_commit_sha or args.training_job_name,
+            "training_table": lineage.get("training_table", ""),
+            "evaluation_table": lineage.get("evaluation_table", ""),
+            "training_snapshot_id": str(lineage.get("training_snapshot_id", "")),
+            "evaluation_snapshot_id": str(lineage.get("evaluation_snapshot_id", "")),
+            "feature_schema_version": args.feature_schema_version,
+            "feature_schema": lineage.get("feature_schema", []),
+            "metrics": metrics,
+            "sample_size": int(len(y_true)),
+            "positive_samples": int(y_true.sum()),
+            "negative_samples": int(len(y_true) - y_true.sum()),
+            "threshold": THRESHOLD,
+            "training_job_name": args.training_job_name,
+            "mlflow_run_id": mlflow_run_id,
+        }
+        baseline_path = os.path.join(output_dir, "baseline.json")
+        with open(baseline_path, "w") as f:
+            json.dump(baseline, f, indent=2)
+        logger.info("Wrote %s", baseline_path)
+        logger.info("Baseline lineage: %s", json.dumps({
+            k: baseline[k] for k in (
+                "training_table", "training_snapshot_id",
+                "evaluation_table", "evaluation_snapshot_id")}))
+
+        if not baseline["training_snapshot_id"] or not baseline["evaluation_snapshot_id"]:
+            logger.warning(
+                "baseline.json has no pinned Iceberg snapshot, so Lab 5 will measure "
+                "drift against the LIVE table. This happens only when the "
+                "preprocessing step ran with --allow-unpinned-snapshots.")
+
         if tracking_uri:
+            mlflow.log_metrics(metrics)
             mlflow.log_artifact(evaluation_path)
-    
+            mlflow.log_artifact(baseline_path)
+
     finally:
         if tracking_uri:
             mlflow.end_run()
+
+
+if __name__ == "__main__":
+    main()
