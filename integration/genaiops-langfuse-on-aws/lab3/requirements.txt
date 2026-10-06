@@ -4,3 +4,4 @@ python-dotenv==1.1.1
 datasets==4.2.0
 ragas==0.3.7
 langchain-aws==1.0.0
+langchain-community==0.3.31
