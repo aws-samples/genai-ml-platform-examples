@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub OIDC Role for SageMaker MLOps Deployment.
+  This template creates an OIDC provider and IAM role that allows GitHub Actions
+  to deploy SageMaker models without storing AWS credentials.
+
+  FIXED COPY (2026-09-22): the trust policy `sub` condition was broadened from
+  `repo:<GitHubOrgName>/*:*` to `repo:<GitHubOrgName>@*/*:*` so it also matches
+  GitHub organizations that include the org/repo IDs in the OIDC subject claim
+  (subject looks like `repo:my-org@311556544/my-repo@1318718333:ref:refs/heads/main`).
+  Without this, `aws-actions/configure-aws-credentials` fails with
+  "Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity".
+  See templates/CLASSIFICATION-PROJECT-TWO-REPOS.md (problem #5) for the full diagnosis.
+
+Parameters:
+  GitHubOrgName:
+    Type: String
+    Description: Your GitHub username or organization name (e.g., smai-testing)
+    AllowedPattern: ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$
+    ConstraintDescription: Must be a valid GitHub username or organization name
+  GitHubPAT:
+    Type: String
+    NoEcho: true
+    Description: GitHub Personal Access Token with 'repo' and 'workflow' scopes
+    MinLength: 40
+Resources:
+  GitHubPATSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: github/pat-for-workflow-trigger
+      Description: GitHub PAT for triggering workflows from Lambda
+      SecretString: !Ref GitHubPAT
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+  GitHubActionsOIDCRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActionsOIDCRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Broadened to tolerate the org/repo-ID subject format that GitHub
+                # emits when the org enables "include enterprise/org and repo IDs in
+                # the OIDC subject claim". The `@*` after the org name matches the
+                # optional `@<orgId>`; the trailing `/*:*` still scopes to this org's
+                # repos on any ref. Default (non-ID) subjects also match.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrgName}@*/*:*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: SageMakerDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:CreateEndpoint
+                  - sagemaker:UpdateEndpoint
+                  - sagemaker:DeleteEndpoint
+                  - sagemaker:CreateEndpointConfig
+                  - sagemaker:DeleteEndpointConfig
+                  - sagemaker:DescribeEndpoint
+                  - sagemaker:DescribeEndpointConfig
+                  - sagemaker:ListTags
+                  - sagemaker:AddTags
+                  - iam:PassRole
+                  - s3:*
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: CloudFormationAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: '*'
+        - PolicyName: IAMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:*
+                Resource: '*'
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:*
+                Resource: '*'
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:*
+                Resource: '*'
+Outputs:
+  GitHubPATSecretArn:
+    Description: ARN of the GitHub PAT secret in Secrets Manager
+    Value: !Ref GitHubPATSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubPATSecretArn'
+  GitHubActionsOIDCRoleArn:
+    # NOTE: the walkthrough stores this in each repo's Actions secret named
+    # OIDC_ROLE_GITHUB_WORKFLOW (that is the name build.yml/deploy.yml read),
+    # NOT AWS_ROLE_ARN. Description corrected accordingly.
+    Description: ARN of the GitHub Actions OIDC Role - add to each repo's Actions secret named OIDC_ROLE_GITHUB_WORKFLOW
+    Value: !GetAtt GitHubActionsOIDCRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubActionsOIDCRoleArn'
+  OIDCProviderArn:
+    Description: ARN of the GitHub OIDC Provider
+    Value: !Ref GitHubOIDCProvider
+    Export:
+      Name: !Sub '${AWS::StackName}-OIDCProviderArn'

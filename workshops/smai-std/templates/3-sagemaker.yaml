@@ -374,10 +374,10 @@ Resources:
           SOURCE_BUCKET: 'aws-blogs-artifacts-public'
           SOURCE_PREFIX: 'ML-16183/abalone.csv'
           DEST_BUCKET: !Ref GrantsBucket
-          GITHUB_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/S3_model_build_deploy_template.yaml'
-          GITHUB_CLASSIFICATION_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/S3_classification_template.yaml'
-          GITHUB_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/seed-code'
-          GITHUB_CLASSIFICATION_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/platform/genai-ml-stdzn-on-smai/seed-code'
+          GITHUB_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/workshops/smai-std/templates/S3_model_build_deploy_template.yaml'
+          GITHUB_CLASSIFICATION_TEMPLATE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/workshops/smai-std/templates/S3_classification_template.yaml'
+          GITHUB_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/workshops/smai-std/seed-code'
+          GITHUB_CLASSIFICATION_BASE_URL: 'https://raw.githubusercontent.com/aws-samples/genai-ml-platform-examples/main/workshops/smai-std/seed-code'
           SEED_CODE_TYPE: !Ref SeedCodeType
           DEST2_BUCKET: !Ref DataBucket
       Code:
@@ -465,8 +465,8 @@ Resources:
               'else',
               '    git clone --depth 1 --filter=blob:none --sparse https://github.com/aws-samples/genai-ml-platform-examples.git temp-repo || { echo "Error: Failed to clone repo"; exit 0; }',
               '    cd temp-repo',
-              '    git sparse-checkout set platform/genai-ml-stdzn-on-smai',
-              '    cp -r platform/genai-ml-stdzn-on-smai/* ../ 2>/dev/null || cp -r platform/genai-ml-stdzn-on-smai/. ../',
+              '    git sparse-checkout set workshops/smai-std',
+              '    cp -r workshops/smai-std/* ../ 2>/dev/null || cp -r workshops/smai-std/. ../',
               '    cd ..',
               '    rm -rf temp-repo',
               '    echo "Files cloned from GitHub repository"',

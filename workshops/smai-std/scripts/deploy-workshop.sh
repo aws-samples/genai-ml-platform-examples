@@ -81,6 +81,14 @@
 #                   'true' (default) or 'false' - after deploying, confirm the
 #                   execution roles really carry the QuickSightGovernanceDashboard
 #                   actions Lab 5E needs (2-iam.yaml). Best-effort: warns only.
+#   SKIP_QS_POLICY  'false' (default) or 'true' - force
+#                   AttachQuickSightServiceRolePolicy=false even when the
+#                   QuickSight service role exists, skipping the workshop's
+#                   QuickSight service-role policies. The policy names are now
+#                   project-scoped (${PROJECT_NAME}-QuickSightS3DataLakeAccess /
+#                   -QuickSightAthenaAccess), so cross-project collisions on the
+#                   account-global role should no longer occur; keep this as a
+#                   manual escape hatch (e.g. two deploys sharing a ProjectName).
 #   TEARDOWN        If 'true', delete the stack instead of deploying.
 #
 # Note on template versioning: the child templates are uploaded under
@@ -397,7 +405,14 @@ fi
 # gate the template's condition on the role actually being there; otherwise the
 # whole deployment would roll back on a non-QuickSight account.
 ATTACH_QS_POLICY="false"
-if aws iam get-role --role-name aws-quicksight-service-role-v0 >/dev/null 2>&1; then
+if [ "${SKIP_QS_POLICY:-false}" = "true" ]; then
+  log "SKIP_QS_POLICY=true -> AttachQuickSightServiceRolePolicy=false."
+  log "  Not attaching the workshop's QuickSight service-role policies"
+  log "  (${PROJECT_NAME}-QuickSightS3DataLakeAccess / -QuickSightAthenaAccess)."
+  log "  Policy names are project-scoped so they should not collide with other"
+  log "  projects on aws-quicksight-service-role-v0. Lab 5E's dashboard panels"
+  log "  will not load workshop data until these policies are attached."
+elif aws iam get-role --role-name aws-quicksight-service-role-v0 >/dev/null 2>&1; then
   ATTACH_QS_POLICY="true"
   log "QuickSight service role found -> AttachQuickSightServiceRolePolicy=true"
 else
@@ -480,7 +495,7 @@ if [ "${VERIFY_QUICKSIGHT_IAM}" = "true" ]; then
     if [ "${qs_role_policies}" = "__ERROR__" ]; then
       warn "Could not list policies on aws-quicksight-service-role-v0; skipping."
     else
-      for policy in QuickSightS3DataLakeAccess QuickSightAthenaAccess; do
+      for policy in "${PROJECT_NAME}-QuickSightS3DataLakeAccess" "${PROJECT_NAME}-QuickSightAthenaAccess"; do
         case " ${qs_role_policies} " in
           *" ${policy} "*) log "  ${policy} attached to the QuickSight service role" ;;
           *) warn "${policy} is MISSING from aws-quicksight-service-role-v0 — Lab 5E's"

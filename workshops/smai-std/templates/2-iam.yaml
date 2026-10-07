@@ -64,6 +64,14 @@ Parameters:
 
 Conditions:
   ShouldCreateSCRoles: !Equals [!Ref CreateServiceCatalogRoles, 'true']
+  # True when the SC product roles are NOT created by this stack (they already
+  # exist in the account, e.g. AWS auto-created them). In that case the
+  # AWS-default AmazonSageMakerServiceCatalogProductsCodeBuildRole is used for
+  # the SageMaker Projects seed-code checkin, and it lacks read access to the
+  # project data bucket where the seed zips live. SeedCodeBucketReadPolicy
+  # (below) attaches that grant by role name to close the gap. When SC roles ARE
+  # created here, the CodeBuildRole below already grants s3:* on *-<acct>-*.
+  ShouldReuseSCRoles: !Not [!Equals [!Ref CreateServiceCatalogRoles, 'true']]
   ShouldAttachQuickSightServiceRolePolicy: !Equals [!Ref AttachQuickSightServiceRolePolicy, 'true']
 
 Resources:
@@ -777,8 +785,10 @@ Resources:
     Type: AWS::IAM::Policy
     Condition: ShouldAttachQuickSightServiceRolePolicy
     Properties:
-      # Name matched by create_governance_dashboard.py's _check_s3_permissions().
-      PolicyName: QuickSightS3DataLakeAccess
+      # Project-scoped so multiple projects can share the account-global
+      # QuickSight service role without a policy-name collision. Name matched by
+      # create_governance_dashboard.py's _check_s3_permissions() via config.py.
+      PolicyName: !Sub '${ProjectName}-QuickSightS3DataLakeAccess'
       Roles:
         - aws-quicksight-service-role-v0
       PolicyDocument:
@@ -818,8 +828,10 @@ Resources:
     Type: AWS::IAM::Policy
     Condition: ShouldAttachQuickSightServiceRolePolicy
     Properties:
-      # Name matched by create_governance_dashboard.py's _check_s3_permissions().
-      PolicyName: QuickSightAthenaAccess
+      # Project-scoped so multiple projects can share the account-global
+      # QuickSight service role without a policy-name collision. Name matched by
+      # create_governance_dashboard.py's _check_s3_permissions() via config.py.
+      PolicyName: !Sub '${ProjectName}-QuickSightAthenaAccess'
       Roles:
         - aws-quicksight-service-role-v0
       PolicyDocument:
@@ -1667,6 +1679,39 @@ Resources:
                   - codestar-connections:GetConnection
                   - codestar-connections:PassConnection
                 Resource: !Sub 'arn:aws:codestar-connections:${AWS::Region}:${AWS::AccountId}:connection/*'
+
+  # ============================================================
+  # 5b. Seed-code bucket read for the SageMaker Projects CodeBuild role
+  # ============================================================
+  # When CreateServiceCatalogRoles=false, this stack does NOT create the
+  # CodeBuildRole above, so the account's AWS-default
+  # AmazonSageMakerServiceCatalogProductsCodeBuildRole is used for the Projects
+  # seed-code checkin. That default role can only read sagemaker-* buckets, not
+  # the project data bucket (${ProjectName}-data-<acct>-<region>) where the seed
+  # zips live, so the checkin fails with s3:GetObject AccessDenied and the model
+  # repos are left empty. This inline policy attaches the needed read grant to
+  # the role BY NAME (so it works on the pre-existing role this stack does not
+  # own). Only created in the reuse case — when the roles ARE created here, the
+  # CodeBuildRole above already grants s3:* on arn:aws:s3:::*-<acct>-*.
+  SeedCodeBucketReadPolicy:
+    Type: AWS::IAM::Policy
+    Condition: ShouldReuseSCRoles
+    Properties:
+      PolicyName: !Sub ${ProjectName}-seedcode-bucket-read
+      Roles:
+        - AmazonSageMakerServiceCatalogProductsCodeBuildRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SeedCodeBucketRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:s3:::${ProjectName}-data-${AWS::AccountId}-${AWS::Region}'
+              - !Sub 'arn:${AWS::Partition}:s3:::${ProjectName}-data-${AWS::AccountId}-${AWS::Region}/*'
 
   # ============================================================
   # 6. CodePipeline Role - For CI/CD pipeline orchestration
