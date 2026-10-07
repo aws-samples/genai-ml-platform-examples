@@ -220,8 +220,11 @@ Re-running `./scripts/deploy-workshop.sh` does the same thing — it detects the
 regardless of how the subscription happened and sets the parameter itself — but it redeploys
 every nested stack, so prefer the targeted update once the workshop is running. Where you cannot
 update the stack at all, attach the two `PolicyDocument` blocks from `templates/2-iam.yaml`
-directly with `aws iam put-role-policy`, using exactly the names `QuickSightS3DataLakeAccess` and
-`QuickSightAthenaAccess` — `create_governance_dashboard.py` matches them by name.
+directly with `aws iam put-role-policy`, using the project-scoped names
+`${ProjectName}-QuickSightS3DataLakeAccess` and `${ProjectName}-QuickSightAthenaAccess` — these are
+project-scoped so multiple projects can share the account-global QuickSight service role, and
+`create_governance_dashboard.py` matches them by name (via `config.QUICKSIGHT_S3_POLICY_NAME` /
+`QUICKSIGHT_ATHENA_POLICY_NAME`).
 
 **Automating both halves instead.** For provisioning accounts in bulk rather than teaching from
 them, the deploy script folds the whole thing into one run:

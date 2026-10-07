@@ -1,0 +1,13 @@
+# Strip notebook outputs on the way INTO git (clean filter), while leaving them
+# in the working copy. Lab runs print the AWS account ID, so committed outputs
+# would publish it through Workshop Studio. Set up with:
+#   pipx install nbstripout && nbstripout --install --attributes .gitattributes
+# Anyone without nbstripout on their machine will get a filter error on commit
+# rather than silently committing outputs (filter.nbstripout.required=true).
+*.ipynb filter=nbstripout
+*.zpln filter=nbstripout
+*.ipynb diff=ipynb
+
+# seed-code ships as a self-contained example whose notebooks are read, not run
+# here; leave its outputs intact. Last match wins in .gitattributes.
+seed-code/**/*.ipynb -filter -diff

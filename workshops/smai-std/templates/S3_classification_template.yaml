@@ -174,6 +174,13 @@ Resources:
       GitConfig:
         RepositoryUrl: !Sub https://github.com/${ModelBuildCodeRepositoryFullname}
 
+  SageMakerDeployCodeRepository:
+    Type: AWS::SageMaker::CodeRepository
+    Properties:
+      CodeRepositoryName: !Sub sagemaker-${SageMakerProjectId}-modeldeploy
+      GitConfig:
+        RepositoryUrl: !Sub https://github.com/${ModelDeployCodeRepositoryFullname}
+
   # Seed Code Automation
   GitSeedCodeCheckinProject:
     Type: AWS::CodeBuild::Project
@@ -318,8 +325,12 @@ Outputs:
     Value: !GetAtt ModelApprovalEventRule.Arn
 
   CodeRepositoryName:
-    Description: SageMaker code repository name
+    Description: SageMaker model build code repository name
     Value: !GetAtt SageMakerCodeRepository.CodeRepositoryName
+
+  DeployCodeRepositoryName:
+    Description: SageMaker model deploy code repository name
+    Value: !GetAtt SageMakerDeployCodeRepository.CodeRepositoryName
 
   ModelPackageGroupName:
     Description: Use this exact name when registering models in your pipeline - bank-classification-model-group
