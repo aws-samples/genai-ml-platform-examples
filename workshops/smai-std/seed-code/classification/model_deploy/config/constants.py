@@ -29,3 +29,12 @@ DEPLOY_ACCOUNT = config.get("deploy_account")
 MODEL_PACKAGE_GROUP_NAME = config.get("model_package_group_name")
 ARTIFACT_BUCKET = config.get("DataBucketName")
 MODEL_BUCKET_ARN = f"arn:aws:s3:::{ARTIFACT_BUCKET}" if ARTIFACT_BUCKET else ""
+
+# Workshop ProjectName, used to locate the inference-capture SQS queue
+# ({ProjectName}-inference-capture). Leave blank to derive it from
+# DataBucketName, which the workshop names {ProjectName}-data-{account}-{region}.
+PROJECT_NAME = config.get("project_name", "")
+
+# Publish each prediction to the capture queue so Lab 5 has data to analyse.
+# Turning this off leaves the endpoint serving normally but records nothing.
+ENABLE_INFERENCE_CAPTURE = bool(config.get("enable_inference_capture", True))

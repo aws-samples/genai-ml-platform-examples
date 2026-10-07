@@ -2,7 +2,6 @@ import argparse
 import os
 import logging
 import sys
-import pickle
 import xgboost as xgb
 import pandas as pd
 import mlflow
@@ -35,9 +34,18 @@ if __name__ == '__main__':
     X_train, y_train = train_data.iloc[:, 1:], train_data.iloc[:, 0]
     X_val, y_val = validation_data.iloc[:, 1:], validation_data.iloc[:, 0]
 
-    feature_names = [str(i) for i in range(X_train.shape[1])]
-    dtrain = xgb.DMatrix(X_train.values, label=y_train, feature_names=feature_names)
-    dval = xgb.DMatrix(X_val.values, label=y_val, feature_names=feature_names)
+    # Build the DMatrix from a bare numpy array, with NO explicit feature_names.
+    #
+    # This matters at SERVING time, not here. The inference handler baked into
+    # the model tarball (source_scripts/inference/inference.py) predicts with
+    # `xgb.DMatrix(ordered.values)`, which produces XGBoost's default positional
+    # names f0..f19. Naming the columns here (the previous code passed
+    # ["0", "1", ... "19"]) stamps those names onto the booster, and XGBoost then
+    # rejects every prediction request with a feature-name mismatch -- "0" != "f0".
+    #
+    # Column ORDER is the real contract, and the preprocessing step guarantees it.
+    dtrain = xgb.DMatrix(X_train.values, label=y_train)
+    dval = xgb.DMatrix(X_val.values, label=y_val)
 
     # MLflow setup
     tracking_uri = os.environ.get('MLFLOW_TRACKING_URI')
@@ -74,8 +82,11 @@ if __name__ == '__main__':
         'eval_metric': 'auc',
     }
 
+    run_id = ''
     if tracking_uri:
         run_ctx = mlflow.start_run(run_name="train", parent_run_id=parent_run_id) if parent_run_id else mlflow.start_run()
+        run_id = run_ctx.info.run_id
+        logger.info('MLflow run id: %s', run_id)
     else:
         run_ctx = open(os.devnull)
     with run_ctx:
@@ -101,8 +112,24 @@ if __name__ == '__main__':
 
         logger.info(f'Metrics: {metrics}')
 
-    # Save model for SageMaker
+    # Save the model in XGBoost's OWN format, not a pickle.
+    #
+    # The filename has no extension, and the inference handler's model_fn treats
+    # any non-".pkl" name as an XGBoost binary: it calls
+    # `xgb.Booster().load_model(path)`. The previous code wrote a pickle to this
+    # same extensionless name, so the endpoint failed at container start while
+    # loading the model -- a deploy-time failure with no signal during the build.
+    #
+    # Keep this filename in sync with model_fn's candidate list in
+    # source_scripts/inference/inference.py.
     model_path = '/opt/ml/model'
     os.makedirs(model_path, exist_ok=True)
-    pickle.dump(model, open(f'{model_path}/xgboost-model', 'wb'))
-    logger.info('Model saved to /opt/ml/model')
+    model.save_model(f'{model_path}/xgboost-model')
+    logger.info('Model saved to %s/xgboost-model', model_path)
+
+    # Record the MLflow run id alongside the model so the evaluation step can put
+    # it in baseline.json. The run belongs to THIS container, so no later step can
+    # ask MLflow for it without guessing; the evaluation step already extracts this
+    # tarball, which makes a file next to the model the cheapest reliable handoff.
+    with open(f'{model_path}/mlflow_run_id.txt', 'w') as f:
+        f.write(run_id)

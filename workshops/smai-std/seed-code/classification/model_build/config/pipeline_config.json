@@ -2,10 +2,13 @@
   "aws_region": "us-east-1",
   "sagemaker_project_name": "",
   "sagemaker_pipeline_role_arn": "",
-  "glue_database": "bank-classification-db",
-  "glue_table": "bank-marketing-data",
+  "athena_database": "bank_marketing",
+  "training_table": "training_data",
+  "evaluation_table": "evaluation_data",
   "DataBucketName": "",
   "model_package_group_name": "bank-classification-model-group",
   "mlflow_tracking_uri": "",
-  "mlflow_experiment_name": "bank-classification-experiment"
+  "mlflow_experiment_name": "bank-classification-experiment",
+  "accuracy_threshold": 0.7,
+  "validation_fraction": 0.1
 }

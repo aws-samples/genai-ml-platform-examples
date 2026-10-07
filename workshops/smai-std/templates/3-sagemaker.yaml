@@ -296,67 +296,19 @@ Resources:
           Fn::Sub: ${ProjectName}-UserBRoleArn
 
   # --- Glue Data Catalog ---
-  BankClassificationGlueDatabase:
-    Type: AWS::Glue::Database
-    Properties:
-      CatalogId: !Ref AWS::AccountId
-      DatabaseInput:
-        Name: bank-classification-db
-        Description: Database for bank marketing campaign classification data
-
-  BankMarketingGlueTable:
-    Type: AWS::Glue::Table
-    Properties:
-      CatalogId: !Ref AWS::AccountId
-      DatabaseName: !Ref BankClassificationGlueDatabase
-      TableInput:
-        Name: bank-marketing-data
-        Description: Bank marketing campaign dataset for classification
-        StorageDescriptor:
-          Columns:
-            - Name: age
-              Type: int
-            - Name: job
-              Type: string
-            - Name: marital
-              Type: string
-            - Name: education
-              Type: string
-            - Name: default
-              Type: string
-            - Name: balance
-              Type: int
-            - Name: housing
-              Type: string
-            - Name: loan
-              Type: string
-            - Name: contact
-              Type: string
-            - Name: day
-              Type: int
-            - Name: month
-              Type: string
-            - Name: duration
-              Type: int
-            - Name: campaign
-              Type: int
-            - Name: pdays
-              Type: int
-            - Name: previous
-              Type: int
-            - Name: poutcome
-              Type: string
-            - Name: "y"
-              Type: string
-          Location: !Sub 's3://${DataBucket}/ml_pipelines/data/'
-          InputFormat: org.apache.hadoop.mapred.TextInputFormat
-          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
-          SerdeInfo:
-            SerializationLibrary: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
-            Parameters:
-              field.delim: ','
-              skip.header.line.count: '1'
-        TableType: EXTERNAL_TABLE
+  # The hive database 'bank-classification-db' and its table 'bank-marketing-data'
+  # were REMOVED here.
+  #
+  # They existed solely so the Lab 4A model-build pipeline could call
+  # get_table_location() and parse a CSV the pipeline itself uploaded -- the
+  # table's declared schema was never read, and was wrong: it described the
+  # 'bank-full' dataset variant (16 features, with 'balance' and 'day', comma
+  # delimited) while the object at its prefix was 'bank-additional'
+  # (20 features, semicolon delimited).
+  #
+  # The Lab 4A pipeline now reads the governed Iceberg tables that Lab 2
+  # publishes -- bank_marketing.training_data / .evaluation_data, created by
+  # 5-data-prep.yaml -- so the workshop has ONE catalog for one dataset.
 
   # --- Lambda: Copy S3 Files ---
   CopyS3FilesLambdaFunction:
@@ -547,10 +499,8 @@ Outputs:
     Value: !GetAtt AccessGrantsInstance.AccessGrantsInstanceArn
     Description: Access Grants Instance Arn
 
-  BankClassificationGlueDatabaseName:
-    Value: !Ref BankClassificationGlueDatabase
-    Description: Glue Database name for bank classification
-
-  BankMarketingGlueTableName:
-    Value: !Ref BankMarketingGlueTable
-    Description: Glue Table name for bank marketing data
+  # BankClassificationGlueDatabaseName / BankMarketingGlueTableName outputs were
+  # removed along with the hive Glue database and table they referenced. The Lab
+  # 4A pipeline now reads bank_marketing.training_data / .evaluation_data, whose
+  # names 5-data-prep.yaml exports as
+  # ${ProjectName}-data-prep-training-table / -evaluation-table.
