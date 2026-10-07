@@ -95,6 +95,8 @@ from src.config.config import (
     QUICKSIGHT_INFERENCE_DATASET_ID,
     QUICKSIGHT_INFERENCE_DATASET_NAME,
     QUICKSIGHT_SERVICE_ROLE_NAME,
+    QUICKSIGHT_S3_POLICY_NAME,
+    QUICKSIGHT_ATHENA_POLICY_NAME,
 )
 from src.setup.grant_lake_formation_permissions import (
     grant_lake_formation_permissions,
@@ -511,13 +513,14 @@ def _check_s3_permissions(
         )
         return results
 
-    # Policy names are fixed by templates/2-iam.yaml.
-    results['data_lake'] = 'QuickSightS3DataLakeAccess' in attached
-    results['athena_access'] = 'QuickSightAthenaAccess' in attached
+    # Policy names are project-scoped in templates/2-iam.yaml and mirrored by
+    # config.QUICKSIGHT_S3_POLICY_NAME / QUICKSIGHT_ATHENA_POLICY_NAME.
+    results['data_lake'] = QUICKSIGHT_S3_POLICY_NAME in attached
+    results['athena_access'] = QUICKSIGHT_ATHENA_POLICY_NAME in attached
 
     for label, present in (
-        ('QuickSightS3DataLakeAccess', results['data_lake']),
-        ('QuickSightAthenaAccess', results['athena_access']),
+        (QUICKSIGHT_S3_POLICY_NAME, results['data_lake']),
+        (QUICKSIGHT_ATHENA_POLICY_NAME, results['athena_access']),
     ):
         if present:
             logger.info(f"  ✓ Policy: {label}")

@@ -667,3 +667,10 @@ QUICKSIGHT_ANALYSIS_NAME: str = "Bank Marketing Governance"
 QUICKSIGHT_DASHBOARD_ID: str = "bank-marketing-governance-dashboard"
 QUICKSIGHT_DASHBOARD_NAME: str = "Bank Marketing Governance"
 QUICKSIGHT_SERVICE_ROLE_NAME: str = "aws-quicksight-service-role-v0"
+
+# Inline policies the workshop attaches to the (account-global) QuickSight
+# service role, declared in templates/2-iam.yaml. Project-scoped so multiple
+# projects can share aws-quicksight-service-role-v0 without a policy-name
+# collision. Must stay in sync with the PolicyName values in 2-iam.yaml.
+QUICKSIGHT_S3_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightS3DataLakeAccess"
+QUICKSIGHT_ATHENA_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightAthenaAccess"

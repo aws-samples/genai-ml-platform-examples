@@ -10,7 +10,7 @@ This implementation plan breaks down the mlp_sdk development into discrete, mana
   - Create Python package structure with proper `__init__.py` files
   - Set up `pyproject.toml` with dependencies including SageMaker SDK v3
   - Define core interfaces and type hints for main components
-  - Set up testing framework (pytest, pytest-hypothesis)
+  - Set up testing framework (pytest, hypothesis)
   - _Requirements: 1.1, 1.2, 1.3, 1.4_
 
 - [ ]* 1.1 Write property test for package installation
@@ -202,7 +202,7 @@ This implementation plan breaks down the mlp_sdk development into discrete, mana
 - Tasks marked with `*` are optional and can be skipped for faster MVP
 - Each task references specific requirements for traceability
 - Checkpoints ensure incremental validation and quality
-- Property tests validate universal correctness properties using pytest-hypothesis
+- Property tests validate universal correctness properties using hypothesis
 - Unit tests validate specific examples and edge cases
 - The implementation builds incrementally, with each component depending on previous ones
 - Configuration system is implemented first as it's foundational to all other components

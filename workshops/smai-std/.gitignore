@@ -1,0 +1,51 @@
+.DS_Store
+
+# Python bytecode caches
+__pycache__/
+
+# Shared environment written by lab0-setup/setup.ipynb (discovered per-account)
+.env
+
+# Lab 5 generates its drift datasets at runtime; don't track the artifacts.
+lab5-monitoring/data/*.csv
+
+# Notebook builder script — not shipped; regenerates lab0-setup/setup.ipynb
+lab0-setup/build_setup.py
+
+# Local notebook dev tooling — not shipped, same rationale as build_setup.py
+# above. nbpatch.py edits .ipynb source in place; run_notebook.py executes a
+# lab headlessly. Neither is referenced by a lab or doc.
+scripts/nbpatch.py
+scripts/run_notebook.py
+
+# Jupyter autosave copies, and the cruft macOS leaves in a zip.
+.ipynb_checkpoints/
+__MACOSX/
+
+# Editable/`pip install -e` metadata for lab5-monitoring's local package.
+*.egg-info/
+
+# UCI Bank Marketing dataset — re-downloaded from archive.ics.uci.edu by the
+# lab 2 notebooks (and lab5-monitoring/src/setup/download_dataset.py), then
+# unzipped in place. Ships a stray .Rhistory we don't want either.
+lab2-data-prep/bank-additional.zip
+lab2-data-prep/bank-additional/
+
+# Job scripts the lab 2 notebooks write at runtime with open(...,'w') and then
+# pass to SageMaker Processing / EMR as the job's `code` entry point.
+lab2-data-prep/processing/
+lab2-data-prep/spark/
+
+# Fine-tuning dataset + prompt template emitted by lab-2a; consumed by lab-3b.
+lab2-data-prep/train.jsonl
+lab2-data-prep/test.jsonl
+lab2-data-prep/template.json
+
+# Training/inference entry points written by lab-3a at runtime.
+lab3-model-build/scripts/
+
+# SHAP plots and CSVs written by shap_utils.create_shap_visualizations().
+lab5-monitoring/shap_output/
+# Local-only runbook: session log of Lab 4A fixes and problems encountered.
+# Kept on disk as a reference but intentionally NOT committed/pushed.
+templates/CLASSIFICATION-PROJECT-TWO-REPOS.md
