@@ -37,7 +37,10 @@ project:
 # env var if your account was activated elsewhere.
 aws:
   region: us-east-1
-  quicksight_identity_region: us-east-1
+  # This account's QuickSight subscription was activated in us-west-2
+  # (DescribeAccountSettings against any other endpoint returns
+  # "your identity region is us-west-2"). Data plane stays in us-east-1.
+  quicksight_identity_region: us-west-2
 
 # ---------------------------------------------------------------------------
 # SageMaker
