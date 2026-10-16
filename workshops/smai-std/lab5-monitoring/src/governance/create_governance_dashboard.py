@@ -386,6 +386,19 @@ def get_quicksight_principals(
     (e.g. the caller lacks quicksight:ListUsers) so dashboard resources are
     still created with a usable (if broader) permission grant.
 
+    Additive region fallback: on most accounts the user namespace lives in
+    the identity region, so the identity-region lookup below returns the
+    users and nothing else runs. Some accounts are "split", though — their
+    account settings resolve to one region (e.g. us-west-2) while the user
+    namespace lives in another (e.g. us-east-1); calling list_users against
+    the identity region there raises AccessDenied ("use the <other> endpoint").
+    Since QuickSight permission principals must exist in the SAME region as
+    the resources being granted — and those resources are created in
+    AWS_DEFAULT_REGION — a second lookup against AWS_DEFAULT_REGION is tried
+    before giving up on the wildcard. This path only executes when the
+    original identity-region lookup yields nothing, so existing single-region
+    behavior is unchanged.
+
     Args:
         account_id: AWS account ID
         quicksight_admin_client: Optional boto3 QuickSight client bound to
@@ -409,6 +422,22 @@ def get_quicksight_principals(
             return arns
     except Exception:
         pass
+
+    # Additive fallback for split-brain accounts: look up the user namespace
+    # in the asset region (AWS_DEFAULT_REGION) where the dashboard resources
+    # are actually created. Returned ARNs then match the resource region, so
+    # create_data_source / create_data_set accept them as valid principals.
+    # Only reached when the identity-region lookup above found no users.
+    if AWS_DEFAULT_REGION and AWS_DEFAULT_REGION != resolved_identity_region:
+        try:
+            asset_region_client = boto3.client('quicksight', region_name=AWS_DEFAULT_REGION)
+            users = asset_region_client.list_users(AwsAccountId=account_id, Namespace='default')
+            arns = [u['Arn'] for u in users.get('UserList', [])]
+            if arns:
+                return arns
+        except Exception:
+            pass
+
     return [f'arn:aws:quicksight:{resolved_identity_region}:{account_id}:user/default/Admin/*']
 
 
