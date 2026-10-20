@@ -143,7 +143,7 @@ Replace `<YOUR_PROJECT_NAME>` with a lowercase, hyphenated name (e.g., `bank-mar
 | `ProjectName` | `bank-marketing-prediction` | Used to name all resources; lowercase letters, digits, hyphens only |
 | `S3TemplateBucket` | *(required)* | Bucket holding the five child templates |
 | `S3TemplateKeyPrefix` | `genai-ml-std-assets` | Key prefix the child templates live under |
-| `SeedCodeType` | `llm-fine-tuning` | `classification`, `llm-fine-tuning`, or `regression` |
+| `SeedCodeType` | `llm-fine-tuning` | `classification` or `llm-fine-tuning` |
 | `VpcCIDR` | `10.1.0.0/16` | VPC CIDR block |
 | `PrivateSubnetCIDR` | `10.1.1.0/24` | Private subnet 1 |
 | `PrivateSubnet2CIDR` | `10.1.2.0/24` | Private subnet 2 |

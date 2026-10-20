@@ -2,6 +2,10 @@ name: BuildSageMakerModel
 
 # Builds and runs the bank-marketing training pipeline.
 #
+# This repository holds one folder per model under models/, so a push only
+# builds the models whose files actually changed; adding a tenth model does
+# not rebuild the other nine.
+#
 # The pipeline reads the Iceberg tables published by Lab 2
 # (bank_marketing.training_data / .evaluation_data), so Lab 2's data-prep
 # notebook AND its Iceberg registration notebook must have run before this
@@ -18,22 +22,93 @@ on:
     branches:
       - main
     paths:
-      - model_build/ml_pipelines/**
-      - model_build/source_scripts/**
-      - model_build/config/pipeline_config.json
-      - model_build/config/dataset_schema.yaml
+      - models/*/ml_pipelines/**
+      - models/*/source_scripts/**
+      - models/*/config/pipeline_config.json
+      - models/*/config/dataset_schema.yaml
   workflow_dispatch:
-
-env:
-  CONFIG_FILE: model_build/config/pipeline_config.json
+    inputs:
+      model_name:
+        description: 'Folder name under models/ to build. Leave blank to build whatever the latest commit changed.'
+        required: false
+        type: string
 
 jobs:
-  Build:
+  detect:
     runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.pick.outputs.models }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out which models to build
+        id: pick
+        env:
+          MODEL_NAME_INPUT: ${{ inputs.model_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          THIS_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${MODEL_NAME_INPUT:-}" ]; then
+            if [ ! -d "models/${MODEL_NAME_INPUT}" ]; then
+              echo "models/${MODEL_NAME_INPUT} does not exist in this repository"
+              exit 1
+            fi
+            MODELS=$(jq -nc --arg m "$MODEL_NAME_INPUT" '[$m]')
+          else
+            # On the first push to a new repository there is no earlier commit to
+            # compare against, so fall back to the files in this commit alone.
+            if [ -z "${BEFORE_SHA:-}" ] \
+               || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] \
+               || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              CHANGED=$(git show --name-only --pretty=format: "$THIS_SHA")
+            else
+              CHANGED=$(git diff --name-only "$BEFORE_SHA" "$THIS_SHA")
+            fi
+            MODELS=$(printf '%s\n' "$CHANGED" \
+              | sed -n 's|^models/\([^/]*\)/.*|\1|p' \
+              | sort -u \
+              | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+
+          # Someone clicked Run workflow and expects a build. Skipping silently
+          # would look like success, so fail and say what to do instead.
+          if [ "$MODELS" = "[]" ] && [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::Nothing to build: the latest commit did not change any folder under models/. Run the workflow again and fill in model_name with the model folder, for example bank-classification."
+            exit 1
+          fi
+
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "Models to build: $MODELS"
+
+  Build:
+    needs: detect
+    if: needs.detect.outputs.models != '[]'
+    runs-on: ubuntu-latest
+
+    strategy:
+      # One model failing should not stop the others.
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.detect.outputs.models) }}
+
+    # Two pushes touching the same model must not build it at the same time.
+    concurrency:
+      group: build-${{ matrix.model }}
+      cancel-in-progress: false
 
     permissions:
       id-token: write
       contents: read
+
+    env:
+      MODEL_DIR: models/${{ matrix.model }}
+      CONFIG_FILE: models/${{ matrix.model }}/config/pipeline_config.json
 
     steps:
       - name: Check out repository code
@@ -49,7 +124,7 @@ jobs:
           python -m pip install --upgrade pip
           sudo rm -rf /usr/lib/python3/dist-packages/PyJWT-*.dist-info
           pip install --force-reinstall --no-deps PyJWT
-          pip install -r model_build/requirements.txt
+          pip install -r "${MODEL_DIR}/requirements.txt"
 
       - name: Load Configuration
         id: load_config
@@ -128,9 +203,9 @@ jobs:
             MODEL_PACKAGE_GROUP_NAME="${SAGEMAKER_PROJECT_NAME_ID}"
           fi
           export SAGEMAKER_PIPELINE_ROLE_ARN=${{ steps.load_config.outputs.sagemaker_pipeline_role_arn }}
-          export PYTHONPATH="${PYTHONPATH}:${PWD}/model_build"
+          export PYTHONPATH="${PYTHONPATH}:${PWD}/${MODEL_DIR}"
 
-          cd model_build
+          cd "${MODEL_DIR}"
 
           # ARTIFACT_BUCKET holds pipeline-managed outputs; the data bucket holds
           # baseline.json, because that is what Lab 5's monitoring reads.

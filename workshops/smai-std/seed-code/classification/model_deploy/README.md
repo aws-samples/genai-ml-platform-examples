@@ -4,10 +4,30 @@ This repository contains the model deployment pipeline for the MLOps framework. 
 
 **Note**: Please refer to the model build section and complete the model training process before proceeding with deployment.
 
-## Repository Structure
+## Mono-repo layout
+
+This repository is shared by every model: each SageMaker Project adds its own
+folder under `models/<model-name>/`, not a new repository. After cloning,
+work from `models/<model-name>/`, and run `./setup_workflow.sh` there for
+**every** model you add, not just the first — it is safe to run every time:
+
+```bash
+git clone https://github.com/<org>/<model-deploy-repo>.git
+cd <model-deploy-repo>/models/<model-name>
+./setup_workflow.sh
+```
+
+The first model moves `deploy.yml` to the repository root; later models find
+it already there and print
+`deploy.yml is already at the repository root - an earlier model set it up.` —
+that's expected. Deployment is normally triggered automatically by model
+approval (the project Lambda sends `model_name`); to deploy a specific model
+by hand, use the Actions tab's **Run workflow** and fill in `model_name`.
+
+## Repository Structure (inside models/<model-name>/)
 
 ```
-model_deploy/
+models/<model-name>/
 ├── README.md                           # This guide
 ├── .github/workflows/                  # GitHub Actions CI/CD
 │   └── deploy_model_pipeline.yml      # Main deployment workflow

@@ -14,3 +14,8 @@ Integrate with CI/CD tools to automate model build and deployment onto **Amazon 
 
 ## Related assets
 - `../seed-code/classification/` – MLOps seed repositories for model build and model deploy, including the event-driven automation blueprint. See `../seed-code/classification/model_build/README.md` for full setup.
+
+> **Mono-repo note**: the build and deploy repos are shared across every model
+> created from this project template — each one lands in its own
+> `models/<model-name>/` folder rather than a fresh pair of repos. See the
+> "Mono-repo layout" section in `../seed-code/classification/model_build/README.md`.

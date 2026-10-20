@@ -2,12 +2,38 @@
 
 This repository contains the model training pipeline for the MLOps framework. It provides automated ML model training, evaluation, and registration using SageMaker Pipelines orchestrated through GitHub Actions.
 
-## Repository Structure
+## Mono-repo layout
+
+This repository is shared by every model: each SageMaker Project adds its own
+folder under `models/<model-name>/`, not a new repository. The structure below
+is what that folder looks like once seeded — `model_build/` is the wrapper the
+seed-code zip ships in, not a folder you'll see at the repository root.
+
+After cloning, work from `models/<model-name>/`, and run `./setup_workflow.sh`
+there for **every** model you add, not just the first — it is safe to run
+every time:
+
+```bash
+git clone https://github.com/<org>/<model-build-repo>.git
+cd <model-build-repo>/models/<model-name>
+./setup_workflow.sh
 ```
-model_build/
+
+The first model moves `build.yml` to the repository root, where GitHub Actions
+can find it. Later models find it already there and print
+`build.yml is already at the repository root - an earlier model set it up.` —
+that's expected; it just drops their own duplicate copy. A push only builds
+the models whose files actually changed, so adding a tenth model never
+rebuilds the other nine. To build a specific model by hand, use the Actions
+tab's **Run workflow** and fill in `model_name` with the folder name, for
+example `bank-classification`.
+
+## Repository Structure (inside models/<model-name>/)
+```
+models/<model-name>/
 ├── README.md                           # This guide
-├── .github/workflows/                  # GitHub Actions CI/CD
-│   └── build_sagemaker_pipeline.yml    # Main build workflow
+├── .github/workflows/                  # GitHub Actions CI/CD (root-level after setup_workflow.sh)
+│   └── build.yml                       # Main build workflow
 ├── ml_pipelines/                       # SageMaker Pipeline definitions
 │   ├── run_pipeline.py                 # Pipeline execution script
 │   ├── training/pipeline.py            # Main pipeline definition
