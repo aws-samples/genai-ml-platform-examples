@@ -18,6 +18,9 @@ All options produce outputs in **Amazon S3**. For the Bank Marketing dataset, a 
 | **2C** | Bank Marketing | EMR Serverless | Serverless Spark — auto-scales, no capacity planning |
 | **2D** | Bank Marketing | EMR on EC2 | Managed clusters — large/long-running jobs |
 | **2E** | Bank Marketing | Canvas (Low-code/No-code) | Visual prep — GUI-based, no coding required |
+| **2F** | Bank Marketing | Iceberg registration (shared step) | Required final step — runs after **any** of 2B–2E to land the data in Iceberg |
+
+> **2B–2E are alternatives** (pick one approach to produce the Bank Marketing CSVs). **2F is not an alternative** — it is the common follow-on step for Bank Marketing dataset that every path runs to register those CSVs into Iceberg.
 
 ## Workflow
 
@@ -41,12 +44,26 @@ All options produce outputs in **Amazon S3**. For the Bank Marketing dataset, a 
 ```
 Lab 2B/2C/2D/2E  →  train.csv + test.csv in S3
         ↓
-lab-2-traditional-ml-iceberg-registration.ipynb
+lab-2f-iceberg-registration.ipynb
         ↓
 S3 Table Bucket + Athena Iceberg tables (with snapshot IDs)
         ↓
 Lab 3 (model build) / Lab 5 (drift monitoring) / QuickSight
 ```
+
+### Lab 2F — Iceberg registration (shared step)
+
+Lab 2F (`lab-2f-iceberg-registration.ipynb`) is the **single shared step that every Bank Marketing path (2B–2E) finishes with**. Whichever tool you used to produce `train.csv` / `test.csv`, you then run 2F exactly once to publish that data into the Iceberg layer the rest of the workshop consumes. It does **not** prepare data itself — it reads the CSVs and writes them into pre-provisioned tables.
+
+What it does:
+
+1. **Reads** the processed `train.csv` / `test.csv` from the shared S3 paths produced by 2B–2E
+2. **Writes** them into the Iceberg tables (`training_data`, `evaluation_data`) in both the S3 Table Bucket and the default Glue catalog — these tables are pre-provisioned by the `5-data-prep.yaml` CloudFormation stack, so 2F only writes data
+3. **Captures snapshot IDs** that Lab 3 and Lab 5 pin as frozen baselines (`FOR VERSION AS OF`)
+
+Run order: **one of 2B–2E → then 2F**. Lab 3 and Lab 5 read the Athena/Iceberg tables that 2F populates, so 2F is required regardless of which prep option you chose.
+
+> **Coming from Lab 2E (Canvas)?** Canvas exports a header-included CSV, so 2F includes an optional, clearly-labeled normalization cell near the top that reshapes the Canvas export into the headerless, target-first layout the rest of the notebook expects. Participants arriving from 2B/2C/2D skip that cell.
 
 ## Outputs
 
@@ -79,7 +96,10 @@ Lab 3 (model build) / Lab 5 (drift monitoring) / QuickSight
 |------|-------------|
 | `lab-2a-fine-tuning-data-prep-processing-job.ipynb` | Dolly summarization dataset preparation |
 | `lab-2b-traditional-ml-data-prep-processing-job.ipynb` | Bank Marketing dataset preparation (SageMaker Processing Job) |
-| `lab-2-traditional-ml-iceberg-registration.ipynb` | **Common step**: Register processed CSVs into S3 Table Bucket + Athena Iceberg (run after any of 2B–2E) |
+| `lab-2c-emr-serverless-data-prep.ipynb` | Bank Marketing dataset preparation (EMR Serverless Spark) |
+| `lab-2d-emr-on-ec2-data-prep.ipynb` | Bank Marketing dataset preparation (EMR on EC2 Spark) |
+| Lab 2E (Canvas) | Visual, no-code prep in SageMaker Canvas — see the Lab 2E workshop instructions (console-based, no notebook) |
+| `lab-2f-iceberg-registration.ipynb` | **Shared final step**: register the processed CSVs from any of 2B–2E into the S3 Table Bucket + Athena Iceberg tables (run once, after your chosen prep option) |
 
 ## Prerequisites
 
@@ -87,10 +107,7 @@ Lab 3 (model build) / Lab 5 (drift monitoring) / QuickSight
 - Access to the workshop S3 bucket (DataBucketName from CloudFormation outputs)
 - SageMaker Studio JupyterLab space running
 
-### Iceberg registration prerequisites (one-time, admin)
+### Lab 2F prerequisites
 
-The `lab-2-traditional-ml-iceberg-registration.ipynb` notebook requires the following account/role setup. In AWS Workshop Studio these are typically pre-provisioned; Section 0 of the notebook automates them if needed:
-
-1. **IAM permissions** on the SageMaker execution role: `s3tables:*`, `glue:*` (catalog/database/table), `athena:*`, `lakeformation:*`
-2. **Lake Formation data lake administrator** — the SageMaker role must be an LF admin to create tables and grant permissions
-3. **S3 Tables → Glue Data Catalog integration** — enabled once per account (S3 console → Table buckets → Enable integration). Without it, Athena/Lake Formation can't see the S3 Table Bucket namespace
+- Completed one of Lab 2B–2E (produces `train.csv` and `test.csv` in S3)
+- Iceberg infrastructure pre-provisioned (Glue database, Iceberg tables, S3 Table Bucket, IAM permissions, Lake Formation grants, S3 Tables → Glue Data Catalog integration)

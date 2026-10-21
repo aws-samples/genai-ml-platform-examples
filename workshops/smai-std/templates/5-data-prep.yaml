@@ -654,6 +654,52 @@ Resources:
             Action: 'sts:AssumeRole'
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonEMRServicePolicy_v2'
+      Policies:
+        # AmazonEMRServicePolicy_v2 only allows EC2 actions on resources already
+        # tagged 'for-use-with-amazon-emr-managed-policies=true'. When EMR
+        # auto-creates the cluster's managed security groups, those resources are
+        # not yet tagged, so ec2:CreateSecurityGroup is denied (cluster fails with
+        # UnauthorizedOperation). This supplemental policy grants the EC2 security
+        # group + describe actions EMR needs to provision a cluster, scoped to the
+        # stack's region.
+        - PolicyName: EMRManagedSecurityGroupSetup
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EC2DescribeForClusterLaunch
+                Effect: Allow
+                Action:
+                  - 'ec2:DescribeVpcs'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:DescribeRouteTables'
+                  - 'ec2:DescribeAvailabilityZones'
+                  - 'ec2:DescribeAccountAttributes'
+                  - 'ec2:DescribeDhcpOptions'
+                Resource: '*'
+              - Sid: EC2ManagedSecurityGroupSetup
+                Effect: Allow
+                Action:
+                  - 'ec2:CreateSecurityGroup'
+                  - 'ec2:DeleteSecurityGroup'
+                  - 'ec2:AuthorizeSecurityGroupIngress'
+                  - 'ec2:AuthorizeSecurityGroupEgress'
+                  - 'ec2:RevokeSecurityGroupIngress'
+                  - 'ec2:RevokeSecurityGroupEgress'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'ec2:Region': !Ref 'AWS::Region'
+              - Sid: EC2CreateTagsForManagedSecurityGroups
+                Effect: Allow
+                Action:
+                  - 'ec2:CreateTags'
+                Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+                Condition:
+                  StringEquals:
+                    'ec2:CreateAction': 'CreateSecurityGroup'
       Tags:
         - Key: Project
           Value: !Ref ProjectName
