@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'S3-based MLOps template for Bank Marketing Classification using SageMaker and GitHub Actions with Glue Catalog integration'
+Description: 'S3-based MLOps template for classification models. Adds one folder per model to a shared model-build and model-deploy repository, using SageMaker, GitHub Actions and Iceberg/Athena integration'
 
 Parameters:
   SageMakerProjectName:
@@ -13,17 +13,38 @@ Parameters:
     Type: String
     Description: Service generated ID of the project
 
+  ModelName:
+    Type: String
+    Description: >-
+      Name of the model this project builds. Used as the folder name under
+      models/ in both shared repos, and as the prefix of the model package group.
+    Default: bank-classification
+    MinLength: 1
+    MaxLength: 48
+    AllowedPattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+    ConstraintDescription: lowercase letters, numbers and single hyphens only
+
+  SeedCodeKind:
+    Type: String
+    Description: >-
+      Which starter code to copy into this model's folder. Each value matches a
+      folder under seed-code/, so a future kind of model needs no template
+      change here - only a new seed-code folder and zip.
+    Default: classification
+    AllowedValues:
+      - classification
+
   ModelBuildCodeRepositoryFullname:
     Type: String
     MaxLength: 1024
-    Description: Full repository name for Model Building (format owner/repo-name)
-    Default: your-github-username/bank-classification-mlops-build-repo
+    Description: Full repository name of the shared model-build repo (format owner/repo-name)
+    Default: your-github-username/model-build-repo
 
   ModelDeployCodeRepositoryFullname:
     Type: String
     MaxLength: 1024
-    Description: Full repository name for Model Deployment (format owner/repo-name)
-    Default: your-github-username/bank-classification-mlops-deploy-repo
+    Description: Full repository name of the shared model-deploy repo (format owner/repo-name)
+    Default: your-github-username/model-deploy-repo
 
   CodeConnectionArn:
     Type: String
@@ -47,6 +68,8 @@ Metadata:
         Parameters:
           - SageMakerProjectName
           - SageMakerProjectId
+          - ModelName
+          - SeedCodeKind
       - Label:
           default: "GitHub Repository Configuration"
         Parameters:
@@ -93,6 +116,9 @@ Resources:
               
               repo_fullname = os.environ['GITHUB_REPO_FULLNAME']
               workflow_name = os.environ['GITHUB_WORKFLOW_NAME']
+              # The deploy repo holds one folder per model. Tell the workflow
+              # which folder to deploy rather than making it guess.
+              model_name = os.environ['MODEL_NAME']
               repo_owner, repo_name = repo_fullname.split('/', 1)
               
               # Get PAT from Secrets Manager
@@ -110,6 +136,7 @@ Resources:
               data = json.dumps({
                   "ref": "main",
                   "inputs": {
+                      "model_name": model_name,
                       "model_package_group_name": event.get('detail', {}).get('ModelPackageGroupName', ''),
                       "model_package_arn": event.get('detail', {}).get('ModelPackageArn', '')
                   }
@@ -138,6 +165,7 @@ Resources:
         Variables:
           GITHUB_REPO_FULLNAME: !Ref ModelDeployCodeRepositoryFullname
           GITHUB_WORKFLOW_NAME: !Ref GitHubWorkflowNameForDeployment
+          MODEL_NAME: !Ref ModelName
 
   EventBridgeInvokeLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -159,7 +187,7 @@ Resources:
           - SageMaker Model Package State Change
         detail:
           ModelPackageGroupName:
-            - bank-classification-model-group
+            - !Sub ${ModelName}-model-group
           ModelApprovalStatus:
             - Approved
       State: ENABLED
@@ -197,10 +225,6 @@ Resources:
         EnvironmentVariables:
           - Name: SeedCodeBucket
             Value: !Ref SeedCodeBucketName
-          - Name: ModelBuildSeedCode
-            Value: classification-model-build-repo.zip
-          - Name: ModelDeploySeedCode
-            Value: classification-model-deploy-repo.zip
           - Name: SourceModelBuildCodeRepositoryBranch
             Value: main
           - Name: SourceModelDeployCodeRepositoryBranch
@@ -211,10 +235,69 @@ Resources:
             Value: !Ref ModelDeployCodeRepositoryFullname
           - Name: CodestarConnectionArn
             Value: !Ref CodeConnectionArn
+          - Name: MODEL_NAME
+            Value: !Ref ModelName
+          - Name: MODEL_PACKAGE_GROUP_NAME
+            Value: !Sub ${ModelName}-model-group
       Source:
         Type: S3
         Location: !Sub sagemaker-servicecatalog-seedcode-${AWS::Region}/bootstrap/GitRepositorySeedCodeCheckinCodeBuildProject-v1.1.zip
-        BuildSpec: buildspec.yml
+        # The buildspec that ships in the bucket above starts a fresh history with
+        # `git init`, which only works against an empty repository. These repos are
+        # shared by every model, so we clone what is already there and add one
+        # folder instead. GIT_REPOSITORY_URL and SEED_SUBFOLDER are supplied per
+        # build by GitSeedCodeCheckinProjectTriggerLambda.
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              commands:
+                - git config --global credential.helper '!aws codecommit credential-helper $@'
+                - git config --global credential.UseHttpPath true
+                - git config --global user.email "noreply-aws@amazon.com"
+                - git config --global user.name "AWS-Sagemaker"
+            build:
+              commands:
+                - echo "Adding models/$MODEL_NAME from $SEED_SUBFOLDER to $GIT_REPOSITORY_URL"
+                - git clone --quiet $GIT_REPOSITORY_URL /tmp/monorepo
+                - cd /tmp/monorepo
+                # A newly created repo has no commits, so there is no branch to check
+                # out yet. Point HEAD at the branch name instead of creating it.
+                - git checkout "$GIT_REPOSITORY_BRANCH" 2>/dev/null || git symbolic-ref HEAD "refs/heads/$GIT_REPOSITORY_BRANCH"
+                - |
+                  if [ -d "models/$MODEL_NAME" ]; then
+                    echo "models/$MODEL_NAME already exists in this repo - refusing to overwrite it"
+                    exit 1
+                  fi
+                - mkdir -p "models/$MODEL_NAME"
+                - cp -r $CODEBUILD_SRC_DIR_source/$SEED_SUBFOLDER/. "models/$MODEL_NAME/"
+                - |
+                  # The seed code ships with a placeholder model package group name.
+                  # Replace it so the pipeline registers into the group this project watches.
+                  for f in "models/$MODEL_NAME/config/pipeline_config.json" \
+                           "models/$MODEL_NAME/config/deploy_config.json"; do
+                    if [ -f "$f" ]; then
+                      sed -i "s|\"model_package_group_name\": *\"[^\"]*\"|\"model_package_group_name\": \"$MODEL_PACKAGE_GROUP_NAME\"|" "$f"
+                      echo "set model_package_group_name in $f"
+                    fi
+                  done
+                - git add "models/$MODEL_NAME"
+                - git commit -m "Add seed code for model $MODEL_NAME"
+                - |
+                  # Two projects created at the same time both push to this branch.
+                  # Whoever loses the race rebases and tries again.
+                  for attempt in 1 2 3 4 5; do
+                    if git push origin "$GIT_REPOSITORY_BRANCH"; then
+                      echo "pushed models/$MODEL_NAME on attempt $attempt"
+                      exit 0
+                    fi
+                    echo "push rejected, rebasing and retrying (attempt $attempt)"
+                    git pull --rebase origin "$GIT_REPOSITORY_BRANCH" || true
+                    sleep $((attempt * 3))
+                  done
+                  echo "could not push models/$MODEL_NAME after 5 attempts"
+                  exit 1
       TimeoutInMinutes: 14
 
   GitSeedCodeCheckinProjectTriggerLambda:
@@ -233,6 +316,8 @@ Resources:
           MODEL_DEPLOY_REPO: !Ref ModelDeployCodeRepositoryFullname
           CODE_CONNECTION_ARN: !Ref CodeConnectionArn
           SEED_CODE_BUCKET: !Ref SeedCodeBucketName
+          SEED_BUILD_ZIP: !Sub ${SeedCodeKind}-model-build-repo.zip
+          SEED_DEPLOY_ZIP: !Sub ${SeedCodeKind}-model-deploy-repo.zip
       Code:
         ZipFile: |
           import boto3
@@ -265,11 +350,12 @@ Resources:
                   projectName=event['ResourceProperties']['ProjectName'],
                   environmentVariablesOverride=[
                     {'name': 'GIT_REPOSITORY_BRANCH', 'value': 'main', 'type': 'PLAINTEXT'},
-                    {'name': 'GIT_REPOSITORY_URL', 'value': build_repo_url, 'type': 'PLAINTEXT'}
+                    {'name': 'GIT_REPOSITORY_URL', 'value': build_repo_url, 'type': 'PLAINTEXT'},
+                    {'name': 'SEED_SUBFOLDER', 'value': 'model_build', 'type': 'PLAINTEXT'}
                   ],
                   secondarySourcesOverride=[
                     {
-                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/classification-model-build-repo.zip',
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/{os.environ["SEED_BUILD_ZIP"]}',
                       'type': 'S3',
                       'sourceIdentifier': 'source'
                     }
@@ -283,11 +369,12 @@ Resources:
                   projectName=event['ResourceProperties']['ProjectName'],
                   environmentVariablesOverride=[
                     {'name': 'GIT_REPOSITORY_BRANCH', 'value': 'main', 'type': 'PLAINTEXT'},
-                    {'name': 'GIT_REPOSITORY_URL', 'value': deploy_repo_url, 'type': 'PLAINTEXT'}
+                    {'name': 'GIT_REPOSITORY_URL', 'value': deploy_repo_url, 'type': 'PLAINTEXT'},
+                    {'name': 'SEED_SUBFOLDER', 'value': 'model_deploy', 'type': 'PLAINTEXT'}
                   ],
                   secondarySourcesOverride=[
                     {
-                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/classification-model-deploy-repo.zip',
+                      'location': f'{os.environ["SEED_CODE_BUCKET"]}/{os.environ["SEED_DEPLOY_ZIP"]}',
                       'type': 'S3',
                       'sourceIdentifier': 'source'
                     }
@@ -333,5 +420,15 @@ Outputs:
     Value: !GetAtt SageMakerDeployCodeRepository.CodeRepositoryName
 
   ModelPackageGroupName:
-    Description: Use this exact name when registering models in your pipeline - bank-classification-model-group
-    Value: bank-classification-model-group
+    Description: >-
+      Model package group this project watches for approvals. The seeded
+      pipeline_config.json and deploy_config.json are already set to it.
+    Value: !Sub ${ModelName}-model-group
+
+  ModelFolder:
+    Description: Folder added to both shared repos for this model
+    Value: !Sub models/${ModelName}
+
+  SeedCodeKindUsed:
+    Description: Starter code copied into that folder
+    Value: !Ref SeedCodeKind

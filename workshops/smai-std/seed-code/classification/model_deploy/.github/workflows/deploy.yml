@@ -1,6 +1,8 @@
-# This workflow will get the approved model from model registry and deploy to dev, pre-prod and prod
+# This workflow gets the approved model from the model registry and deploys its
+# endpoint. The repository holds one folder per model under models/, so the
+# workflow first works out which model it is being asked to deploy.
 
-name: Sagemaker Model Deploy Pipeline 
+name: Sagemaker Model Deploy Pipeline
 run-name: ${{ github.actor }} is deploying a new model to SageMaker
 
 on:
@@ -8,9 +10,13 @@ on:
     branches:
       - main
     paths:
-      - model_deploy/config/deploy_config.json
+      - models/*/config/deploy_config.json
   workflow_dispatch:
     inputs:
+      model_name:
+        description: 'Folder name under models/ to deploy. Sent by the project Lambda.'
+        required: false
+        type: string
       model_package_group_name:
         description: 'Model Package Group Name'
         required: false
@@ -33,13 +39,86 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  CONFIG_FILE: model_deploy/config/deploy_config.json
-
 jobs:
-  GitHub-Actions-Deploy:
-
+  detect:
     runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.pick.outputs.models }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out which model to deploy
+        id: pick
+        env:
+          MODEL_NAME_INPUT: ${{ inputs.model_name }}
+          MPG_INPUT: ${{ inputs.model_package_group_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          THIS_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          MODEL=""
+          if [ -n "${MODEL_NAME_INPUT:-}" ]; then
+            MODEL="$MODEL_NAME_INPUT"
+          elif [ -n "${MPG_INPUT:-}" ]; then
+            # Older callers only send the model package group. The project
+            # template names it <model-name>-model-group, so strip the suffix.
+            MODEL="${MPG_INPUT%-model-group}"
+          fi
+
+          if [ -n "$MODEL" ]; then
+            if [ ! -d "models/${MODEL}" ]; then
+              echo "models/${MODEL} does not exist in this repository"
+              exit 1
+            fi
+            MODELS=$(jq -nc --arg m "$MODEL" '[$m]')
+          else
+            # Pushed change with no inputs: deploy whatever model folders moved.
+            if [ -z "${BEFORE_SHA:-}" ] \
+               || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] \
+               || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              CHANGED=$(git show --name-only --pretty=format: "$THIS_SHA")
+            else
+              CHANGED=$(git diff --name-only "$BEFORE_SHA" "$THIS_SHA")
+            fi
+            MODELS=$(printf '%s\n' "$CHANGED" \
+              | sed -n 's|^models/\([^/]*\)/.*|\1|p' \
+              | sort -u \
+              | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+
+          # Someone clicked Run workflow and expects a deployment. Skipping
+          # silently would look like success, so fail and say what to do instead.
+          if [ "$MODELS" = "[]" ] && [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::Nothing to deploy: the latest commit did not change any folder under models/. Run the workflow again and fill in model_name with the model folder, for example bank-classification."
+            exit 1
+          fi
+
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "Models to deploy: $MODELS"
+
+  GitHub-Actions-Deploy:
+    needs: detect
+    if: needs.detect.outputs.models != '[]'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.detect.outputs.models) }}
+
+    concurrency:
+      group: deploy-${{ matrix.model }}
+      cancel-in-progress: false
+
+    env:
+      MODEL_DIR: models/${{ matrix.model }}
+      CONFIG_FILE: models/${{ matrix.model }}/config/deploy_config.json
+
     steps:
     - run: echo "The job was automatically triggered by a ${{ github.event_name }} event."
     - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub!"
@@ -62,7 +141,7 @@ jobs:
         DEPLOY_ACCOUNT=$(jq -r '.deploy_account' ${{ env.CONFIG_FILE }})
         MODEL_PACKAGE_GROUP_NAME=$(jq -r '.model_package_group_name' ${{ env.CONFIG_FILE }})
         DATA_BUCKET_NAME=$(jq -r '.DataBucketName' ${{ env.CONFIG_FILE }})
-        
+
         echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
         echo "deploy_account=$DEPLOY_ACCOUNT" >> $GITHUB_OUTPUT
         echo "model_package_group_name=$MODEL_PACKAGE_GROUP_NAME" >> $GITHUB_OUTPUT
@@ -75,19 +154,19 @@ jobs:
           aws-region: ${{ steps.load_config.outputs.aws_region }}
 
     - name: Install dependencies
-      working-directory: model_deploy
+      working-directory: ${{ env.MODEL_DIR }}
       run: |
         sh install-prerequisites-brew.sh
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-                 
+
     - name: CDK Synth
-      working-directory: model_deploy
+      working-directory: ${{ env.MODEL_DIR }}
       run: |
-        cdk synth --no-lookups 
-        
+        cdk synth --no-lookups
+
     - name: Check and Create Bootstrap
-      working-directory: model_deploy
+      working-directory: ${{ env.MODEL_DIR }}
       env:
         AWS_REGION: ${{ steps.load_config.outputs.aws_region }}
         DEPLOY_ACCOUNT: ${{ steps.load_config.outputs.deploy_account }}
@@ -117,7 +196,7 @@ jobs:
         fi
           
     - name: CDK Deploy
-      working-directory: model_deploy
+      working-directory: ${{ env.MODEL_DIR }}
       env:
         CDK_QUALIFIER: "gitactions"
       run: |
@@ -129,7 +208,7 @@ jobs:
 
   
     - name: CDK list
-      working-directory: model_deploy
+      working-directory: ${{ env.MODEL_DIR }}
       run: |
         cdk list 
     - run: echo "This github action job's status is ${{ job.status }}."

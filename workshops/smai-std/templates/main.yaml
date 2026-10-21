@@ -63,7 +63,9 @@ Parameters:
     Type: String
     Default: 'llm-fine-tuning'
     AllowedValues:
-      - regression
+      # 'regression' was listed here but no seed-code/regression folder has
+      # ever existed; picking it would have failed with a 404 at project
+      # creation. Removed rather than fixed, since there is nothing to point it at.
       - llm-fine-tuning
       - classification
 
