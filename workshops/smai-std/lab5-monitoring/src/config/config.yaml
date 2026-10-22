@@ -400,6 +400,49 @@ drift_generation:
       shift: -50
       noise: 20
 
+# ---------------------------------------------------------------------------
+# Drift window — which predictions count as "current" for a drift run
+# ---------------------------------------------------------------------------
+#   since_last_run : predictions after the previous monitoring run for this
+#                    endpoint. Each run measures only new traffic, so a loop
+#                    of runs gives one independent point per batch. On the
+#                    first-ever run, falls back to the last
+#                    MONITORING_DATA_DRIFT_LOOKBACK_DAYS (7 days).
+#   rolling        : predictions in the last `minutes` before the run. Windows
+#                    of consecutive runs overlap when `minutes` is longer than
+#                    the gap between runs, which smooths the trend.
+#
+# Applies to both data drift and model drift, in Lab 5D Section 5 (single run)
+# and Section 6 (multi-batch). Implemented in
+# src/drift_monitoring/monitoring_run.py (MonitoringSession.resolve_window).
+drift_window:
+  mode: "since_last_run"
+  minutes: 60
+
+# ---------------------------------------------------------------------------
+# Multi-batch drift simulation (dev/test only — Lab 5D Section 6)
+# ---------------------------------------------------------------------------
+# One entry per batch. Each batch sends `rows_per_batch` predictions to the
+# endpoint, simulates their ground truth, computes drift over the window above
+# and writes one row to monitoring_responses — so N batches give the
+# governance dashboard N points to chart.
+#
+#   intensity    : scales every feature in drift_generation.default_drift.
+#                  0 = no drift, 1 = default_drift as written, >1 = stronger.
+#                  additive:       shift × intensity, noise × intensity
+#                  multiplicative: 1 + (factor − 1) × intensity, noise × intensity
+#   gt_accuracy  : simulated label accuracy for the batch (see
+#                  ground-truth simulation). Lower = more model drift.
+drift_simulation:
+  rows_per_batch: 150
+  batches:
+    - {intensity: 0.0,  gt_accuracy: 0.98}
+    - {intensity: 0.25, gt_accuracy: 0.95}
+    - {intensity: 0.5,  gt_accuracy: 0.92}
+    - {intensity: 0.75, gt_accuracy: 0.88}
+    - {intensity: 1.0,  gt_accuracy: 0.84}
+    - {intensity: 1.5,  gt_accuracy: 0.80}
+
 # QuickSight resource IDs (datasource/dataset/analysis/dashboard) and the
 # QuickSight service-role name are constants in src/config/config.py
 # (QUICKSIGHT_*). They are NOT duplicated in this YAML because they should

@@ -96,6 +96,7 @@ from src.config.config import (
     QUICKSIGHT_INFERENCE_DATASET_NAME,
     QUICKSIGHT_SERVICE_ROLE_NAME,
     QUICKSIGHT_S3_POLICY_NAME,
+    QUICKSIGHT_TREND_GRANULARITY,
     QUICKSIGHT_ATHENA_POLICY_NAME,
 )
 from src.setup.grant_lake_formation_permissions import (
@@ -1556,7 +1557,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'm1-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'm1-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [
                             {'NumericalMeasureField': {'FieldId': 'm1-baseline', 'Column': dcol('baseline_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}},
                             {'NumericalMeasureField': {'FieldId': 'm1-current', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}},
@@ -1574,7 +1575,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'm2-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'm2-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [
                             {'NumericalMeasureField': {'FieldId': 'm2-acc',  'Column': dcol('accuracy'),  'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}},
                             {'NumericalMeasureField': {'FieldId': 'm2-prec', 'Column': dcol('precision'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}},
@@ -1594,7 +1595,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'm3-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'm3-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'm3-auc', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors': [{'CategoricalDimensionField': {'FieldId': 'm3-version', 'Column': dcol('model_version')}}],
                     }
@@ -1699,7 +1700,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'm8-val', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
-                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'm8-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'm8-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                 }
             }
         }
@@ -1744,7 +1745,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'm10-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'm10-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'm10-degpct', 'Column': dcol('roc_auc_degradation_pct'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'm10-mv', 'Column': dcol('model_version')}}],
                     }
@@ -1769,7 +1770,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'm11-date', 'Column': fcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'm11-date', 'Column': fcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [
                             {'NumericalMeasureField': {'FieldId': 'm11-gt',  'Column': fcol('gt_count'),        'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                             {'NumericalMeasureField': {'FieldId': 'm11-inf', 'Column': fcol('inference_count'), 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
@@ -1827,7 +1828,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd1-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd1-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'd1-share', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     }
                 }
@@ -1842,7 +1843,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd2-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd2-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'd2-count', 'Column': dcol('drifted_columns_count'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     }
                 }
@@ -1857,7 +1858,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'BarChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd3-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd3-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'd3-alerts', 'Column': dcol('alert_sent'), 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}}],
                         'Colors': [{'CategoricalDimensionField': {'FieldId': 'd3-sev', 'Column': dcol('drift_severity')}}],
                     }
@@ -1874,7 +1875,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd4-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd4-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'd4-share', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors': [{'CategoricalDimensionField': {'FieldId': 'd4-version', 'Column': dcol('model_version')}}],
                     }
@@ -1890,7 +1891,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd5-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd5-date', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values': [{'NumericalMeasureField': {'FieldId': 'd5-share', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors': [{'CategoricalDimensionField': {'FieldId': 'd5-ep', 'Column': dcol('endpoint_name')}}],
                     }
@@ -1908,7 +1909,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'ComboChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'd6-date', 'Column': fcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'd6-date', 'Column': fcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'BarValues':  [{'NumericalMeasureField': {'FieldId': 'd6-vol',   'Column': fcol('inference_count'),        'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}}],
                         'LineValues': [{'NumericalMeasureField': {'FieldId': 'd6-drift', 'Column': fcol('drifted_columns_share'),  'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     }
@@ -1924,7 +1925,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'd7-val', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
-                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'd7-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'd7-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                 }
             }
         }
@@ -1998,7 +1999,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'BarChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField':    {'FieldId': 'd10-date',  'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField':    {'FieldId': 'd10-date',  'Column': dcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'd10-samp',  'Column': dcol('data_sample_size'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'd10-mv',  'Column': dcol('model_version')}}],
                     }
@@ -2061,7 +2062,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'f1-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'f1-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'f1-score', 'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'f1-feat', 'Column': flcol('feature_name')}}],
                     }
@@ -2119,7 +2120,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'PivotTableAggregatedFieldWells': {
                         'Rows':    [{'CategoricalDimensionField': {'FieldId': 'f4-feat', 'Column': flcol('feature_name')}}],
-                        'Columns': [{'DateDimensionField':        {'FieldId': 'f4-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Columns': [{'DateDimensionField':        {'FieldId': 'f4-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':  [{'NumericalMeasureField':    {'FieldId': 'f4-val',  'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     }
                 }
@@ -2156,7 +2157,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'f6-val', 'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}}],
-                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'f6-trend', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                    'TrendGroups': [{'DateDimensionField': {'FieldId': 'f6-trend', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                 }
             }
         }
@@ -2194,7 +2195,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'f8-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'f8-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'f8-max', 'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'f8-mv', 'Column': flcol('model_version')}}],
                     }
@@ -2239,7 +2240,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'f10-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'f10-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'f10-score', 'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'f10-feat', 'Column': flcol('feature_name')}}],
                     }
@@ -2270,7 +2271,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
             'ChartConfiguration': {
                 'FieldWells': {
                     'LineChartAggregatedFieldWells': {
-                        'Category': [{'DateDimensionField': {'FieldId': 'f11-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
+                        'Category': [{'DateDimensionField': {'FieldId': 'f11-date', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': QUICKSIGHT_TREND_GRANULARITY}}],
                         'Values':   [{'NumericalMeasureField': {'FieldId': 'f11-score', 'Column': flcol('drift_score'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                         'Colors':   [{'CategoricalDimensionField': {'FieldId': 'f11-feat', 'Column': flcol('feature_name')}}],
                     }
