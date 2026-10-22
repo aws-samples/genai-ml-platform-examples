@@ -641,6 +641,30 @@ DRIFT_GEN_NUM_SAMPLES: int = int(_drift_gen_cfg.get("num_samples", "5000"))
 DRIFT_GEN_RANDOM_STATE: int = int(_drift_gen_cfg.get("random_state", "123"))
 
 # ===================================================================
+# Drift window + multi-batch simulation (Lab 5D Section 6)
+# ===================================================================
+_drift_window_cfg = _yaml_cfg.get("drift_window", {}) if isinstance(
+    _yaml_cfg.get("drift_window"), dict
+) else {}
+
+# "since_last_run" or "rolling" — see config.yaml drift_window.
+DRIFT_WINDOW_MODE: str = os.environ.get(
+    "DRIFT_WINDOW_MODE", _drift_window_cfg.get("mode", "since_last_run")
+)
+DRIFT_WINDOW_MINUTES: int = int(
+    os.environ.get("DRIFT_WINDOW_MINUTES", _drift_window_cfg.get("minutes", "60"))
+)
+
+_drift_sim_cfg = _yaml_cfg.get("drift_simulation", {}) if isinstance(
+    _yaml_cfg.get("drift_simulation"), dict
+) else {}
+
+DRIFT_SIM_ROWS_PER_BATCH: int = int(_drift_sim_cfg.get("rows_per_batch", "150"))
+DRIFT_SIM_BATCHES: list = _drift_sim_cfg.get("batches") or [
+    {"intensity": 1.0, "gt_accuracy": GROUND_TRUTH_SIM_ACCURACY},
+]
+
+# ===================================================================
 # QuickSight (used by lab5e-governance-dashboard.ipynb)
 # ===================================================================
 # These IDs and display names are constants of the deployed dashboard, not
@@ -667,6 +691,15 @@ QUICKSIGHT_ANALYSIS_NAME: str = "Bank Marketing Governance"
 QUICKSIGHT_DASHBOARD_ID: str = "bank-marketing-governance-dashboard"
 QUICKSIGHT_DASHBOARD_NAME: str = "Bank Marketing Governance"
 QUICKSIGHT_SERVICE_ROLE_NAME: str = "aws-quicksight-service-role-v0"
+
+# Date granularity of every trend visual keyed on monitoring_timestamp. One
+# monitoring run is one point only if the granularity is finer than the gap
+# between runs: MINUTE for the workshop's back-to-back batches (Lab 5D
+# Section 6), DAY for a once-a-day production schedule. One of QuickSight's
+# TimeGranularity values: YEAR QUARTER MONTH WEEK DAY HOUR MINUTE SECOND.
+QUICKSIGHT_TREND_GRANULARITY: str = os.environ.get(
+    "QUICKSIGHT_TREND_GRANULARITY", "MINUTE"
+)
 
 # Inline policies the workshop attaches to the (account-global) QuickSight
 # service role, declared in templates/2-iam.yaml. Project-scoped so multiple

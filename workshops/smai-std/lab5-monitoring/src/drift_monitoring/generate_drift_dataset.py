@@ -81,7 +81,48 @@ RANDOM_STATE = DRIFT_GEN_RANDOM_STATE
 DRIFT_CONFIG = DRIFT_GEN_DEFAULT_CONFIG
 
 
-def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
+def scale_drift_config(drift_config: dict, intensity: float) -> dict:
+    """Return a copy of drift_config with every feature's drift scaled by intensity.
+
+    0 = no drift, 1 = drift_config as written, >1 = stronger. Additive drift
+    scales shift and noise; multiplicative drift scales the factor's distance
+    from 1 (so 1.3 at intensity 0.5 becomes 1.15) and the noise.
+    """
+    scaled = {}
+    for feature, config in drift_config.items():
+        config = dict(config)
+        if "factor" in config:
+            config["factor"] = 1.0 + (config["factor"] - 1.0) * intensity
+        if "shift" in config:
+            config["shift"] = config["shift"] * intensity
+        if "noise" in config:
+            config["noise"] = config["noise"] * intensity
+        scaled[feature] = config
+    return scaled
+
+
+def build_drifted_sample(
+    df_source: pd.DataFrame,
+    num_samples: int,
+    intensity: float = 1.0,
+    seed: int = RANDOM_STATE,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Sample num_samples rows of df_source and apply DRIFT_CONFIG scaled by intensity.
+
+    In-memory counterpart of generate_drifted_dataset(), used by the multi-batch
+    simulation so each batch gets its own rows and its own drift level.
+    """
+    np.random.seed(seed)
+    n = min(num_samples, len(df_source))
+    df = df_source.sample(n=n, random_state=seed).copy()
+    if intensity > 0:
+        for feature, config in scale_drift_config(DRIFT_CONFIG, intensity).items():
+            df = apply_drift(df, feature, config, verbose=verbose)
+    return df.reset_index(drop=True)
+
+
+def apply_drift(df: pd.DataFrame, feature: str, config: dict, verbose: bool = True) -> pd.DataFrame:
     """Apply drift to a specific feature based on configuration."""
     if feature not in df.columns:
         print(f"  Warning: Feature '{feature}' not found in dataset, skipping")
@@ -135,6 +176,9 @@ def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
         drifted_values = np.round(drifted_values).astype(int)
 
     df[feature] = drifted_values
+
+    if not verbose:
+        return df
 
     # Print drift statistics
     original_mean = original_values.mean()
