@@ -21,11 +21,17 @@ try:
     import datasets
 except ImportError:
     logger.info("Installing datasets library...")
+    # Pin datasets and huggingface_hub. Unpinned, pip pulls a huggingface_hub
+    # that downloads through httpx2, whose decoder passes a keyword argument the
+    # PyTorch 2.1 container's compression library does not accept, so
+    # load_dataset fails with "process() takes no keyword arguments".
+    # datasets 2.21.0 also works with the container's pyarrow 17.
     subprocess.check_call([
         sys.executable, "-m", "pip", "install",
         "--timeout=300",
         "--retries=5",
-        "datasets",
+        "datasets==2.21.0",
+        "huggingface_hub==0.24.6",
         "-q"
     ])
     import datasets

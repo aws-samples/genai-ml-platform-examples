@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def get_training_hyperparameters() -> Dict[str, Any]:
     """Get default hyperparameters for LLaMA fine-tuning"""
     return {
-        "epochs": "4",
+        "epoch": "2",
         "instruction_tuned": "True",
         "max_input_length": "2048",
         "per_device_train_batch_size": "1",

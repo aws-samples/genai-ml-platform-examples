@@ -10,7 +10,7 @@
   "MLFLOW_TRACKING_URI": "http://your-mlflow-server:5000",
   "PROCESSING_INSTANCE_TYPE": "ml.m5.xlarge",
   "PROCESSING_INSTANCE_COUNT": 1,
-  "EPOCHS": "4",
+  "EPOCHS": "2",
   "MAX_INPUT_LENGTH": "2048",
   "INSTRUCTION_TUNED": "True"
 }

@@ -1,0 +1,14 @@
+{
+  "EndpointInstanceTypes": [
+    "ml.g6.xlarge",
+    "ml.g5.xlarge",
+    "ml.g6.2xlarge",
+    "ml.g5.2xlarge",
+    "ml.g6.4xlarge",
+    "ml.g5.4xlarge"
+  ],
+  "EndpointInstanceCount": 1,
+  "Rounds": 1,
+  "WaitBetweenRoundsSeconds": 60,
+  "PollSeconds": 30
+}

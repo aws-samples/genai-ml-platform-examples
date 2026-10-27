@@ -17,7 +17,7 @@ from __future__ import absolute_import
 import ast
 
 
-def get_pipeline_driver(module_name, passed_args=None):
+def get_pipeline_driver(module_name, passed_args=None, overrides=None):
     """Gets the driver for generating your pipeline definition.
 
     Pipeline modules must define a get_pipeline() module-level method.
@@ -25,12 +25,15 @@ def get_pipeline_driver(module_name, passed_args=None):
     Args:
         module_name: The module name of your pipeline.
         passed_args: Optional passed arguments that your pipeline may be templated by.
+        overrides: Optional dict of extra get_pipeline() keyword arguments that
+            take precedence over passed_args (for example training_instance_type).
 
     Returns:
         The SageMaker Workflow pipeline.
     """
     _imports = __import__(module_name, fromlist=["get_pipeline"])
     kwargs = convert_struct(passed_args)
+    kwargs.update(overrides or {})
     return _imports.get_pipeline(**kwargs)
 
 
@@ -59,6 +62,9 @@ def get_pipeline_custom_tags(module_name, args, tags):
     """
     try:
         _imports = __import__(module_name, fromlist=["get_pipeline_custom_tags"])
+        # Custom tags are optional; keep the base tags when the module has none.
+        if not hasattr(_imports, "get_pipeline_custom_tags"):
+            return tags
         kwargs = convert_struct(args)
         return _imports.get_pipeline_custom_tags(
             tags, 
