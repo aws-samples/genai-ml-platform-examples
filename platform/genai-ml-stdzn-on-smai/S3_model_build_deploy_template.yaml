@@ -192,7 +192,7 @@ Resources:
     Properties:
       # Max length: 255 chars
       Name: !Sub sagemaker-${SageMakerProjectName}-${SageMakerProjectId}-modeldeploy # max: 10+33+15+11=69
-      Description: Builds the Cfn template which defines the Endpoint with specified configuration
+      Description: Deploys the approved model to a SageMaker endpoint, falling back across GPU instance types on capacity errors
       ServiceRole: !Join [ ':', [ 'arn', !Ref 'AWS::Partition', 'iam:', !Ref 'AWS::AccountId', 'role/service-role/AmazonSageMakerServiceCatalogProductsCodeBuildRole'] ]
       Artifacts:
         Type: CODEPIPELINE
@@ -213,15 +213,11 @@ Resources:
             Value: !Sub ${SageMakerProjectName}-${SageMakerProjectId}
           - Name: AWS_REGION
             Value: !Ref AWS::Region
-          # these values are used by the build system to output to the output artifacts.
-          - Name: EXPORT_TEMPLATE_NAME
-            Value: template-export.yml
-          - Name: EXPORT_TEMPLATE_PROD_CONFIG
-            Value: prod-config-export.json
       Source:
         Type: CODEPIPELINE
         BuildSpec: buildspec.yml
-      TimeoutInMinutes: 30
+      # Room for several capacity failures plus one ~10 minute successful create
+      TimeoutInMinutes: 120
 
   ModelDeployTestProject:
     Type: AWS::CodeBuild::Project
@@ -244,7 +240,7 @@ Resources:
           - Name: AWS_REGION
             Value: !Ref "AWS::Region"
           - Name: BUILD_CONFIG
-            Value: prod-config-export.json
+            Value: deploy-output.json
           - Name: EXPORT_TEST_RESULTS
             Value: test-results.json
       Source:
@@ -282,7 +278,7 @@ Resources:
                 - Name: SourceArtifact
         - Name: Build
           Actions:
-            - Name: BuildDeploymentTemplates
+            - Name: DeployEndpointWithFallback
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -297,23 +293,6 @@ Resources:
               RunOrder: 1
         - Name: DeployProduction
           Actions:
-            - Name: DeployResourcesProduction
-              InputArtifacts:
-                - Name: BuildArtifact
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: 1
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: CREATE_UPDATE
-                RoleArn:
-                  !Join [ ':', [ 'arn', !Ref 'AWS::Partition', 'iam:', !Ref 'AWS::AccountId', 'role/service-role/AmazonSageMakerServiceCatalogProductsCloudformationRole'] ]
-                Capabilities: CAPABILITY_NAMED_IAM
-                StackName: !Sub sagemaker-${SageMakerProjectName}-${SageMakerProjectId}-deploy-prod
-                TemplateConfiguration: BuildArtifact::prod-config-export.json
-                TemplatePath: BuildArtifact::template-export.yml
-              RunOrder: 1
             - Name: TestProduction
               ActionTypeId:
                 Category: Build
@@ -328,7 +307,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref ModelDeployTestProject
                 PrimarySource: SourceArtifact
-              RunOrder: 2
+              RunOrder: 1
 
   GitSeedCodeCheckinProject:
     Type: AWS::CodeBuild::Project

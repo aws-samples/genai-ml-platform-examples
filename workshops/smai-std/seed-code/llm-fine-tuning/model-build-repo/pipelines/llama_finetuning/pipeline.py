@@ -1,5 +1,5 @@
 from sagemaker.workflow.pipeline import Pipeline
-from sagemaker.workflow.steps import ProcessingStep, TrainingStep
+from sagemaker.workflow.steps import CacheConfig, ProcessingStep, TrainingStep
 from sagemaker.workflow.model_step import ModelStep
 from sagemaker.workflow.functions import Join
 from sagemaker.processing import ProcessingInput, ProcessingOutput
@@ -19,6 +19,7 @@ def get_pipeline(
     model_package_group_name=None,
     base_job_prefix=None,
     sagemaker_project_name=None,
+    training_instance_type=None,
 ):
     """
     Get a SageMaker Pipeline instance.
@@ -31,6 +32,9 @@ def get_pipeline(
         model_package_group_name: Model package group name for registry
         base_job_prefix: Prefix for SageMaker jobs
         sagemaker_project_name: SageMaker project name
+        training_instance_type: Training instance type to use. Defaults to the
+            first type in TRAINING_INSTANCE_POOL. That type's entry in
+            TRAINING_HP_OVERRIDES is applied on top of the base hyperparameters.
     
     Returns:
         Pipeline instance
@@ -58,6 +62,19 @@ def get_pipeline(
         config.AWS_REGION = region
     
     print(f"Final SAGEMAKER_ROLE being used: {config.SAGEMAKER_ROLE}")
+    
+    # Training instance type and its hyperparameters
+    instance_type = training_instance_type or config.training_pool()[0]
+    hyperparameters = {
+        "epoch": config.EPOCHS,
+        "instruction_tuned": config.INSTRUCTION_TUNED,
+        "max_input_length": config.MAX_INPUT_LENGTH,
+    }
+    hyperparameters.update({
+        k: str(v) for k, v in config.TRAINING_HP_OVERRIDES.get(instance_type, {}).items()
+    })
+    print(f"Training instance type: {instance_type}")
+    print(f"Training hyperparameters: {hyperparameters}")
     
     # Set up MLflow if configured
     if hasattr(config, 'MLFLOW_TRACKING_ARN') and config.MLFLOW_TRACKING_ARN:
@@ -99,7 +116,10 @@ def get_pipeline(
                 )
             ],
             arguments=["--task", "preprocessing"]
-        )
+        ),
+        # Its inputs do not depend on the training type, so when run_pipeline.py
+        # retries on another training type the new execution reuses this output.
+        cache_config=CacheConfig(enable_caching=True, expire_after="P1D"),
     )
     
 
@@ -109,7 +129,8 @@ def get_pipeline(
         name="FineTuneLlama",
         estimator=JumpStartEstimator(
             model_id=config.MODEL_ID,
-            instance_type=config.TRAINING_INSTANCE_TYPE,
+            model_version=config.MODEL_VERSION,
+            instance_type=instance_type,
             instance_count=1,
             role=config.SAGEMAKER_ROLE,
             disable_output_compression=False,  # Ensure model.tar.gz is created
@@ -118,11 +139,7 @@ def get_pipeline(
                 "MLFLOW_TRACKING_ARN": config.MLFLOW_TRACKING_ARN,
                 "MLFLOW_EXPERIMENT_NAME": f"{config.PIPELINE_NAME}-experiment"
             },
-            hyperparameters={
-                "epochs": config.EPOCHS,
-                "instruction_tuned": config.INSTRUCTION_TUNED,
-                "max_input_length": config.MAX_INPUT_LENGTH,
-            },
+            hyperparameters=hyperparameters,
             sagemaker_session=pipeline_session,
         ),
         inputs={
@@ -163,7 +180,11 @@ def get_pipeline(
             content_types=["application/json"],
             response_types=["application/json"],
             # List of supported GPU instance types for LLaMA inference
+            # Includes every type in model-deploy-repo/deploy-config.json.
             inference_instances=[
+                "ml.g6.xlarge",
+                "ml.g6.2xlarge",
+                "ml.g6.4xlarge",
                 "ml.g5.xlarge",
                 "ml.g5.2xlarge", 
                 "ml.g5.4xlarge",
@@ -193,3 +214,18 @@ def get_pipeline(
     )
     
     return pipeline
+
+
+def get_training_fallback_settings(config_file="configs/dev-config.json"):
+    """Training fallback settings read by pipelines/run_pipeline.py.
+
+    Returns:
+        dict with the ordered instance type pool, the Pending timeout in
+        seconds, and the name of the training step to watch.
+    """
+    config = Config.from_file(config_file)
+    return {
+        "pool": config.training_pool(),
+        "pending_timeout_seconds": int(config.TRAINING_PENDING_TIMEOUT_SECONDS),
+        "training_step_name": "FineTuneLlama",
+    }

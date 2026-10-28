@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -30,10 +30,30 @@ class Config:
     
     # Model Configuration
     MODEL_ID: str = "meta-textgeneration-llama-2-7b-f"
-    MODEL_VERSION: str = "*"  # Use latest version
+    # Pinned to the JumpStart 1.x model contract used by Lab 3b, so the
+    # container and supported-instance list do not drift between runs.
+    MODEL_VERSION: str = "1.1.9"
     
     # Instance Types for different steps
-    TRAINING_INSTANCE_TYPE: str = "ml.g5.2xlarge"
+    # Training tries each type in TRAINING_INSTANCE_POOL in order.
+    # run_pipeline.py moves to the next type when a type has no capacity or
+    # quota, or its training job stays Pending longer than
+    # TRAINING_PENDING_TIMEOUT_SECONDS. g4dn.12xlarge goes first: in us-east-1
+    # testing it got capacity when the g5 types did not, and with its
+    # 1-epoch / 200-sample override it is about the cheapest per job. The g5
+    # types are fallbacks. TRAINING_INSTANCE_TYPE is used only when the pool
+    # is empty (backward compatible single-type setup); keep it equal to the
+    # first pool entry.
+    TRAINING_INSTANCE_TYPE: str = "ml.g4dn.12xlarge"
+    TRAINING_INSTANCE_POOL: list = field(default_factory=list)
+    TRAINING_PENDING_TIMEOUT_SECONDS: int = 360
+    # Per-type hyperparameter overrides applied on top of the base values.
+    # g4dn.12xlarge (4x T4) is about 4x slower per epoch than g5, so it trains
+    # 1 epoch on a 200-sample subset to keep the lab within its time budget.
+    # max_train_samples must not exceed the training split (370 rows).
+    TRAINING_HP_OVERRIDES: dict = field(default_factory=lambda: {
+        "ml.g4dn.12xlarge": {"epoch": "1", "max_train_samples": "200"},
+    })
     BATCH_TRANSFORM_INSTANCE_TYPE: str = "ml.g5.2xlarge"
     
     # Deprecated - kept for backward compatibility
@@ -52,10 +72,16 @@ class Config:
     PROCESSING_INSTANCE_COUNT: int = 1
     
     # Training Hyperparameters
-    EPOCHS: str = "4"
+    EPOCHS: str = "2"
     MAX_INPUT_LENGTH: str = "2048"
     INSTRUCTION_TUNED: str = "True"
     
+    def training_pool(self) -> list:
+        """Ordered, de-duplicated training instance types to try."""
+        return list(dict.fromkeys(
+            self.TRAINING_INSTANCE_POOL or [self.TRAINING_INSTANCE_TYPE]
+        ))
+
     @classmethod
     def from_file(cls, config_file: str) -> 'Config':
         """Load configuration from a file"""
