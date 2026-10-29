@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Okta federation stack - SAML identity provider, federation IAM role, and
+  tag-gated SageMaker Studio access policy for Okta IAM federation (Lab 1D).
+  Deployed conditionally by main.yaml when EnableOktaFederation=true.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name — must match the value used in the main stack.
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: 'ProjectName must contain only lowercase letters, numbers, and hyphens'
+
+  OktaMetadataDocument:
+    Type: String
+    Description: >
+      The SAML 2.0 metadata XML document downloaded from your Okta tenant
+      (Sign On tab → View IdP metadata). Paste the full XML content here.
+    NoEcho: true
+
+  OktaProviderName:
+    Type: String
+    Default: okta
+    Description: >
+      Name for the IAM SAML identity provider. Defaults to "okta".
+      Change only if you already have a provider named "okta" in this account.
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # SAML Identity Provider
+  # -------------------------------------------------------------------------
+  OktaSAMLProvider:
+    Type: AWS::IAM::SAMLProvider
+    Properties:
+      Name: !Ref OktaProviderName
+      SamlMetadataDocument: !Ref OktaMetadataDocument
+
+  # -------------------------------------------------------------------------
+  # Tag-gated SageMaker access policy
+  # Allows the federated session to list/describe Studio resources (needed for
+  # the Studio landing page) and to call CreatePresignedDomainUrl — but only
+  # for the user profile whose studiouserid tag matches the session principal tag.
+  # -------------------------------------------------------------------------
+  OktaSageMakerAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${ProjectName}-okta-sm-access-policy'
+      Description: >
+        Grants federated Okta users access to SageMaker Studio scoped to
+        their own user profile via studiouserid principal/resource tag matching.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SageMakerConsoleReadAccess
+            Effect: Allow
+            Action:
+              - sagemaker:ListDomains
+              - sagemaker:ListUserProfiles
+              - sagemaker:DescribeDomain
+              - sagemaker:DescribeUserProfile
+              - sagemaker:ListApps
+            Resource: '*'
+
+          - Sid: SageMakerPresignedUrlTagGated
+            Effect: Allow
+            Action:
+              - sagemaker:CreatePresignedDomainUrl
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'sagemaker:ResourceTag/studiouserid': '${aws:PrincipalTag/studiouserid}'
+
+          - Sid: SageMakerStudioAppPermissionsOwnerOnly
+            Effect: Allow
+            Action:
+              - sagemaker:CreateApp
+              - sagemaker:DeleteApp
+            Resource: '*'
+            Condition:
+              ArnLike:
+                'sagemaker:OwnerUserProfileArn': !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*/*'
+              StringEquals:
+                'sagemaker:ResourceTag/studiouserid': '${aws:PrincipalTag/studiouserid}'
+
+  # -------------------------------------------------------------------------
+  # Federation IAM Role
+  # Assumed by Okta users via sts:AssumeRoleWithSAML. The trust policy
+  # restricts assumption to the Okta SAML provider and the standard AWS
+  # Console SAML audience. sts:TagSession is required so the studiouserid
+  # principal tag from the SAML assertion is accepted by STS.
+  # -------------------------------------------------------------------------
+  OktaFederationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-okta-federation-role'
+      Description: >
+        Assumed by Okta-federated users. Grants access to SageMaker Studio
+        scoped to the user's own profile via tag-based access control.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSAMLAssumption
+            Effect: Allow
+            Principal:
+              Federated: !GetAtt OktaSAMLProvider.Arn
+            Action: sts:AssumeRoleWithSAML
+            Condition:
+              StringEquals:
+                'SAML:aud': 'https://signin.aws.amazon.com/saml'
+          - Sid: IdentifyTransitiveTags
+            Effect: Allow
+            Principal:
+              Federated: !GetAtt OktaSAMLProvider.Arn
+            Action: sts:TagSession
+            Condition:
+              'ForAllValues:StringEquals':
+                'sts:TransitiveTagKeys':
+                  - studiouserid
+      ManagedPolicyArns:
+        - !Ref OktaSageMakerAccessPolicy
+      Tags:
+        - Key: ProjectName
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Lab
+          Value: lab1d-okta-federation
+
+Outputs:
+  SAMLProviderArn:
+    Description: ARN of the Okta SAML identity provider
+    Value: !GetAtt OktaSAMLProvider.Arn
+    Export:
+      Name: !Sub '${ProjectName}-OktaSAMLProviderArn'
+
+  FederationRoleArn:
+    Description: ARN of the Okta federation IAM role
+    Value: !GetAtt OktaFederationRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-OktaFederationRoleArn'
+
+  FederationRoleName:
+    Description: Name of the Okta federation IAM role
+    Value: !Ref OktaFederationRole

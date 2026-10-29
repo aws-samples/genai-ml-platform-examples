@@ -69,12 +69,19 @@ Parameters:
     Type: String
     Default: ''
     Description: >-
-      Suffix appended to the SageMaker execution role names in 2-iam.yaml
-      (PROJECTNAME-{product,usera,userb}-role-SUFFIX). These roles RUN the Lab 2
-      notebooks (call PyIceberg overwrite()) and are granted Lake Formation
-      ALTER/INSERT/DESCRIBE/DELETE/SELECT on the Iceberg tables so the write
-      commit (Glue UpdateTable) is authorized. Leave blank if the roles have no
-      suffix (names end in "-role"). Must match the ResourceSuffix used in 2-iam.yaml.
+      Suffix appended to the SageMaker execution role names in 2-iam.yaml,
+      which builds them as PROJECTNAME-{product,usera,userb}-role-SUFFIX. These
+      roles RUN the Lab 2 notebooks (call PyIceberg overwrite()) and are granted
+      Lake Formation ALTER/INSERT/DESCRIBE/DELETE/SELECT on the Iceberg tables so
+      the write commit (Glue UpdateTable) is authorized.
+
+      MUST match the value given to 2-iam.yaml. scripts/deploy-workshop.sh passes
+      it to neither, so both default to '' and the role names end with a literal
+      trailing hyphen ("...-product-role-"). That is why the ARNs below always
+      append "-role-" plus the suffix: it reproduces 2-iam.yaml's expression
+      exactly, for any suffix including blank. Do NOT reintroduce an "unsuffixed"
+      variant -- the roles are never actually named that way, and a grant to a
+      nonexistent principal fails or silently grants nothing.
 
   CreateGlueDatabase:
     Type: String
@@ -104,7 +111,6 @@ Parameters:
 Conditions:
   DeriveBucketName: !Equals [!Ref DataBucketName, '']
   DeriveTableBucketName: !Equals [!Ref TableBucketName, '']
-  HasResourceSuffix: !Not [!Equals [!Ref ResourceSuffix, '']]
   ShouldCreateGlueDatabase: !Equals [!Ref CreateGlueDatabase, 'true']
   ShouldCreateLFGrants: !Equals [!Ref EnableLakeFormationGrants, 'true']
 
@@ -188,10 +194,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role-${ResourceSuffix}'
       Resource:
         Database:
           CatalogId: !Ref AWS::AccountId
@@ -204,10 +207,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-product-role-${ResourceSuffix}'
       Resource:
         Table:
           CatalogId: !Ref AWS::AccountId
@@ -221,10 +221,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role-${ResourceSuffix}'
       Resource:
         Database:
           CatalogId: !Ref AWS::AccountId
@@ -237,10 +234,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-usera-role-${ResourceSuffix}'
       Resource:
         Table:
           CatalogId: !Ref AWS::AccountId
@@ -254,10 +248,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role-${ResourceSuffix}'
       Resource:
         Database:
           CatalogId: !Ref AWS::AccountId
@@ -270,10 +261,7 @@ Resources:
     Condition: ShouldCreateLFGrants
     Properties:
       Principal:
-        DataLakePrincipalIdentifier: !If
-          - HasResourceSuffix
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role-${ResourceSuffix}'
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role'
+        DataLakePrincipalIdentifier: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-userb-role-${ResourceSuffix}'
       Resource:
         Table:
           CatalogId: !Ref AWS::AccountId

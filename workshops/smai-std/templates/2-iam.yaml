@@ -16,8 +16,19 @@ Parameters:
     Default: ''
     Description: >
       Unique suffix appended to globally-named IAM resources (roles and managed
-      policies) to avoid AlreadyExists collisions across deployments. When deployed
-      via main.yaml this is set automatically from the stack ID.
+      policies) to avoid AlreadyExists collisions when two deployments share an
+      account.
+
+      NOTE: scripts/deploy-workshop.sh does not set this, so it defaults to ''
+      and every name below ends with a literal trailing hyphen, e.g.
+      "<project>-product-role-". That is cosmetic but REAL -- it is the actual
+      role name, and anything referencing these roles must build the name with
+      the same "-role-" plus suffix expression rather than assuming a blank
+      suffix means no hyphen. 5-data-prep.yaml's Lake Formation grants do that.
+
+      Changing the naming to drop the hyphen would REPLACE every role and policy
+      here, which cascades into the SageMaker domain's execution role and the
+      Studio user profiles, so it is left alone on purpose.
 
   MonitoringDatabaseName:
     Type: String
@@ -623,15 +634,37 @@ Resources:
       PolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Sid: MLflowTrackingServerPermissions
+          # Resource-scoped MLflow permissions. BOTH ARN types are listed on
+          # purpose: SageMaker has two MLflow resources, the older
+          # 'mlflow-tracking-server' and the newer serverless 'mlflow-app', and
+          # they are distinct ARN types. This workshop deploys an mlflow-app
+          # (3-sagemaker.yaml), so scoping only to mlflow-tracking-server/*
+          # granted nothing usable and every lab that logs to MLflow (3A, 3B,
+          # 3C, 5D, 5E, 5F) was denied at the data plane.
+          #
+          # AmazonSageMakerFullAccess does NOT cover this: as of v29 it grants
+          # zero sagemaker-mlflow actions, so this policy is the only source.
+          - Sid: MLflowServerAndAppPermissions
             Effect: Allow
             Action:
               - sagemaker:DescribeMlflowTrackingServer
-              - sagemaker:ListMlflowTrackingServers
               - sagemaker:CreatePresignedMlflowTrackingServerUrl
+              - sagemaker:DescribeMlflowApp
+              - sagemaker:CreatePresignedMlflowAppUrl
+              # Data plane: experiments, runs, metrics, the model registry, and
+              # the prompt registry all authorize under this service prefix.
               - sagemaker-mlflow:*
             Resource:
               - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:mlflow-tracking-server/*"
+              - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:mlflow-app/*"
+          # List actions do not support resource-level permissions, so they
+          # cannot be folded into the statement above.
+          - Sid: MLflowListPermissions
+            Effect: Allow
+            Action:
+              - sagemaker:ListMlflowTrackingServers
+              - sagemaker:ListMlflowApps
+            Resource: "*"
           - Sid: MLflowArtifactsBucketAccess
             Effect: Allow
             Action:
