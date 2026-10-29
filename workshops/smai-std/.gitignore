@@ -43,6 +43,19 @@ lab2-data-prep/template.json
 # Reference-only prompt/completion rendering written by lab-2a's optional cell.
 lab2-data-prep/sft_train.jsonl
 
+# Runtime outputs in lab3-model-build. Not source:
+#   train.jsonl / test.jsonl / template.json  — lab-3b DOWNLOADS these from the
+#     S3 package lab-2a published, for local lineage and prompt formatting.
+#   evaluation.json / model_card.json         — lab-3c WRITES these, then uploads
+#     them as the model package's metrics and card.
+# Committing them pins one participant's run (and their DATA_SOURCE choice) into
+# the repo, and the next person's run silently diffs against it.
+lab3-model-build/train.jsonl
+lab3-model-build/test.jsonl
+lab3-model-build/template.json
+lab3-model-build/evaluation.json
+lab3-model-build/model_card.json
+
 # Training/inference entry points written by lab-3a at runtime.
 lab3-model-build/scripts/
 
