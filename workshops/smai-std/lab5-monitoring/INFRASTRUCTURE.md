@@ -1,10 +1,10 @@
 # Infrastructure Behind Lab 5D / 5E / 5F
 
-Everything Lab 5 needs is created by the **single workshop stack** —
-`scripts/deploy-workshop.sh` → `templates/main.yaml` and its five nested stacks.
-There is no companion stack, no stack deployed from a notebook, and nothing for
-you to deploy between labs. Notebooks only **write rows** and **create QuickSight
-objects**; they never create AWS infrastructure.
+Everything Lab 5 needs is created by **`scripts/deploy-workshop.sh`**, which
+deploys six independent CloudFormation stacks. There is no companion stack, no
+stack deployed from a notebook, and nothing for you to deploy between labs.
+Notebooks only **write rows** and **create QuickSight objects**; they never
+create AWS infrastructure.
 
 Drift itself is computed **inline in notebook 5D** — Evidently runs in the
 kernel, results are `INSERT`ed into Athena and logged to MLflow, and Lab 5E reads
@@ -22,16 +22,34 @@ workshop page.)
 
 ## Stack layout
 
-`templates/main.yaml` orchestrates five nested stacks. Default stack name is
-`<ProjectName>-workshop` (`bank-marketing-prediction-workshop`).
+`scripts/deploy-workshop.sh` deploys six **independent, top-level** stacks in
+dependency order, named `<STACK_PREFIX>-<component>` where `STACK_PREFIX`
+defaults to `PROJECT_NAME`. Outputs are threaded forward as parameters — the
+SageMaker stack's data bucket and the IAM stack's execution-role names become
+parameters of the later stacks.
 
-| Nested stack | Relevance to Lab 5 |
-|---|---|
-| `1-networking.yaml` | VPC, two private subnets, public subnet + NAT, security groups, 11 VPC endpoints (S3, SageMaker API/Runtime/Studio, STS, SSM, CloudWatch, Logs, ECR) — the domain runs VpcOnly |
-| `2-iam.yaml` | Execution roles and every policy Lab 5 needs, including the two QuickSight service-role policies |
-| `3-sagemaker.yaml` | Domain, user profiles, JupyterLab space, MLflow app, S3 buckets, S3 Access Grants |
-| `4-inference-capture.yaml` | **The Lab 5 data plane**: `inference_responses`, `monitoring_responses`, `ground_truth_updates` + the SQS→Lambda capture pipeline |
-| `5-data-prep.yaml` | `training_data` and `evaluation_data` (the drift baselines) + the Lab 2C/2D EMR resources |
+| Stack | Template | Relevance to Lab 5 |
+|---|---|---|
+| `<prefix>-networking` | `1-networking.yaml` | VPC, two private subnets, public subnet + NAT, security groups, 11 VPC endpoints (S3, SageMaker API/Runtime/Studio, STS, SSM, CloudWatch, Logs, ECR) — the domain runs VpcOnly |
+| `<prefix>-iam` | `2-iam.yaml` | Execution roles and every policy Lab 5 needs, including the two QuickSight service-role policies and the MLflow data-plane grants |
+| `<prefix>-sagemaker` | `3-sagemaker.yaml` | Domain, user profiles, JupyterLab space, MLflow app, S3 buckets, S3 Access Grants |
+| `<prefix>-inference-capture` | `4-inference-capture.yaml` | **The Lab 5 data plane**: `inference_responses`, `monitoring_responses`, `ground_truth_updates` + the SQS→Lambda capture pipeline |
+| `<prefix>-data-prep` | `5-data-prep.yaml` | `training_data` and `evaluation_data` (the drift baselines) + the Lab 2C/2D EMR resources |
+| `<prefix>-okta-federation` | `6-okta-federation.yaml` | Lab 1D only — not used by Lab 5. Opt-in via `ENABLE_OKTA_FEDERATION=true` |
+
+> **`templates/main.yaml` is deprecated.** It was the parent stack that nested
+> the templates above, and it is retained only so a pre-split deployment can
+> still be deleted with the template that created it. It is not deployed,
+> updated, or tested. `deploy-workshop.sh` detects a surviving parent stack and
+> refuses to run alongside it, because the two layouts would collide on every
+> fixed-name resource.
+
+Because the stacks are independent, a change to one template touches only that
+stack — useful for Lab 5E, where the QuickSight policies live in the IAM stack:
+
+```bash
+ONLY_STACKS=iam ./scripts/deploy-workshop.sh      # minutes, not 20-40
+```
 
 ### Two Glue databases exist — know which is which
 
@@ -41,9 +59,11 @@ workshop page.)
 | `bank-classification-db` | `3-sagemaker.yaml` (`BankClassificationGlueDatabase`, hardcoded) + one Glue table `bank-marketing-data` | The optional MLOps **seed code** only (`seed-code/classification/model_build/config/pipeline_config.json`). No lab notebook reads or writes it |
 
 `5-data-prep.yaml` also declares `bank_marketing`, but it is guarded by
-`Condition: ShouldCreateGlueDatabase` and `main.yaml` passes
-`CreateGlueDatabase: 'false'`, so the two stacks do not collide — Glue database
-names are unique per account and region.
+`Condition: ShouldCreateGlueDatabase` and `deploy-workshop.sh` passes
+`CreateGlueDatabase=false`, so the two stacks do not collide — Glue database
+names are unique per account and region. This is also why the deploy order puts
+`inference-capture` before `data-prep`: the former creates the database, the
+latter reuses it.
 
 ---
 
@@ -180,17 +200,28 @@ the console's *Manage QuickSight → Security & permissions* toggles.
 Both are conditional on `AttachQuickSightServiceRolePolicy`, which defaults to
 `false`: an IAM policy resource fails outright if its target role does not exist,
 and that role is created by the subscription. Subscribing from the console during
-5E therefore always leaves the stack a step behind — flip the parameter with a
-targeted `update-stack --use-previous-template`, which touches only the IAM
-nested stack, or re-run `scripts/deploy-workshop.sh`, which detects the role
-however the subscription happened and sets the parameter itself at the cost of
-redeploying every stack. Without those policies the dashboard is created
-successfully but every panel fails to load.
+5E therefore always leaves the stack a step behind. Re-run the deploy limited to
+the IAM stack — the script detects the service role however the subscription
+happened and sets the parameter itself:
+
+```bash
+ONLY_STACKS=iam ./scripts/deploy-workshop.sh
+```
+
+Without those policies the dashboard is created successfully but every panel
+fails to load.
 
 Two things notebook 5E does not need, but a human browsing the dashboard does: a
 QuickSight **Author/Admin** user for your IAM/SSO identity (*Manage QuickSight →
 Manage users*), and `QUICKSIGHT_IDENTITY_REGION` in `.env` if the account's
 identity region differs from `AWS_DEFAULT_REGION`.
+
+> **If the deploy reports QuickSight as not subscribed when it is**, the identity
+> region is wrong. QuickSight has one identity endpoint per account, fixed when
+> the account was first activated, and `deploy-workshop.sh` defaults to
+> `us-east-1`. It now detects the real region from the API error and reports it;
+> set `QUICKSIGHT_IDENTITY_REGION` here *and* in `.env`, because Lab 5E reads its
+> own config rather than the script's.
 
 Full prerequisites and troubleshooting: the repo `README.md`, section
 **QuickSight prerequisites (one-time per account)**.
@@ -200,17 +231,42 @@ Full prerequisites and troubleshooting: the repo `README.md`, section
 ## Deployment order
 
 ```
-1. ./scripts/deploy-workshop.sh          ← one stack, five nested stacks, 20-40 min
-2. Lab 2      prepare data               → training_data, evaluation_data
-3. Lab 3A/3C  train, register, deploy    → live endpoint + baseline.json
-4. Lab 5A-5C  infrastructure monitoring
-5. Lab 5D     drift monitoring           → monitoring_responses, ground_truth_updates
-6. Lab 5E     governance dashboard       ← needs QuickSight Enterprise
-7. Lab 5F     explainability
-8. Lab 3A final cell                     ← delete the endpoint last
+1. ./scripts/deploy-workshop.sh          ← six stacks, in order, 20-40 min
+2. lab0-setup/setup.ipynb                ← writes the shared .env every lab reads
+3. Lab 2      prepare data               → training_data, evaluation_data
+4. Lab 3A/3C  train, register, deploy    → live endpoint + baseline.json
+5. Lab 5A-5C  infrastructure monitoring
+6. Lab 5D     drift monitoring           → monitoring_responses, ground_truth_updates
+7. Lab 5E     governance dashboard       ← needs QuickSight Enterprise
+8. Lab 5F     explainability
+9. Lab 3A final cell                     ← delete the endpoint last
 ```
 
-Teardown: `aws cloudformation delete-stack --stack-name <ProjectName>-workshop`.
-The S3 buckets and Athena tables are retained deliberately;
-`scripts/delete_s3_buckets.py` empties and removes the buckets when you are done
-with the data.
+### Teardown
+
+```bash
+scripts/teardown-workshop.sh          # deletes the six stacks in reverse order
+```
+
+It clears the two things that otherwise block deletion — running Studio apps and
+objects in the grants/data/mlflow buckets — and, if the networking stack delete
+hits the classic VpcOnly blocker, removes the domain's orphaned EFS mount targets
+and NFS security groups before retrying.
+
+Two Lab 5–specific points:
+
+- **A lab endpoint deployed with a `VpcConfig` will block teardown.** Its ENIs sit
+  in the workshop's private subnets, and the EFS/NFS unblock cannot clear them
+  because they belong to a live endpoint. The script detects and names those
+  endpoints before it starts; pass `DELETE_LAB_ENDPOINTS=true` to have it delete
+  them first.
+- **The Athena tables and their S3 data go with the stacks.** Export anything you
+  want to keep — drift verdicts in `monitoring_responses`, captured predictions in
+  `inference_responses` — before tearing down. `scripts/delete_s3_buckets.py`
+  empties and removes the buckets if a stack delete leaves them stranded.
+
+For stacks only, with no bucket or app cleanup:
+
+```bash
+TEARDOWN=true ./scripts/deploy-workshop.sh
+```

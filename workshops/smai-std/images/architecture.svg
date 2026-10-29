@@ -1,0 +1,344 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1010" viewBox="0 0 1680 1010" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#5f6b7a"/>
+    </marker>
+    <marker id="arrFb" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#C2571A"/>
+    </marker>
+  </defs>
+
+  <rect width="1680" height="1010" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="24" y="34" font-size="23" font-weight="bold" fill="#16191f">GenAI / ML Standardization Workshop — Technical Architecture</text>
+  <text x="24" y="56" font-size="13.5" fill="#5f6b7a">Labs 1–5 mapped onto the AI lifecycle · Amazon SageMaker AI · all infrastructure provisioned by scripts/deploy-workshop.sh</text>
+
+  <!-- lifecycle ribbon -->
+  <g>
+    <polygon points="24,74 324,74 342,99 324,124 24,124 42,99" fill="#4B5563"/>
+    <polygon points="352,74 652,74 670,99 652,124 352,124 370,99" fill="#0972D3"/>
+    <polygon points="680,74 980,74 998,99 980,124 680,124 698,99" fill="#7D3AC1"/>
+    <polygon points="1008,74 1308,74 1326,99 1308,124 1008,124 1026,99" fill="#0F8B5F"/>
+    <polygon points="1336,74 1636,74 1654,99 1636,124 1336,124 1354,99" fill="#C2571A"/>
+    <text x="182" y="98" font-size="14.5" font-weight="bold" fill="#fff" text-anchor="middle">1 · INFRA SETUP</text>
+    <text x="182" y="115" font-size="11" fill="#d6dbe1" text-anchor="middle">platform foundation</text>
+    <text x="510" y="98" font-size="14.5" font-weight="bold" fill="#fff" text-anchor="middle">2 · DATA PREP</text>
+    <text x="510" y="115" font-size="11" fill="#dbe7f7" text-anchor="middle">datasets &amp; prompts</text>
+    <text x="838" y="98" font-size="14.5" font-weight="bold" fill="#fff" text-anchor="middle">3 · MODEL BUILD</text>
+    <text x="838" y="115" font-size="11" fill="#e6d8f5" text-anchor="middle">train · evaluate · register</text>
+    <text x="1166" y="98" font-size="14.5" font-weight="bold" fill="#fff" text-anchor="middle">4 · MODEL DEPLOY</text>
+    <text x="1166" y="115" font-size="11" fill="#d4ece0" text-anchor="middle">CI/CD to endpoints</text>
+    <text x="1494" y="98" font-size="14.5" font-weight="bold" fill="#fff" text-anchor="middle">5 · MONITORING</text>
+    <text x="1494" y="115" font-size="11" fill="#f7e0cd" text-anchor="middle">observe · govern · explain</text>
+  </g>
+
+  <!-- persona row -->
+  <g font-size="11.5">
+    <rect x="24"   y="134" width="316" height="24" rx="4" fill="#f2f4f6" stroke="#d5dbdb"/>
+    <rect x="352"  y="134" width="316" height="24" rx="4" fill="#f2f4f6" stroke="#d5dbdb"/>
+    <rect x="680"  y="134" width="316" height="24" rx="4" fill="#f2f4f6" stroke="#d5dbdb"/>
+    <rect x="1008" y="134" width="316" height="24" rx="4" fill="#eaf4ef" stroke="#0F8B5F"/>
+    <rect x="1336" y="134" width="316" height="24" rx="4" fill="#fdf3ec" stroke="#C2571A"/>
+    <text x="182"  y="150" fill="#414d5c" text-anchor="middle">Persona · Platform Admin</text>
+    <text x="510"  y="150" fill="#414d5c" text-anchor="middle">Persona · Data Engineer</text>
+    <text x="838"  y="150" fill="#414d5c" text-anchor="middle">Persona · Data Scientist</text>
+    <text x="1166" y="150" fill="#0d5c42" font-weight="bold" text-anchor="middle">Persona · ML Engineer / Gov Officer</text>
+    <text x="1494" y="150" fill="#9c4615" font-weight="bold" text-anchor="middle">Persona · Ops / Gov Officer</text>
+  </g>
+
+  <!-- LAB 1 -->
+  <g transform="translate(24,170)">
+    <rect width="316" height="512" rx="8" fill="#EEF2F6" stroke="#4B5563" stroke-width="1.6"/>
+    <rect width="316" height="30" rx="8" fill="#4B5563"/>
+    <rect y="22" width="316" height="8" fill="#4B5563"/>
+    <text x="12" y="20" font-size="14" font-weight="bold" fill="#fff">LAB 1 — Onboarding</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="12" y="52" font-weight="bold" fill="#4B5563">Studio domain &amp; network</text>
+      <text x="20" y="69">• SageMaker Studio domain (VpcOnly mode)</text>
+      <text x="20" y="85">• VPC: 2 private subnets + public + NAT GW</text>
+      <text x="20" y="101">• 11 VPC endpoints (S3, SM API/Runtime,</text>
+      <text x="28" y="116">STS, SSM, CloudWatch, Logs, ECR)</text>
+      <text x="20" y="132">• JupyterLab space per user profile</text>
+
+      <text x="12" y="158" font-weight="bold" fill="#4B5563">Identity &amp; access</text>
+      <text x="20" y="175">• IAM execution roles: product / userA / userB</text>
+      <text x="20" y="191">• User profiles: usera, userb</text>
+      <text x="20" y="207">• S3 Access Grants — governed data access</text>
+      <text x="20" y="223">• Lab 1D: Okta SAML federation (opt-in)</text>
+      <text x="28" y="238">tag-gated Studio access via studiouserid</text>
+
+      <text x="12" y="264" font-weight="bold" fill="#4B5563">Self-service provisioning</text>
+      <text x="20" y="281">• Service Catalog products: domain, network,</text>
+      <text x="28" y="296">roles, user profile, federation role</text>
+      <text x="20" y="312">• SageMaker Projects / MLOps toolchain roles</text>
+
+      <text x="12" y="338" font-weight="bold" fill="#4B5563">Managed services stood up</text>
+      <text x="20" y="355">• SageMaker managed MLflow app</text>
+      <text x="20" y="371">• S3 buckets: data · grants · mlflow</text>
+      <text x="20" y="387">• Glue Data Catalog + Athena workgroup</text>
+
+      <text x="12" y="413" font-weight="bold" fill="#4B5563">Hands-on</text>
+      <text x="20" y="430">• user-data-governance.ipynb</text>
+      <text x="28" y="445">read governed S3 data via Access Grants</text>
+    </g>
+    <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
+    <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#4B5563">OUTPUT →</text>
+    <text x="20" y="491" font-size="10.5" fill="#414d5c">Governed platform: domain, roles, buckets, catalog</text>
+  </g>
+
+  <!-- LAB 2 -->
+  <g transform="translate(352,170)">
+    <rect width="316" height="512" rx="8" fill="#EAF2FB" stroke="#0972D3" stroke-width="1.6"/>
+    <rect width="316" height="30" rx="8" fill="#0972D3"/>
+    <rect y="22" width="316" height="8" fill="#0972D3"/>
+    <text x="12" y="20" font-size="14" font-weight="bold" fill="#fff">LAB 2 — Data Prep</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="12" y="52" font-weight="bold" fill="#0972D3">2A · Summarization instruction set</text>
+      <text x="20" y="69">• Source flag: Dolly 15K (Hub) OR synthetic</text>
+      <text x="28" y="84">offline generator — no dataset download</text>
+      <text x="20" y="100">• Quality gates: schema · min length ·</text>
+      <text x="28" y="115">groundedness · compression · dedup</text>
+      <text x="20" y="131">• Enforce for synthetic, advise for Dolly</text>
+      <text x="20" y="147">• 70/30 stratified split + leakage check</text>
+      <text x="20" y="163">• MLflow Prompt Registry (use-case scoped)</text>
+      <text x="28" y="178">text-summarization-instruct @production</text>
+      <text x="20" y="194">• → train.jsonl · test.jsonl · template.json</text>
+
+      <text x="12" y="220" font-weight="bold" fill="#0972D3">2B–2E · Tabular prep (pick one)</text>
+      <text x="20" y="237">• 2B SageMaker Processing Job (scikit-learn)</text>
+      <text x="20" y="253">• 2C EMR Serverless — Spark, auto-scaling</text>
+      <text x="20" y="269">• 2D EMR on EC2 — managed Spark clusters</text>
+      <text x="20" y="285">• 2E SageMaker Canvas — low/no-code</text>
+
+      <text x="12" y="311" font-weight="bold" fill="#0972D3">2F · Iceberg registration (required)</text>
+      <text x="20" y="328">• Runs after any of 2B–2E</text>
+      <text x="20" y="344">• S3 Table Buckets (managed Iceberg)</text>
+      <text x="20" y="360">• Glue/Athena: training_data, evaluation_data</text>
+      <text x="20" y="376">• Captures snapshot IDs → frozen baselines</text>
+
+      <text x="12" y="402" font-weight="bold" fill="#0972D3">Concepts</text>
+      <text x="20" y="419">• Dataset design · validation before GPU spend</text>
+      <text x="20" y="435">• Prompt as a versioned, lineage-tracked input</text>
+      <text x="20" y="451">• Time travel: FOR VERSION AS OF snapshot</text>
+    </g>
+    <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
+    <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#0972D3">OUTPUT →</text>
+    <text x="20" y="491" font-size="10.5" fill="#414d5c">JSONL + template.json in S3 · Iceberg baselines</text>
+  </g>
+
+  <!-- LAB 3 -->
+  <g transform="translate(680,170)">
+    <rect width="316" height="512" rx="8" fill="#F3EBFB" stroke="#7D3AC1" stroke-width="1.6"/>
+    <rect width="316" height="30" rx="8" fill="#7D3AC1"/>
+    <rect y="22" width="316" height="8" fill="#7D3AC1"/>
+    <text x="12" y="20" font-size="14" font-weight="bold" fill="#fff">LAB 3 — Model Build</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="12" y="52" font-weight="bold" fill="#7D3AC1">3A · Traditional ML</text>
+      <text x="20" y="69">• XGBoost on Bank Marketing (tabular)</text>
+      <text x="20" y="85">• Reads Iceberg tables via Athena</text>
+      <text x="20" y="101">• MLflow experiment tracking + autologging</text>
+
+      <text x="12" y="127" font-weight="bold" fill="#7D3AC1">3B · LLM fine-tuning</text>
+      <text x="20" y="144">• Llama 3.2 3B via SageMaker JumpStart</text>
+      <text x="20" y="160">• SDK v3: JumpStartConfig · ModelTrainer</text>
+      <text x="20" y="176">• Instruction tuning (instruction_tuned=True)</text>
+      <text x="20" y="192">• Training channel = DIRECTORY, so the</text>
+      <text x="28" y="207">container reads template.json beside data</text>
+      <text x="20" y="223">• Capacity-aware GPU instance fallback</text>
+      <text x="20" y="239">• MLflow lineage: dataset + prompt version</text>
+      <text x="20" y="255">• Base vs fine-tuned endpoint comparison</text>
+
+      <text x="12" y="281" font-weight="bold" fill="#7D3AC1">3C · Evaluate &amp; register</text>
+      <text x="20" y="298">• ROUGE-1/2/L + BLEU via mlflow.evaluate</text>
+      <text x="20" y="314">• Prompt resolved from run lineage (pinned)</text>
+      <text x="20" y="330">• Model Registry: package group + versions</text>
+      <text x="20" y="346">• Model Card + ModelLifeCycle stage</text>
+      <text x="20" y="362">• Governance metadata incl. prompt provenance</text>
+
+      <text x="12" y="388" font-weight="bold" fill="#7D3AC1">Concepts</text>
+      <text x="20" y="405">• Reproducibility: seed · pinned model version</text>
+      <text x="20" y="421">• Train/inference prompt parity</text>
+      <text x="20" y="437">• Metrics are only valid relative to a prompt</text>
+      <text x="20" y="453">• Approval gate before deployment</text>
+    </g>
+    <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
+    <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#7D3AC1">OUTPUT →</text>
+    <text x="20" y="491" font-size="10.5" fill="#414d5c">Registered model package + card + metrics</text>
+  </g>
+
+  <!-- LAB 4 -->
+  <g transform="translate(1008,170)">
+    <rect width="316" height="512" rx="8" fill="#E8F6EF" stroke="#0F8B5F" stroke-width="1.6"/>
+    <rect width="316" height="30" rx="8" fill="#0F8B5F"/>
+    <rect y="22" width="316" height="8" fill="#0F8B5F"/>
+    <text x="12" y="20" font-size="14" font-weight="bold" fill="#fff">LAB 4 — Model Deploy</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="12" y="52" font-weight="bold" fill="#0F8B5F">CI/CD automation · ML Engineer</text>
+      <text x="20" y="69">• GitHub Actions pipelines</text>
+      <text x="20" y="85">• Seed-code mono-repo:</text>
+      <text x="28" y="100">model_build/ → model_deploy/</text>
+      <text x="20" y="116">• Each model in models/&lt;name&gt;/</text>
+      <text x="20" y="132">• Event-driven automation blueprint</text>
+
+      <text x="12" y="158" font-weight="bold" fill="#0F8B5F">Promotion path · Gov Officer gate</text>
+      <text x="20" y="175">• Model Registry approval gate</text>
+      <text x="28" y="190">Approved status is the control point</text>
+      <text x="20" y="206">• Approved package → real-time endpoint</text>
+      <text x="20" y="222">• ModelBuilder / Endpoint (SDK v3)</text>
+      <text x="20" y="238">• Endpoint config + instance sizing</text>
+
+      <text x="12" y="264" font-weight="bold" fill="#0F8B5F">Validation</text>
+      <text x="20" y="281">• lab-4-endpoint-testing.ipynb</text>
+      <text x="20" y="297">• Sample payload invocation</text>
+      <text x="20" y="313">• Confirm InService + response shape</text>
+
+      <text x="12" y="339" font-weight="bold" fill="#0F8B5F">Wiring for observability</text>
+      <text x="20" y="356">• SQS_QUEUE_URL env var on the endpoint</text>
+      <text x="28" y="371">turns on inference capture for Lab 5</text>
+      <text x="20" y="387">• Execution role granted sqs:SendMessage</text>
+
+      <text x="12" y="413" font-weight="bold" fill="#0F8B5F">Concepts</text>
+      <text x="20" y="430">• Registry as the promotion boundary</text>
+      <text x="20" y="446">• Deployment is a pipeline, not a notebook</text>
+    </g>
+    <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
+    <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#0F8B5F">OUTPUT →</text>
+    <text x="20" y="491" font-size="10.5" fill="#414d5c">Live endpoint emitting captured predictions</text>
+  </g>
+
+  <!-- LAB 5 -->
+  <g transform="translate(1336,170)">
+    <rect width="316" height="512" rx="8" fill="#FDF0E6" stroke="#C2571A" stroke-width="1.6"/>
+    <rect width="316" height="30" rx="8" fill="#C2571A"/>
+    <rect y="22" width="316" height="8" fill="#C2571A"/>
+    <text x="12" y="20" font-size="14" font-weight="bold" fill="#fff">LAB 5 — Monitoring</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="12" y="52" font-weight="bold" fill="#C2571A">Operational observability · Ops</text>
+      <text x="20" y="69">• 5A CloudWatch metrics — training job and</text>
+      <text x="28" y="84">endpoint health, invocations, latency</text>
+      <text x="20" y="100">• 5B CloudWatch Logs — debug training and</text>
+      <text x="28" y="115">inference, Logs Insights queries</text>
+
+      <text x="12" y="141" font-weight="bold" fill="#C2571A">Audit &amp; compliance · Gov Officer</text>
+      <text x="20" y="158">• 5C CloudTrail — SageMaker API audit trail,</text>
+      <text x="28" y="173">who did what, compliance controls</text>
+
+      <text x="12" y="199" font-weight="bold" fill="#C2571A">Data &amp; model quality · both</text>
+      <text x="20" y="216">• 5D Drift monitoring — Evidently in-kernel</text>
+      <text x="28" y="231">baseline pinned FOR VERSION AS OF</text>
+      <text x="28" y="246">verdicts → Athena Iceberg + MLflow</text>
+      <text x="20" y="262">• 5F SHAP explainability — per-prediction</text>
+      <text x="28" y="277">attribution for the XGBoost model</text>
+
+      <text x="12" y="303" font-weight="bold" fill="#C2571A">Reporting · Gov Officer</text>
+      <text x="20" y="320">• 5E QuickSight governance dashboard</text>
+      <text x="28" y="335">Enterprise edition · Definition API</text>
+      <text x="28" y="350">reads the Iceberg monitoring tables</text>
+
+      <text x="12" y="376" font-weight="bold" fill="#C2571A">Concepts</text>
+      <text x="20" y="393">• Frozen baselines make drift comparable</text>
+      <text x="20" y="409">• Operational vs statistical vs audit signals</text>
+      <text x="20" y="425">• Explainability as a governance artifact</text>
+      <text x="20" y="441">• Drift verdict → retrain decision</text>
+    </g>
+    <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
+    <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#C2571A">OUTPUT →</text>
+    <text x="20" y="491" font-size="10.5" fill="#414d5c">Drift verdicts · dashboards · audit evidence</text>
+  </g>
+
+  <!-- artifact flow -->
+  <g>
+    <rect x="24" y="696" width="1628" height="62" rx="7" fill="#fbfcfd" stroke="#d5dbdb"/>
+    <text x="36" y="714" font-size="11.5" font-weight="bold" fill="#414d5c">ARTIFACT FLOW</text>
+
+    <line x1="340" y1="738" x2="490" y2="738" stroke="#5f6b7a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="415" y="733" font-size="10.2" fill="#414d5c" text-anchor="middle">roles · buckets</text>
+    <text x="415" y="750" font-size="10.2" fill="#414d5c" text-anchor="middle">catalog · MLflow</text>
+
+    <line x1="668" y1="738" x2="818" y2="738" stroke="#5f6b7a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="743" y="733" font-size="10.2" fill="#414d5c" text-anchor="middle">train/test.jsonl</text>
+    <text x="743" y="750" font-size="10.2" fill="#414d5c" text-anchor="middle">template.json · Iceberg</text>
+
+    <line x1="996" y1="738" x2="1146" y2="738" stroke="#5f6b7a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="1071" y="733" font-size="10.2" fill="#414d5c" text-anchor="middle">approved model</text>
+    <text x="1071" y="750" font-size="10.2" fill="#414d5c" text-anchor="middle">package + card</text>
+
+    <line x1="1324" y1="738" x2="1474" y2="738" stroke="#5f6b7a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="1399" y="733" font-size="10.2" fill="#414d5c" text-anchor="middle">endpoint +</text>
+    <text x="1399" y="750" font-size="10.2" fill="#414d5c" text-anchor="middle">captured predictions</text>
+  </g>
+
+  <!-- feedback loop -->
+  <path d="M1494,758 L1494,776 L510,776 L510,758" fill="none" stroke="#C2571A" stroke-width="1.6"
+        stroke-dasharray="6,3" marker-end="url(#arrFb)"/>
+  <rect x="890" y="766" width="236" height="19" rx="3" fill="#fff" stroke="#C2571A" stroke-dasharray="3,2"/>
+  <text x="1008" y="779" font-size="10.5" fill="#C2571A" text-anchor="middle">drift detected → re-prep data &amp; retrain</text>
+
+  <!-- inference capture data plane -->
+  <g transform="translate(24,794)">
+    <rect width="1628" height="56" rx="7" fill="#FFF8F2" stroke="#C2571A" stroke-width="1.3"/>
+    <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#C2571A">INFERENCE CAPTURE DATA PLANE — templates/4-inference-capture.yaml (real infrastructure, not notebook code)</text>
+    <g font-size="11">
+      <rect x="130" y="26" width="150" height="22" rx="4" fill="#E8F6EF" stroke="#0F8B5F"/>
+      <text x="205" y="41" fill="#16191f" text-anchor="middle">SageMaker endpoint</text>
+      <line x1="280" y1="37" x2="320" y2="37" stroke="#5f6b7a" stroke-width="1.4" marker-end="url(#arr)"/>
+      <rect x="322" y="26" width="110" height="22" rx="4" fill="#FDF0E6" stroke="#C2571A"/>
+      <text x="377" y="41" fill="#16191f" text-anchor="middle">SQS queue</text>
+      <line x1="432" y1="37" x2="472" y2="37" stroke="#5f6b7a" stroke-width="1.4" marker-end="url(#arr)"/>
+      <rect x="474" y="26" width="128" height="22" rx="4" fill="#FDF0E6" stroke="#C2571A"/>
+      <text x="538" y="41" fill="#16191f" text-anchor="middle">logger Lambda</text>
+      <line x1="602" y1="37" x2="642" y2="37" stroke="#5f6b7a" stroke-width="1.4" marker-end="url(#arr)"/>
+      <rect x="644" y="26" width="470" height="22" rx="4" fill="#EAF2FB" stroke="#0972D3"/>
+      <text x="879" y="41" fill="#16191f" text-anchor="middle">Athena / Glue Iceberg · inference_responses · monitoring_responses · ground_truth_updates</text>
+      <line x1="1114" y1="37" x2="1154" y2="37" stroke="#5f6b7a" stroke-width="1.4" marker-end="url(#arr)"/>
+      <rect x="1156" y="26" width="160" height="22" rx="4" fill="#FDF0E6" stroke="#C2571A"/>
+      <text x="1236" y="41" fill="#16191f" text-anchor="middle">Lab 5D drift · 5E QuickSight</text>
+      <text x="1330" y="41" fill="#5f6b7a">DLQ on the queue · 5-data-prep.yaml holds the drift baselines</text>
+    </g>
+  </g>
+
+  <!-- shared platform foundation -->
+  <g transform="translate(24,858)">
+    <rect width="1628" height="58" rx="7" fill="#f7f8fa" stroke="#9aa7b4" stroke-width="1.3"/>
+    <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#414d5c">SHARED PLATFORM FOUNDATION — provisioned once in Lab 1, consumed by every later lab</text>
+    <g font-size="10.8" fill="#16191f">
+      <rect x="12"   y="26" width="252" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="138"  y="42" text-anchor="middle">VPC · private subnets · 11 VPC endpoints</text>
+      <rect x="272"  y="26" width="236" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="390"  y="42" text-anchor="middle">IAM execution roles · S3 Access Grants</text>
+      <rect x="516"  y="26" width="228" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="630"  y="42" text-anchor="middle">S3: data · grants · mlflow buckets</text>
+      <rect x="752"  y="26" width="276" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="890"  y="42" text-anchor="middle">Glue Data Catalog · Athena · S3 Table Buckets</text>
+      <rect x="1036" y="26" width="310" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="1191" y="42" text-anchor="middle">SageMaker managed MLflow: experiments · model registry · prompt registry</text>
+      <rect x="1354" y="26" width="262" height="24" rx="4" fill="#fff" stroke="#d5dbdb"/>
+      <text x="1485" y="42" text-anchor="middle">CloudWatch · CloudTrail · QuickSight</text>
+    </g>
+  </g>
+
+  <!-- IaC layer -->
+  <g transform="translate(24,924)">
+    <rect width="1628" height="54" rx="7" fill="#eef1f4" stroke="#4B5563" stroke-width="1.3"/>
+    <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#16191f">INFRASTRUCTURE AS CODE — scripts/deploy-workshop.sh deploys six independent CloudFormation stacks in dependency order</text>
+    <g font-size="10.8">
+      <rect x="12"   y="26" width="186" height="22" rx="4" fill="#fff" stroke="#4B5563"/>
+      <text x="105"  y="41" text-anchor="middle">1-networking.yaml</text>
+      <rect x="206"  y="26" width="186" height="22" rx="4" fill="#fff" stroke="#4B5563"/>
+      <text x="299"  y="41" text-anchor="middle">2-iam.yaml</text>
+      <rect x="400"  y="26" width="186" height="22" rx="4" fill="#fff" stroke="#4B5563"/>
+      <text x="493"  y="41" text-anchor="middle">3-sagemaker.yaml</text>
+      <rect x="594"  y="26" width="216" height="22" rx="4" fill="#fff" stroke="#4B5563"/>
+      <text x="702"  y="41" text-anchor="middle">4-inference-capture.yaml</text>
+      <rect x="818"  y="26" width="186" height="22" rx="4" fill="#fff" stroke="#4B5563"/>
+      <text x="911"  y="41" text-anchor="middle">5-data-prep.yaml</text>
+      <rect x="1012" y="26" width="246" height="22" rx="4" fill="#fff" stroke="#4B5563" stroke-dasharray="3,2"/>
+      <text x="1135" y="41" text-anchor="middle">6-okta-federation.yaml (opt-in)</text>
+      <text x="1272" y="41" fill="#5f6b7a">templates staged in S3 · outputs threaded forward as parameters</text>
+    </g>
+  </g>
+
+  <!-- footnote -->
+  <text x="24" y="996" font-size="10.3" fill="#5f6b7a">Solid arrows = artifact hand-off between labs · dashed orange = monitoring feedback loop · dashed box = opt-in component. Lab 2B–2E are alternatives; 2F always follows. templates/main.yaml is deprecated.</text>
+</svg>

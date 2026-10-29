@@ -1,7 +1,42 @@
+# =============================================================================
+# DEPRECATED - DO NOT DEPLOY
+# =============================================================================
+# This parent template is no longer part of the workshop deployment path.
+# scripts/deploy-workshop.sh now deploys each child template as an INDEPENDENT
+# stack, in dependency order, passing outputs forward as parameters.
+#
+# It is retained for ONE reason: so an existing parent stack created from this
+# template can still be deleted with the template that created it. Nothing here
+# is deployed, updated, or tested. Do not add resources or parameters.
+#
+#   Deploy:   scripts/deploy-workshop.sh
+#   Teardown: scripts/teardown-workshop.sh
+#
+# Why the split:
+#   * Nested stacks required the children in S3 under URLs this parent built,
+#     and overwriting a child in place was invisible to CloudFormation -- the
+#     child kept running its original template -- so the script hashed the whole
+#     template set into the S3 key prefix to force updates. That hand-rolled
+#     upload-and-hash plumbing is gone. Templates are still staged in S3,
+#     because `aws cloudformation deploy` caps inline templates at 51,200 bytes
+#     and 2-iam.yaml is ~87 KB, but the CLI does the upload and names each
+#     object after the template's own hash.
+#   * One child failing rolled back the entire parent. Independent stacks fail
+#     and retry in isolation.
+#   * Nested stacks get generated names, making their ${AWS::StackName}-scoped
+#     exports unpredictable. Fixed stack names make them usable.
+#
+# Migrating: there is no in-place path. The resources here are owned by this
+# stack's children, so a standalone deploy collides on every fixed-name resource
+# (IAM roles, data bucket, SageMaker domain, 'bank_marketing' Glue database).
+# Run scripts/teardown-workshop.sh first -- it DESTROYS the data bucket and its
+# contents. deploy-workshop.sh detects a live parent stack and refuses to run.
+# =============================================================================
 AWSTemplateFormatVersion: 2010-09-09
 Description: >
-  Main stack - Orchestrates deployment of networking, IAM, SageMaker, and
-  inference-capture nested stacks.
+  [DEPRECATED - do not deploy; see the header comment and
+  scripts/deploy-workshop.sh] Main stack - Orchestrates deployment of
+  networking, IAM, SageMaker, inference-capture, and data-prep nested stacks.
 
 Parameters:
   ProjectName:

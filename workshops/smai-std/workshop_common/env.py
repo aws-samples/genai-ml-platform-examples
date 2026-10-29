@@ -70,8 +70,20 @@ def load_workshop_env(require: bool = True) -> Dict[str, str]:
 
     Returns:
         Dict of the canonical variables (PROJECT_NAME, ATHENA_DATABASE,
-        S3T_NAMESPACE, TRAINING_TABLE, EVALUATION_TABLE, DATA_PREFIX) resolved
-        from the environment with canonical fallbacks.
+        S3T_NAMESPACE, TRAINING_TABLE, EVALUATION_TABLE, DATA_PREFIX,
+        SAGEMAKER_EXEC_ROLE) resolved from the environment with canonical
+        fallbacks.
+
+        This is a WHITELIST, not everything in .env. Keys the file carries but
+        this dict omits (ACCOUNT_ID, DATA_S3_BUCKET, ALERT_EMAIL,
+        MLFLOW_TRACKING_URI) are still loaded into ``os.environ`` as a side
+        effect, so read those with ``os.environ[...]`` after calling this.
+
+        MLFLOW_TRACKING_URI is deliberately NOT returned here. Studio pre-seeds
+        it with the domain's DEFAULT MLflow app, and this loader uses
+        ``override=False``, so the ambient value would win over the project's
+        own and silently send runs to the wrong app. Labs that need it read it
+        straight out of the .env FILE instead (see lab-2a / lab-3b).
     """
     env_path = find_env()
     if env_path is None:
@@ -93,5 +105,18 @@ def load_workshop_env(require: bool = True) -> Dict[str, str]:
         "TRAINING_TABLE": os.environ.get("ATHENA_TRAINING_TABLE", _DEFAULTS["ATHENA_TRAINING_TABLE"]),
         "EVALUATION_TABLE": os.environ.get("ATHENA_EVALUATION_TABLE", _DEFAULTS["ATHENA_EVALUATION_TABLE"]),
         "DATA_PREFIX": os.environ.get("DATA_PREFIX", _DEFAULTS["DATA_PREFIX"]),
+        # SageMaker execution role discovered by lab0-setup from the deployed
+        # domain. Mirrors config.py's SAGEMAKER_EXEC_ROLE (same env key, same ""
+        # default) so the notebook-facing loader and lab5's config agree -- they
+        # did not before, and env['SAGEMAKER_EXEC_ROLE'] raised KeyError.
+        #
+        # No canonical default: a wrong role ARN fails in confusing ways far
+        # from here, so callers should check for "" and say so.
+        "SAGEMAKER_EXEC_ROLE": os.environ.get("SAGEMAKER_EXEC_ROLE", ""),
+        # Studio user profile name, discovered once by lab0-setup. Labs use it
+        # to namespace their per-user S3 prefix. No default: guessing it is what
+        # produced two different prefixes for the same notebook depending on
+        # whether it ran in Studio or on a local kernel.
+        "SAGEMAKER_USER_PROFILE": os.environ.get("SAGEMAKER_USER_PROFILE", ""),
     }
     return resolved

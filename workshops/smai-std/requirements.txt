@@ -23,7 +23,11 @@ sagemaker-mlflow>=0.5.0,<1      # MLflow tracking against the SageMaker MLflow a
 mlflow>=3.10.0,<4               # labs 3a, 3b, 3c, 5d, 5e, 5f
 
 # --- Data & classic ML -------------------------------------------------------
-pandas>=2.2.0
+pandas>=2.2.0,<3                # <3 is REQUIRED: evidently's legacy module imports
+                                # pandas.core.dtypes.common.infer_dtype_from_object,
+                                # which pandas 3.x removed. Unbounded, a fresh
+                                # install resolves pandas 3.x and `import evidently`
+                                # fails with ImportError, breaking labs 5D/5E.
 numpy>=1.26.0
 scikit-learn>=1.5.0
 xgboost>=2.1.0

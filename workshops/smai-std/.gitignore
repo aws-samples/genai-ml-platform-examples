@@ -40,6 +40,8 @@ lab2-data-prep/spark/
 lab2-data-prep/train.jsonl
 lab2-data-prep/test.jsonl
 lab2-data-prep/template.json
+# Reference-only prompt/completion rendering written by lab-2a's optional cell.
+lab2-data-prep/sft_train.jsonl
 
 # Training/inference entry points written by lab-3a at runtime.
 lab3-model-build/scripts/

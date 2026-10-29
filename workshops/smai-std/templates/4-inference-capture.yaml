@@ -43,10 +43,23 @@ Parameters:
     Description: >-
       Glue/Athena database that holds the bank-marketing Iceberg tables. This is
       the same database the Lab 2 registration notebook writes training_data /
-      evaluation_data into (source of truth); this stack creates it if absent and
-      adds the inference table. Use underscores (Athena Iceberg friendly), not hyphens.
+      evaluation_data into (source of truth); this stack creates it (unless
+      CreateGlueDatabase=false) and adds the inference table. Use underscores
+      (Athena Iceberg friendly), not hyphens.
     AllowedPattern: '^[a-z0-9_]+$'
     ConstraintDescription: 'Database name must contain only lowercase letters, numbers, and underscores'
+
+  CreateGlueDatabase:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Whether this stack creates the Glue/Athena database (AthenaDatabase).
+      Set 'false' when the database already exists in this account/region —
+      e.g. a standalone deploy alongside an existing workshop stack, or a
+      redeploy after the Lab 2 notebook created it. Glue database names are
+      unique per account/region, so creating a duplicate fails with
+      "Database already exists". The tables are still created either way.
 
   InferenceTableName:
     Type: String
@@ -60,9 +73,11 @@ Parameters:
     Description: >-
       Names of the SageMaker execution roles to grant sqs:SendMessage on the
       capture queue (comma-delimited). When deployed via main.yaml this is set
-      to the workshop's product/userA/userB roles automatically. Leave blank
-      for standalone deploys — the SqsSendPolicy is still created and exported
-      so you can attach it later.
+      to the workshop's product/userA/userB roles automatically. Leave blank to
+      skip the grant entirely: SqsSendPolicy is an inline policy, so it is NOT
+      created when this is empty and there is nothing to attach later. For a
+      standalone deploy, either pass the role names here or grant
+      sqs:SendMessage on the queue yourself afterwards.
 
   LogRetentionInDays:
     Type: Number
@@ -74,13 +89,20 @@ Conditions:
   DeriveBucketName: !Equals [!Ref DataBucketName, '']
   # CommaDelimitedList default '' parses to [''] — Select 0 is '' when unset.
   AttachToRole: !Not [!Equals [!Select [0, !Ref EndpointExecutionRoleNames], '']]
+  ShouldCreateGlueDatabase: !Equals [!Ref CreateGlueDatabase, 'true']
 
 Resources:
   # =========================================================================
   # Glue database for the Iceberg inference table
+  # Shared with 5-data-prep.yaml. Glue database names are unique per
+  # account/region, so only ONE stack may create it: via main.yaml this stack
+  # creates it and 5-data-prep.yaml gets CreateGlueDatabase=false. For a
+  # standalone deploy into an account that already has the database, pass
+  # CreateGlueDatabase=false here instead.
   # =========================================================================
   MonitoringGlueDatabase:
     Type: AWS::Glue::Database
+    Condition: ShouldCreateGlueDatabase
     Properties:
       CatalogId: !Ref AWS::AccountId
       DatabaseInput:
@@ -528,9 +550,16 @@ Resources:
 
   InferenceTable:
     Type: Custom::AthenaIcebergTable
-    DependsOn: MonitoringGlueDatabase
     Properties:
       ServiceToken: !GetAtt TableCreatorFunction.Arn
+      # Referencing the database name (only when this stack creates it) forces
+      # CloudFormation to create MonitoringGlueDatabase before this custom
+      # resource runs the CREATE TABLE DDL. When CreateGlueDatabase=false the
+      # database already exists and no ordering is needed.
+      DatabaseDependency: !If
+        - ShouldCreateGlueDatabase
+        - !Ref MonitoringGlueDatabase
+        - !Ref AthenaDatabase
       # Bump this value to force the DDL to re-run on a stack update.
       # v2: added monitoring_responses + ground_truth_updates tables.
       # v3: added monitoring_responses.training_snapshot_id.
