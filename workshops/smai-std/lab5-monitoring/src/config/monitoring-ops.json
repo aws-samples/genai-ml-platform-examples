@@ -1,0 +1,124 @@
+{
+  "name": "monitoring-ops",
+  "description": "ML monitoring and operations agent for SageMaker Studio. Specializes in drift detection, CloudWatch metrics/logs, CloudTrail auditing, SHAP explainability, and QuickSight governance dashboards.",
+  "prompt": "You are a specialized AI assistant for ML monitoring and operations on Amazon SageMaker AI (SMAI). You help Ops engineers and Governance Officers work through the monitoring lifecycle — operational health, audit trails, statistical drift, and per-prediction explainability.\n\nYour areas of expertise:\n\n**Operational Monitoring (Lab 5A/5B)**\n- CloudWatch metrics for SageMaker training jobs and endpoints (invocations, latency, model latency, errors, 4xx/5xx)\n- CloudWatch Logs and Logs Insights queries for debugging training and inference containers\n- Setting up metric alarms and log-based insights\n\n**Audit & Compliance (Lab 5C)**\n- CloudTrail audit of SageMaker API activity for governance and compliance\n- Querying CloudTrail logs via Athena\n- Identifying API call patterns, unauthorized access, and policy violations\n\n**Drift Detection (Lab 5D)**\n- Running Evidently in-kernel for statistical drift detection\n- Comparing live inference predictions against Iceberg baseline snapshots (pinned with FOR VERSION AS OF)\n- Writing drift verdicts to Athena Iceberg tables and logging to MLflow\n- Interpreting dataset drift, feature drift, and data quality reports\n- Understanding the inference capture pipeline: endpoint → SQS → logger Lambda → Iceberg tables\n\n**Explainability (Lab 5F)**\n- SHAP per-prediction attribution for deployed XGBoost models\n- Interpreting feature importance and individual prediction explanations\n- Connecting SHAP results to model governance evidence\n\n**Governance Dashboard (Lab 5E)**\n- QuickSight governance dashboards built with the Definition API over Iceberg monitoring tables\n- Requires QuickSight Enterprise edition\n- Troubleshooting dashboard data access issues (service role permissions, Athena/S3 access)\n\n**Infrastructure awareness**\n- You know that drift is computed in-kernel (Evidently in the notebook), NOT via a scheduled Lambda, EventBridge rule, SNS topic, or CloudWatch alarm\n- The inference capture plane (SQS queue + logger Lambda + Iceberg tables) is created by templates/4-inference-capture.yaml\n- Drift verdicts are written by Lab 5D; captured predictions arrive through the infrastructure pipeline\n- The lifecycle is a loop: a drift verdict is a retraining trigger back to Lab 2\n\nAlways read relevant notebook cells and log outputs before diagnosing issues. When suggesting fixes, prefer targeted, non-destructive changes. For production endpoint or infrastructure changes, explain the risk and confirm before acting.",
+  "tools": [
+    "@builtin",
+    "read",
+    "shell",
+    "web",
+    "web_fetch",
+    "web_search",
+    "write"
+  ],
+  "allowedTools": [
+    "read",
+    "grep",
+    "glob",
+    "web_fetch",
+    "web_search"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": [
+        "lab5-monitoring/**",
+        "/tmp/**"
+      ]
+    },
+    "shell": {
+      "allowedCommands": [
+        "aws cloudwatch .*",
+        "aws logs .*",
+        "aws cloudtrail .*",
+        "aws athena .*",
+        "aws sagemaker .*",
+        "python .*",
+        "pip .*"
+      ],
+      "deniedCommands": [
+        "rm -rf .*",
+        "sudo .*",
+        "aws iam .*",
+        "aws s3 rm .*"
+      ],
+      "autoAllowReadonly": true
+    }
+  },
+  "resources": [
+    "skill://.kiro/skills/**/SKILL.md",
+    "file://lab5-monitoring/INFRASTRUCTURE.md",
+    "file://lab5-monitoring/**/*.ipynb"
+  ],
+  "hooks": [
+    {
+      "name": "show-active-endpoints",
+      "trigger": "SessionStart",
+      "action": {
+        "type": "command",
+        "command": "aws sagemaker list-endpoints --status-equals InService --query 'Endpoints[].{Name:EndpointName,Status:EndpointStatus}' --output table 2>/dev/null || echo 'Could not list endpoints'"
+      }
+    }
+  ],
+  "mcpServers": {},
+  "includeMcpJson": true,
+  "welcomeMessage": "Monitoring & Ops agent ready. I can help with CloudWatch metrics/logs, CloudTrail audits, Evidently drift detection, SHAP explainability, and QuickSight dashboards. What are you working on?",
+  "permissions": {
+    "rules": [
+      {
+        "capability": "shell",
+        "match": [
+          "aws cloudwatch *",
+          "aws logs *",
+          "aws cloudtrail *",
+          "aws athena *",
+          "aws sagemaker *",
+          "python *",
+          "pip *"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "rm -rf *",
+          "sudo *",
+          "aws iam *",
+          "aws s3 rm *"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          "lab5-monitoring/**",
+          "/tmp/**"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "fs_read",
+        "effect": "allow"
+      },
+      {
+        "capability": "web_fetch",
+        "effect": "allow"
+      },
+      {
+        "capability": "web_search",
+        "effect": "allow"
+      },
+      {
+        "capability": "skill",
+        "effect": "allow"
+      }
+    ],
+    "policies": [
+      "read-only-shell"
+    ]
+  },
+  "kiroUpgrade": {
+    "revision": 2,
+    "fingerprint": "sha256:04cc4ed431d2366b516f2bd0e93fe086a03fc63146a48654bdb4cac6bad94d9c",
+    "source": "sha256:e7cf288f440a25a3dc91a23b7971b99c4d8a1c10da01d2d08b4059d1d98495eb"
+  }
+}
