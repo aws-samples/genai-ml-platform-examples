@@ -204,7 +204,21 @@ def load_model_from_mlflow(
             if feature_names:
                 logger.info("Extracted feature names from Booster.feature_names")
             else:
-                raise ValueError("Booster model has no feature_names attribute")
+                # Booster trained with header=None has no feature names stored.
+                # Fall back to the dataset schema — it defines the canonical
+                # feature order, which is the same order the training CSV used.
+                logger.warning(
+                    "Booster has no feature_names (likely trained with header=None). "
+                    "Falling back to dataset schema feature order."
+                )
+                from src.config import schema as _schema
+                feature_names = list(_schema.feature_names())
+                logger.info(
+                    "Using %d feature names from dataset_schema.yaml", len(feature_names)
+                )
+                # Stamp the names onto the booster so downstream DMatrix calls
+                # (e.g. in compute_shap_values) agree on column order.
+                model.feature_names = feature_names
         elif hasattr(model, 'get_booster'):
             # Try to get from underlying booster
             booster = model.get_booster()
@@ -212,7 +226,16 @@ def load_model_from_mlflow(
             if feature_names:
                 logger.info("Extracted feature names from underlying Booster")
             else:
-                raise ValueError("Cannot determine feature names from model")
+                logger.warning(
+                    "Underlying Booster has no feature_names. "
+                    "Falling back to dataset schema feature order."
+                )
+                from src.config import schema as _schema
+                feature_names = list(_schema.feature_names())
+                logger.info(
+                    "Using %d feature names from dataset_schema.yaml", len(feature_names)
+                )
+                booster.feature_names = feature_names
         else:
             raise ValueError("Cannot determine feature names from model or metadata")
 
