@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1010" viewBox="0 0 1680 1010" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1114" viewBox="0 0 1680 1114" font-family="Helvetica, Arial, sans-serif">
   <defs>
     <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
       <path d="M0,0 L10,4 L0,8 z" fill="#5f6b7a"/>
@@ -8,7 +8,7 @@
     </marker>
   </defs>
 
-  <rect width="1680" height="1010" fill="#ffffff"/>
+  <rect width="1680" height="1114" fill="#ffffff"/>
 
   <!-- title -->
   <text x="24" y="34" font-size="23" font-weight="bold" fill="#16191f">GenAI / ML Standardization Workshop — Technical Architecture</text>
@@ -103,7 +103,7 @@
       <text x="20" y="147">• 70/30 stratified split + leakage check</text>
       <text x="20" y="163">• MLflow Prompt Registry (use-case scoped)</text>
       <text x="28" y="178">text-summarization-instruct @production</text>
-      <text x="20" y="194">• → train.jsonl · test.jsonl · template.json</text>
+      <text x="20" y="194">• → train/test.jsonl · template.json · _sft pair</text>
 
       <text x="12" y="220" font-weight="bold" fill="#0972D3">2B–2E · Tabular prep (pick one)</text>
       <text x="20" y="237">• 2B SageMaker Processing Job (scikit-learn)</text>
@@ -165,6 +165,17 @@
     <rect x="12" y="462" width="292" height="38" rx="5" fill="#fff" stroke="#9aa7b4" stroke-dasharray="3,2"/>
     <text x="20" y="477" font-size="10.5" font-weight="bold" fill="#7D3AC1">OUTPUT →</text>
     <text x="20" y="491" font-size="10.5" fill="#414d5c">Registered model package + card + metrics</text>
+
+    <!-- 3D: optional serverless path, dashed = opt-in (see footnote) -->
+    <rect x="0" y="522" width="316" height="94" rx="8" fill="#FBF8FE" stroke="#7D3AC1"
+          stroke-width="1.4" stroke-dasharray="5,3"/>
+    <text x="12" y="540" font-size="11.3" font-weight="bold" fill="#7D3AC1">3D · Serverless customization (optional)</text>
+    <g font-size="11.3" fill="#16191f">
+      <text x="20" y="557">• SFT + LoRA — SageMaker owns the compute</text>
+      <text x="20" y="573">• Input = versioned DataSet (2A’s _sft pair)</text>
+      <text x="20" y="589">• Registers itself · own group · MLflow auto</text>
+      <text x="20" y="605">• Side branch: Labs 4–5 unchanged either way</text>
+    </g>
   </g>
 
   <!-- LAB 4 -->
@@ -248,7 +259,7 @@
   </g>
 
   <!-- artifact flow -->
-  <g>
+  <g transform="translate(0,104)">
     <rect x="24" y="696" width="1628" height="62" rx="7" fill="#fbfcfd" stroke="#d5dbdb"/>
     <text x="36" y="714" font-size="11.5" font-weight="bold" fill="#414d5c">ARTIFACT FLOW</text>
 
@@ -270,13 +281,15 @@
   </g>
 
   <!-- feedback loop -->
+  <g transform="translate(0,104)">
   <path d="M1494,758 L1494,776 L510,776 L510,758" fill="none" stroke="#C2571A" stroke-width="1.6"
         stroke-dasharray="6,3" marker-end="url(#arrFb)"/>
   <rect x="890" y="766" width="236" height="19" rx="3" fill="#fff" stroke="#C2571A" stroke-dasharray="3,2"/>
   <text x="1008" y="779" font-size="10.5" fill="#C2571A" text-anchor="middle">drift detected → re-prep data &amp; retrain</text>
+  </g>
 
   <!-- inference capture data plane -->
-  <g transform="translate(24,794)">
+  <g transform="translate(24,898)">
     <rect width="1628" height="56" rx="7" fill="#FFF8F2" stroke="#C2571A" stroke-width="1.3"/>
     <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#C2571A">INFERENCE CAPTURE DATA PLANE — templates/4-inference-capture.yaml (real infrastructure, not notebook code)</text>
     <g font-size="11">
@@ -299,7 +312,7 @@
   </g>
 
   <!-- shared platform foundation -->
-  <g transform="translate(24,858)">
+  <g transform="translate(24,962)">
     <rect width="1628" height="58" rx="7" fill="#f7f8fa" stroke="#9aa7b4" stroke-width="1.3"/>
     <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#414d5c">SHARED PLATFORM FOUNDATION — provisioned once in Lab 1, consumed by every later lab</text>
     <g font-size="10.8" fill="#16191f">
@@ -319,7 +332,7 @@
   </g>
 
   <!-- IaC layer -->
-  <g transform="translate(24,924)">
+  <g transform="translate(24,1028)">
     <rect width="1628" height="54" rx="7" fill="#eef1f4" stroke="#4B5563" stroke-width="1.3"/>
     <text x="12" y="19" font-size="11.5" font-weight="bold" fill="#16191f">INFRASTRUCTURE AS CODE — scripts/deploy-workshop.sh deploys six independent CloudFormation stacks in dependency order</text>
     <g font-size="10.8">
@@ -340,5 +353,5 @@
   </g>
 
   <!-- footnote -->
-  <text x="24" y="996" font-size="10.3" fill="#5f6b7a">Solid arrows = artifact hand-off between labs · dashed orange = monitoring feedback loop · dashed box = opt-in component. Lab 2B–2E are alternatives; 2F always follows. templates/main.yaml is deprecated.</text>
+  <text x="24" y="1100" font-size="10.3" fill="#5f6b7a">Solid arrows = artifact hand-off between labs · dashed orange = monitoring feedback loop · dashed box = opt-in component. Lab 2B–2E are alternatives; 2F always follows. templates/main.yaml is deprecated.</text>
 </svg>

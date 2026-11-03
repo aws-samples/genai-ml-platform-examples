@@ -2,7 +2,7 @@
 
 A hands-on workshop and reference implementation for standardizing the end-to-end machine learning lifecycle on AWS. It combines guided lab notebooks with production-ready MLOps seed code and infrastructure templates, covering both **traditional ML** (XGBoost classification) and **generative AI** (foundation-model fine-tuning) workflows.
 
-The workshop is built on **Amazon SageMaker AI (SMAI)** — the core ML service for training, tuning, JumpStart foundation models, the Model Registry, and real-time endpoints.
+The workshop is built on **Amazon SageMaker AI (SMAI)** — the core ML service for training, tuning, JumpStart foundation models, serverless model customization, the Model Registry, and real-time endpoints.
 
 The labs are organized around the personas who operate an ML platform — **platform admins**, **data engineers**, **data scientists**, and **ML/Ops engineers** — walking each role through their part of the lifecycle, from platform setup and data preparation to model build, automated deployment, and monitoring.
 
@@ -18,7 +18,7 @@ One band per lifecycle stage, showing only the AWS services you touch there. Goo
 
 ![AWS services used in each stage of the AI lifecycle, Labs 1–5](images/architecture-icons.svg)
 
-SageMaker AI shows up in several bands because the workshop uses several of its capabilities — Studio, Processing, Training, JumpStart, managed MLflow, and Model Registry. The only non-AWS tool is GitHub Actions in Lab 4, marked with a dark tile.
+SageMaker AI shows up in several bands because the workshop uses several of its capabilities — Studio, Processing, Training, JumpStart, serverless model customization, managed MLflow, and Model Registry. The only non-AWS tool is GitHub Actions in Lab 4, marked with a dark tile. A dashed outline marks an optional step: the serverless fine-tune in Lab 3D, and the extra dataset format Lab 2A renders for it.
 
 ### Detailed view
 
@@ -29,7 +29,7 @@ Each column is a lab; the bands underneath are shared — the platform foundatio
 | Lifecycle stage | Lab | Persona | Key artifact it produces |
 |---|---|---|---|
 | Infra setup | Lab 1 | Platform Admin | Governed platform: domain, roles, buckets, catalog |
-| Data prep | Lab 2 | Data Engineer | `train.jsonl` / `test.jsonl` / `template.json` + Iceberg baselines |
+| Data prep | Lab 2 | Data Engineer | `train.jsonl` / `test.jsonl` / `template.json` (+ `train_sft.jsonl` / `test_sft.jsonl`) + Iceberg baselines |
 | Model build | Lab 3 | Data Scientist | Registered model package + model card + metrics |
 | Model deploy | Lab 4 | ML Engineer / Gov Officer | Live endpoint emitting captured predictions |
 | Monitoring | Lab 5 | Ops / Gov Officer | Drift verdicts, dashboards, audit evidence |
@@ -40,6 +40,8 @@ Three things in the diagram are worth calling out, because they are easy to assu
 - **Inference capture is real infrastructure, not notebook code.** `endpoint → SQS → logger Lambda → Iceberg tables` is created by `templates/4-inference-capture.yaml`. Lab 5D's notebook writes drift *verdicts*; the captured predictions arrive through that pipeline.
 - **Drift is computed in-kernel.** Lab 5D runs Evidently in the notebook and `INSERT`s results into Athena. There is no scheduled drift Lambda, EventBridge rule, SNS topic, or CloudWatch alarm anywhere in this repo.
 
+The optional **Lab 3D** appears in both views with a dashed outline — a box hanging off the bottom of the Lab 3 column in the detailed view, a dashed halo on the icon tile in the services view. Dashed means opt-in: 3D reads Lab 2A's `_sft` pair and nothing downstream reads what it produces, so Labs 4 and 5 are identical whether you run it or skip it.
+
 ## What's Inside
 
 The repository is organized as a sequence of persona-oriented labs that follow the ML platform lifecycle — from platform setup, to data prep, model build, deployment automation, and monitoring — plus reusable seed code and infrastructure assets.
@@ -49,7 +51,7 @@ The repository is organized as a sequence of persona-oriented labs that follow t
 | `lab0-setup/` | All | **Run first.** Installs the shared kernel dependencies and writes the repo-root `.env` every lab reads. |
 | `lab1-onboarding/` | Platform Admin | Set up the platform infrastructure and onboard users with governed S3 access. |
 | `lab2-data-prep/` | Data Engineer | Prepare data two ways: a summarization instruction dataset for fine-tuning (2A), and tabular prep via processing jobs, EMR, or Canvas (2B–2E) followed by Iceberg registration (2F). |
-| `lab3-model-build/` | Data Scientist | Experiment with and build both traditional ML (XGBoost) and LLM (Llama 3.2 3B fine-tuning) models, then evaluate and register them. |
+| `lab3-model-build/` | Data Scientist | Experiment with and build both traditional ML (XGBoost) and LLM (Llama 3.2 3B fine-tuning) models, then evaluate and register them. 3D repeats the fine-tune serverlessly — optional. |
 | `lab4-model-deploy/` | ML Engineer / Gov Officer | Automate build and deployment via CI/CD, gated on Model Registry approval. |
 | `lab5-monitoring/` | Ops / Gov Officer | Monitor operational metrics and logs, audit API activity, detect drift, explain predictions, and report via QuickSight. |
 | `seed-code/` | — | Production-ready MLOps seed repositories (model build + model deploy). |
@@ -69,8 +71,8 @@ Setting up the **SMAI** platform infrastructure — SageMaker Studio domain (Vpc
 - Lab 1D (optional) – Okta SAML federation via `templates/6-okta-federation.yaml`: a SAML identity provider, a federation role, and tag-gated Studio access keyed on `studiouserid`.
 
 **Lab 2 – Data Prep** (`lab2-data-prep/`) · _Data Engineer_
-Two independent tracks. **2A** builds the instruction dataset for the LLM fine-tuning lab; **2B–2E** are alternative tools for the tabular dataset, and **2F** is the shared step every tabular path finishes with.
-- `lab-2a-fine-tuning-data-prep.ipynb` – Summarization instruction dataset. One flag, `DATA_SOURCE`, chooses between downloading **Databricks Dolly 15K** and generating an equivalent corpus offline with `synthetic_corpus.py`. Both paths then run the same quality gates (schema, minimum length, groundedness, compression ratio, exact and near-duplicate detection), a 70/30 stratified split with a leakage check, and registration of the prompt in the **MLflow Prompt Registry**. Produces `train.jsonl`, `test.jsonl`, and `template.json`.
+Two independent tracks. **2A** builds the instruction dataset for the LLM fine-tuning labs; **2B–2E** are alternative tools for the tabular dataset, and **2F** is the shared step every tabular path finishes with.
+- `lab-2a-fine-tuning-data-prep.ipynb` – Summarization instruction dataset. One flag, `DATA_SOURCE`, chooses between downloading **Databricks Dolly 15K** and generating an equivalent corpus offline with `synthetic_corpus.py`. Both paths then run the same quality gates (schema, minimum length, groundedness, compression ratio, exact and near-duplicate detection), a 70/30 stratified split with a leakage check, and registration of the prompt in the **MLflow Prompt Registry**. Produces `train.jsonl`, `test.jsonl`, and `template.json` for Lab 3B, plus `train_sft.jsonl` / `test_sft.jsonl` — the flat `{"prompt", "completion"}` form the optional Lab 3D needs. Both pairs are rendered from the same registry entry and the notebook asserts the prompt text is byte-identical across them.
 - `synthetic_corpus.py` – Offline, seeded corpus generator. Template-grounded: each record is rendered from a structured fact dictionary, so a summary cannot cite a fact its context omits.
 - `lab-2b-traditional-ml-data-prep-processing-job.ipynb` – SageMaker Processing Job (scikit-learn container).
 - `lab-2c-emr-serverless-data-prep.ipynb` – EMR Serverless (Spark).
@@ -80,11 +82,19 @@ Two independent tracks. **2A** builds the instruction dataset for the LLM fine-t
 - `user-data-governance.ipynb` – Governed S3 data access patterns via S3 Access Grants.
 
 **Lab 3 – Model Build** (`lab3-model-build/`) · _Data Scientist_
-Using the **SMAI** platform tools — managed training, JumpStart, MLflow, and the Model Registry — to build, evaluate, and register both model types.
+Using the **SMAI** platform tools — managed training, JumpStart, serverless model customization, MLflow, and the Model Registry — to build, evaluate, and register both model types.
 - `lab-3a_traditional_ml_experimenation.ipynb` – Traditional ML. Trains an XGBoost binary classifier on the UCI Bank Marketing dataset to predict term-deposit subscriptions, reading the Iceberg tables through Athena, with MLflow experiment tracking.
 - `lab-3b-fine-tuning.ipynb` – Fine-tunes **Llama 3.2 3B** for summarization via SageMaker JumpStart and SDK v3 (`JumpStartConfig`, `ModelTrainer`). Tracks dataset and prompt-version lineage in MLflow, and compares the base and fine-tuned endpoints side by side.
 - `lab-3c-model-evaluation-registration.ipynb` – Scores both models with ROUGE and BLEU through `mlflow.evaluate`, registers versions in the **Model Registry**, and attaches a Model Card plus governance metadata including the prompt version the metrics were produced with.
-- `metrics.py` – Shared evaluation metric helpers.
+- `lab-3d-serverless-fine-tuning.ipynb` – **Optional.** The same summarization fine-tune via **serverless model customization** (`SFTTrainer`, LoRA): no instance type to choose, no GPU capacity fallback to write, and training, Model Registry registration, and MLflow tracking in a single call. The dataset arrives as a versioned `DataSet` artifact (SageMaker Hub content) rather than an S3 path, and the base model is the **instruct** variant — `meta-textgeneration-llama-3-2-3b-instruct` — because the base model Lab 3B uses has no serverless recipe. Section 12 lays out what the serverless path trades away.
+- `metrics.py` – Shared evaluation metric helpers, imported by both 3C and 3D so their scores stay comparable.
+
+What to know before you plan a session around Lab 3D:
+
+- **It is self-contained.** It reads Lab 2A's output and nothing from 3B or 3C, writes into its own model package group, and creates no endpoint by default — so running it or skipping it leaves Labs 4 and 5 identical either way.
+- **It is region-limited.** Serverless model customization is available in `us-east-1`, `us-west-2`, `ap-northeast-1`, and `eu-west-1`; the notebook checks up front and points you back to 3B elsewhere. It also needs `sagemaker>=3.22.0` for `sagemaker.train`, which the first cell asserts; a fresh install of `requirements.txt` (`sagemaker>=3,<4`) satisfies it.
+- **Spending is opt-in.** With the defaults, the lab costs a training job (~11.5 min measured on 840 records, most of it image pull and capacity acquisition). `RUN_EVALUATION = True` adds a GPU endpoint for ROUGE/BLEU scoring — deleted in a `finally` — and `APPROVE_MODEL` stays `False`, because a notebook that approves its own model is not a governance gate.
+- **The model is gated.** `ACCEPT_EULA` defaults to `False`; the SDK refuses to build the trainer until you accept the **Llama 3.2 Community License**, so a participant has to read it and opt in, the same as in Lab 3B.
 
 **Lab 4 – Model Deploy** (`lab4-model-deploy/`) · _ML Engineer / Gov Officer_
 Automating build and deployment onto **SMAI** endpoints with GitHub Actions, where the Model Registry **approval status is the control point** between the two personas: the ML Engineer owns the pipeline, the Gov Officer decides what passes through it. The automation blueprint lives in `seed-code/` (see below).
@@ -127,6 +137,7 @@ Four kinds of signal, deliberately separated: operational health, audit trail, s
 - Access to **Amazon SageMaker AI (SMAI)**.
 - **AWS CLI v2** — the deploy script stages templates in S3 and passes stack parameters as a JSON file, both of which need v2.
 - **Python 3.12** to match the Studio kernel the labs are built against. The labs normally run on the Studio kernel; for a local kernel, create a venv and install `requirements.txt`.
+- For Lab 3D only (optional): a region where **serverless model customization** is available — `us-east-1`, `us-west-2`, `ap-northeast-1`, or `eu-west-1`. Every other lab runs anywhere SageMaker AI does.
 - For Lab 5E only: a QuickSight **Enterprise** subscription — see the prerequisites section below.
 - For the seed-code CI/CD flow: a GitHub organization with OIDC-based access to AWS.
 
@@ -311,8 +322,8 @@ Skipping this is the most common cause of a lab failing on its first cell: witho
 
 Open the notebooks under `lab1-onboarding/` through `lab5-monitoring/` and follow the instructions in each. Order matters in two places:
 
-- **Lab 2:** pick **one** of 2B–2E for the tabular dataset, then always run **2F** to register the result into Iceberg. Lab 2A is independent and feeds Lab 3B.
-- **Lab 3:** 3B before 3C — 3C evaluates the model 3B produced and reads the prompt version 3B pinned to its MLflow run.
+- **Lab 2:** pick **one** of 2B–2E for the tabular dataset, then always run **2F** to register the result into Iceberg. Lab 2A is independent and feeds Labs 3B and 3D.
+- **Lab 3:** 3B before 3C — 3C evaluates the model 3B produced and reads the prompt version 3B pinned to its MLflow run. **3D is optional** and depends only on 2A; it is placed after 3C because its point is the contrast with the explicit path, not because it needs anything 3C produced.
 
 ### 4. Run the MLOps Seed Code (Optional)
 
@@ -336,7 +347,7 @@ python ./ml_pipelines/run_pipeline.py \
 ## Datasets
 
 - **Bank Marketing Dataset** (UCI Machine Learning Repository) — the traditional ML classification labs (2B–2E, 3A, 5D, 5F).
-- **Databricks Dolly 15K**, filtered to its summarization category — the default source for the Llama 3.2 fine-tuning labs (2A, 3B, 3C).
+- **Databricks Dolly 15K**, filtered to its summarization category — the default source for the Llama 3.2 fine-tuning labs (2A, 3B, 3C, 3D).
 - **Synthetic summarization corpus** — generated offline by `lab2-data-prep/synthetic_corpus.py` as an alternative to Dolly. Set `DATA_SOURCE = "synthetic"` in Lab 2A. Useful when the Hugging Face Hub is unreachable from the Studio VPC, when dataset licensing or PII review is a blocker, or to teach dataset design rather than dataset acquisition.
 
 ## Clean Up
@@ -361,6 +372,7 @@ TEARDOWN=true ./scripts/deploy-workshop.sh
   aws sagemaker delete-endpoint --endpoint-name <name>
   ```
 - MLflow experiments, registered models, and registered prompts.
+- If you ran Lab 3D: its own model package group, and the versioned `DataSet` artifacts in the private SageMaker Hub the first run creates. The notebook's last cell has the delete calls, commented out. Neither costs anything to keep.
 
 One exception: a lab endpoint deployed with a `VpcConfig` holds ENIs in the workshop's private subnets and will **block** the networking stack from deleting. The teardown script detects those up front and names them; pass `DELETE_LAB_ENDPOINTS=true` to have it remove them first.
 
@@ -374,6 +386,7 @@ smai-std/
 ├── lab1-onboarding/        # Platform Admin – platform setup & user onboarding
 ├── lab2-data-prep/         # Data Engineer  – 2A instruction data · 2B–2E tabular · 2F Iceberg
 ├── lab3-model-build/       # Data Scientist – 3A XGBoost · 3B fine-tuning · 3C eval & register
+│                           #   · 3D serverless fine-tune (optional)
 ├── lab4-model-deploy/      # ML Eng/Gov     – CI/CD automation, approval-gated deploy
 ├── lab5-monitoring/        # Ops/Gov        – 5A–5C observability · 5D drift · 5E dash · 5F SHAP
 ├── seed-code/              # MLOps seed repos (build + deploy)

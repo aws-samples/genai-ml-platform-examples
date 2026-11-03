@@ -117,7 +117,8 @@ STAGES = [
                 ("bucketobj", "S3 Tables", "Iceberg · 2F"),
                 ("glue", "Glue", "table schemas"),
                 ("athena", "Athena", "time travel"),
-                ("sagemaker", "MLflow", "prompt registry · 2A")]),
+                ("sagemaker", "MLflow", "prompt registry · 2A"),
+                ("bucketobj", "SFT dataset", "for 3D · 2A", True)]),
     dict(n="3", name="MODEL BUILD", sub="train · evaluate · register", lab="Lab 3",
          persona="Data Scientist", colour="#7D3AC1", tint="#F3EBFB", ptint="#f2f4f6", ptext="#414d5c",
          items=[("athena", "Athena", "read baselines"),
@@ -125,7 +126,10 @@ STAGES = [
                 ("train", "Training job", "XGBoost · 3A"),
                 ("sagemaker", "JumpStart", "Llama 3.2 3B · 3B"),
                 ("sagemaker", "MLflow", "experiments · metrics"),
-                ("model", "Model Registry", "package + card · 3C")]),
+                ("model", "Model Registry", "package + card · 3C"),
+                # Optional lab: serverless model customization. Marked with a
+                # dashed outline, matching architecture.svg's opt-in notation.
+                ("sagemaker", "Serverless SFT", "LoRA · 3D", True)]),
     dict(n="4", name="MODEL DEPLOY", sub="CI/CD to endpoints", lab="Lab 4",
          persona="ML Engineer / Gov Officer", colour="#0F8B5F", tint="#E8F6EF", ptint="#eaf4ef", ptext="#0d5c42",
          items=[("model", "Approval gate", "Approved status"),
@@ -151,7 +155,9 @@ def esc(s):
 for _st in STAGES:
     for _k in ("name", "sub", "persona", "lab"):
         _st[_k] = esc(_st[_k])
-    _st["items"] = [(k, esc(a), esc(b)) for k, a, b in _st["items"]]
+    # Normalise items to 4-tuples: (icon_key, caption1, caption2, is_optional).
+    _st["items"] = [(i[0], esc(i[1]), esc(i[2]), bool(i[3]) if len(i) > 3 else False)
+                    for i in _st["items"]]
 
 W = 1320
 TITLE_H = 78
@@ -211,9 +217,13 @@ for st, ty in zip(STAGES, band_tops):
     items = st["items"]
     x0 = ICON_X0
     iy = ty + 26
-    for j, (key, cap1, cap2) in enumerate(items):
+    for j, (key, cap1, cap2, is_optional) in enumerate(items):
         cx = x0 + j * SLOT + SLOT / 2
         ix = cx - ICON / 2
+        if is_optional:
+            # Dashed halo = opt-in, the same notation architecture.svg uses.
+            out.append(f'    <rect x="{ix-5:.1f}" y="{iy-5}" width="{ICON+10}" height="{ICON+10}" '
+                       f'rx="7" fill="none" stroke="{c}" stroke-width="1.4" stroke-dasharray="4,3"/>')
         if key == "GHA":
             # Not an AWS service: the icon terms forbid using an AWS product
             # icon to stand for something else, so this gets a neutral tile.
@@ -235,8 +245,9 @@ for st, ty in zip(STAGES, band_tops):
                            f'width="{ICON}" height="{ICON}"/>')
         out.append(f'    <text x="{cx:.1f}" y="{iy+ICON+15}" font-size="9.8" font-weight="bold" '
                    f'fill="#16191f" text-anchor="middle">{cap1}</text>')
+        _c2 = f"{cap2} (opt)" if is_optional else cap2
         out.append(f'    <text x="{cx:.1f}" y="{iy+ICON+27}" font-size="9" fill="#5f6b7a" '
-                   f'text-anchor="middle">{cap2}</text>')
+                   f'text-anchor="middle">{_c2}</text>')
     out.append("  </g>")
 
 # stage-to-stage chevrons, drawn in the gaps between bands
@@ -262,10 +273,12 @@ out.append(f'    <rect width="{BAND_W}" height="56" rx="7" fill="#f7f8fa" stroke
 out.append(f'    <text x="12" y="18" font-size="10.4" font-weight="bold" fill="#414d5c">LEGEND</text>')
 out.append(f'    <text x="72" y="18" font-size="10.2" fill="#414d5c">'
            f'Filled square = AWS service icon · white square with teal border = AWS resource icon '
-           f'(a specific capability of the service) · dark tile = non-AWS tool</text>')
+           f'(a specific capability of the service) · dark tile = non-AWS tool · '
+           f'dashed outline = optional step</text>')
 out.append(f'    <text x="12" y="34" font-size="10.2" fill="#414d5c">'
            f'SageMaker AI appears in several stages because the workshop uses several of its '
-           f'capabilities: Studio, Processing, Training, JumpStart, managed MLflow and Model Registry.</text>')
+           f'capabilities: Studio, Processing, Training, JumpStart, serverless customization, '
+           f'managed MLflow and Model Registry.</text>')
 out.append(f'    <text x="12" y="49" font-size="9.6" fill="#5f6b7a">'
            f'Icons are the official AWS Architecture Icons (07/31/2026 release, aws.amazon.com/architecture/icons), '
            f'reproduced unmodified at uniform scale. AWS and its service icons are trademarks of Amazon.com, Inc. or its affiliates.</text>')
