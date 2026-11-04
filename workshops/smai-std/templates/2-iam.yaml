@@ -94,7 +94,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: sagemaker.amazonaws.com
+              Service:
+                - sagemaker.amazonaws.com
+                # Lab 3D's optional serverless evaluation (LLMAsJudgeEvaluator)
+                # scores the model through a Bedrock model-evaluation job and
+                # passes this execution role as that job's role, so Bedrock
+                # must be able to assume it. Remove this principal if you drop
+                # Lab 3D, or if a future SDK release stops passing the caller's
+                # role to Bedrock.
+                - bedrock.amazonaws.com
             Action: sts:AssumeRole
       Path: /
       RoleName: !Sub ${ProjectName}-product-role-${ResourceSuffix}
@@ -109,7 +117,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: sagemaker.amazonaws.com
+              Service:
+                - sagemaker.amazonaws.com
+                # Lab 3D's optional serverless evaluation (LLMAsJudgeEvaluator)
+                # scores the model through a Bedrock model-evaluation job and
+                # passes this execution role as that job's role, so Bedrock
+                # must be able to assume it. Remove this principal if you drop
+                # Lab 3D, or if a future SDK release stops passing the caller's
+                # role to Bedrock.
+                - bedrock.amazonaws.com
             Action: sts:AssumeRole
       Path: /
       RoleName: !Sub ${ProjectName}-usera-role-${ResourceSuffix}
@@ -124,7 +140,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: sagemaker.amazonaws.com
+              Service:
+                - sagemaker.amazonaws.com
+                # Lab 3D's optional serverless evaluation (LLMAsJudgeEvaluator)
+                # scores the model through a Bedrock model-evaluation job and
+                # passes this execution role as that job's role, so Bedrock
+                # must be able to assume it. Remove this principal if you drop
+                # Lab 3D, or if a future SDK release stops passing the caller's
+                # role to Bedrock.
+                - bedrock.amazonaws.com
             Action: sts:AssumeRole
       Path: /
       RoleName: !Sub ${ProjectName}-userb-role-${ResourceSuffix}
@@ -675,6 +699,90 @@ Resources:
             Resource:
               - !Sub "arn:aws:s3:::${ProjectName}-mlflow-${AWS::AccountId}-${AWS::Region}"
               - !Sub "arn:aws:s3:::${ProjectName}-mlflow-${AWS::AccountId}-${AWS::Region}/*"
+          # ------------------------------------------------------------------
+          # Lab 3D: serverless evaluation with sagemaker.train.evaluate
+          # LLMAsJudgeEvaluator.
+          #
+          # The scoring does NOT run on a SageMaker endpoint -- it runs as a
+          # BEDROCK model-evaluation job, which is why a Bedrock foundation
+          # model acts as the judge and why these statements are needed at all.
+          # The SDK validates the caller before it submits anything and fails
+          # with exactly this, naming the first two actions:
+          #   RoleValidationError: IAM role '...' cannot be used for
+          #   'model_eval' workloads. Missing permissions:
+          #   bedrock:CreateEvaluationJob, bedrock:GetEvaluationJob
+          #
+          # These are appended to the MLflow policy rather than added as a new
+          # managed policy because each execution role is already carrying a
+          # long list of attachments (see the CloudWatchLogsPolicy note below),
+          # and the evaluation results are logged to MLflow anyway.
+          # ------------------------------------------------------------------
+          - Sid: BedrockModelEvaluationLab3D
+            Effect: Allow
+            Action:
+              - bedrock:CreateEvaluationJob
+              - bedrock:GetEvaluationJob
+              # List/Stop are not required to submit; they let a participant
+              # find a running evaluation and cancel it.
+              - bedrock:ListEvaluationJobs
+              - bedrock:StopEvaluationJob
+            # CreateEvaluationJob names the job being created, so there is no
+            # pre-existing ARN to scope creation to.
+            Resource: '*'
+          # Lab 3D resolves a judge model at run time instead of hardcoding
+          # one, because the SDK's supported-judge list is a superset that
+          # still contains end-of-life models. That needs two catalogue reads,
+          # and without them the notebook fails on its judge-selection cell:
+          #   AccessDeniedException ... not authorized to perform:
+          #   bedrock:ListFoundationModels
+          # ListFoundationModels has no resource-level permissions, so '*'.
+          - Sid: BedrockFoundationModelCatalogueRead
+            Effect: Allow
+            Action:
+              - bedrock:ListFoundationModels
+            Resource: '*'
+          - Sid: BedrockFoundationModelDescribe
+            Effect: Allow
+            Action:
+              - bedrock:GetFoundationModel
+            Resource:
+              - 'arn:aws:bedrock:*::foundation-model/*'
+          # The other half of judge resolution: the service-maintained
+          # supported-judge list, mirrored in the JumpStart cache bucket.
+          # AmazonSageMakerFullAccess does not cover reading this object --
+          # verified with iam simulate-principal-policy, which returned
+          # implicitDeny for s3:GetObject on it.
+          - Sid: JumpStartCacheReadForJudgeList
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub 'arn:aws:s3:::jumpstart-cache-prod-${AWS::Region}/fmhMetadata/*'
+          - Sid: BedrockJudgeModelInvoke
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource:
+              # Most currently-active judge models are INFERENCE_PROFILE-only,
+              # so the inference-profile ARN is required as well as the
+              # foundation-model one. The foundation-model entry is NOT
+              # region-scoped on purpose: a cross-region profile invokes the
+              # model in whichever region it routes to. A region-scoped
+              # duplicate was removed here because IAM Access Analyzer flags it
+              # as redundant (REDUNDANT_RESOURCE) against this wildcard.
+              - 'arn:aws:bedrock:*::foundation-model/*'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+          - Sid: BedrockEvaluationPassRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            # Scoped to this project's own roles, and further gated so the role
+            # can only ever be handed to Bedrock.
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+            Condition:
+              StringEquals:
+                iam:PassedToService: bedrock.amazonaws.com
       Roles:
         - !Ref ProductSageMakerExecutionRole
         - !Ref UserASageMakerExecutionRole
