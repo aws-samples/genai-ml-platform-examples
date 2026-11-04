@@ -499,9 +499,9 @@ MIN_ROC_AUC_THRESHOLD: float = float(
     _drift_cfg.get("min_roc_auc", os.environ.get("MIN_ROC_AUC_THRESHOLD", "0.85"))
 )
 # 🔁 SYNC: lambda_drift_monitor.py:58 — Lambda fallback: 0.2. Data-drift
-# threshold: fraction of features whose distribution must shift (Evidently
-# DataDriftPreset) before alerting. Used by notebook 3 cells 56 (CloudWatch
-# alarms) and 62 (alert config).
+# threshold: fraction of features whose distribution must shift. Equality
+# counts as dataset drift. Passed to Evidently DataDriftPreset by
+# evidently_reports.py and displayed as the dataset-share reference line.
 DATA_DRIFT_THRESHOLD: float = float(
     _drift_cfg.get("data_drift", os.environ.get("DATA_DRIFT_THRESHOLD", "0.20"))
 )

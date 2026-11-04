@@ -1,121 +1,270 @@
-"""
-Evidently-based drift detection and model performance reporting.
+"""Evidently reports with one explicit drift-score contract.
 
-Replaces custom matplotlib visualizations with Evidently's built-in
-interactive HTML reports for data drift and classification metrics.
+New Lab 5 runs use Jensen-Shannon distance for every comparable feature.
+``drift_magnitude`` is the raw score divided by its threshold, so 1.0 is the
+boundary and larger values always mean more drift. The parser also understands
+p-value methods for callers that explicitly choose one, but it never invents a
+score for an unavailable feature.
 """
 
 import logging
+import math
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 from evidently import Report
 from evidently.core.datasets import BinaryClassification, DataDefinition, Dataset
-from evidently.metrics import DriftedColumnsCount, ValueDrift
 from evidently.presets import ClassificationPreset, DataDriftPreset
 
+from src.config.config import DATA_DRIFT_THRESHOLD
+
 logger = logging.getLogger(__name__)
+
+DRIFT_NUM_METHOD = "jensenshannon"
+DRIFT_CAT_METHOD = "jensenshannon"
+DRIFT_SCORE_THRESHOLD = 0.1
+MIN_FEATURE_SAMPLES = 50
+
+LOWER_IS_MORE_DRIFT = "lower_is_more_drift"
+HIGHER_IS_MORE_DRIFT = "higher_is_more_drift"
+UNKNOWN_DRIFT_DIRECTION = "unknown"
+
+
+def _drift_score_direction(method: str) -> str:
+    """Return the comparison direction encoded by an Evidently method name."""
+    normalized = str(method or "").lower().replace("_", " ").replace("-", " ")
+    if "p value" in normalized or any(
+        token in normalized
+        for token in ("kolmogorov", "k s", "ks", "chisquare", "chi square", "z test")
+    ):
+        return LOWER_IS_MORE_DRIFT
+    if any(
+        token in normalized
+        for token in (
+            "distance",
+            "wasserstein",
+            "jensen",
+            "jensenshannon",
+            "psi",
+            "hellinger",
+            "kullback",
+            "total variation",
+            "tvd",
+        )
+    ):
+        return HIGHER_IS_MORE_DRIFT
+    return UNKNOWN_DRIFT_DIRECTION
+
+
+def normalize_drift_score(
+    drift_score: Any,
+    threshold: Any,
+    method: str,
+) -> Dict[str, Any]:
+    """Normalize an Evidently score to one finite, directional chart metric.
+
+    The feature verdict is strict: equality is the decision boundary and does
+    not count as feature drift. Missing, non-finite, negative, or unknown-method
+    values retain an unavailable magnitude/verdict.
+    """
+    direction = _drift_score_direction(method)
+    result: Dict[str, Any] = {
+        "drift_score": None,
+        "drifted": None,
+        "method": str(method or ""),
+        "threshold": None,
+        "direction": direction,
+        "drift_magnitude": None,
+    }
+
+    try:
+        numeric_threshold = float(threshold)
+    except (TypeError, ValueError):
+        return result
+    if not math.isfinite(numeric_threshold) or numeric_threshold <= 0:
+        return result
+    result["threshold"] = numeric_threshold
+
+    if drift_score is None:
+        return result
+    try:
+        numeric_score = float(drift_score)
+    except (TypeError, ValueError):
+        return result
+    if not math.isfinite(numeric_score) or numeric_score < 0:
+        return result
+    result["drift_score"] = numeric_score
+
+    if direction == LOWER_IS_MORE_DRIFT:
+        result["drifted"] = numeric_score < numeric_threshold
+        if numeric_score > 0:
+            result["drift_magnitude"] = numeric_threshold / numeric_score
+    elif direction == HIGHER_IS_MORE_DRIFT:
+        result["drifted"] = numeric_score > numeric_threshold
+        result["drift_magnitude"] = numeric_score / numeric_threshold
+
+    return result
+
+
+def _prepare_drift_inputs(
+    baseline_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    min_samples: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Dict[str, Any]]]:
+    """Return comparable inputs plus explicit unavailable feature records."""
+    prepared_baseline: Dict[str, pd.Series] = {}
+    prepared_current: Dict[str, pd.Series] = {}
+    per_column: Dict[str, Dict[str, Any]] = {}
+
+    for column in baseline_df.columns:
+        base_series = baseline_df[column]
+        current_series = current_df[column] if column in current_df.columns else None
+        numeric = pd.api.types.is_numeric_dtype(base_series) or (
+            current_series is not None and pd.api.types.is_numeric_dtype(current_series)
+        )
+        if numeric:
+            base_series = pd.to_numeric(base_series, errors="coerce").replace(
+                [float("inf"), float("-inf")], pd.NA
+            )
+            if current_series is not None:
+                current_series = pd.to_numeric(current_series, errors="coerce").replace(
+                    [float("inf"), float("-inf")], pd.NA
+                )
+
+        baseline_count = int(base_series.notna().sum())
+        current_count = int(current_series.notna().sum()) if current_series is not None else 0
+        unavailable_reason = None
+        if current_series is None:
+            unavailable_reason = "missing_from_current"
+        elif baseline_count == 0:
+            unavailable_reason = "all_null_baseline"
+        elif current_count == 0:
+            unavailable_reason = "all_null_current"
+        elif baseline_count < min_samples:
+            unavailable_reason = "insufficient_baseline_samples"
+        elif current_count < min_samples:
+            unavailable_reason = "insufficient_current_samples"
+
+        per_column[column] = {
+            **normalize_drift_score(None, DRIFT_SCORE_THRESHOLD, DRIFT_NUM_METHOD),
+            "comparable": unavailable_reason is None,
+            "unavailable_reason": unavailable_reason,
+            "baseline_sample_size": baseline_count,
+            "current_sample_size": current_count,
+        }
+        if unavailable_reason is None:
+            prepared_baseline[column] = base_series
+            prepared_current[column] = current_series
+
+    return (
+        pd.DataFrame(prepared_baseline, index=baseline_df.index),
+        pd.DataFrame(prepared_current, index=current_df.index),
+        per_column,
+    )
 
 
 def run_data_drift_report(
     baseline_df: pd.DataFrame,
     current_df: pd.DataFrame,
     output_path: Optional[str] = None,
+    min_samples: int = MIN_FEATURE_SAMPLES,
 ) -> Dict[str, Any]:
-    """
-    Run Evidently DataDriftPreset report comparing baseline vs current data.
+    """Compare baseline and current feature distributions.
 
-    Args:
-        baseline_df: Reference/training data (numeric features only).
-        current_df: Current/inference data (same columns as baseline).
-        output_path: If provided, saves the HTML report to this path.
-
-    Returns:
-        Dictionary with:
-            - 'snapshot': The Evidently report snapshot (call .save_html() etc.)
-            - 'drift_detected': bool, whether overall drift was detected
-            - 'drifted_columns_count': number of drifted columns
-            - 'drifted_columns_share': share of drifted columns
-            - 'drift_share_threshold': share a dataset must exceed to count as
-              drifted overall (Evidently's DriftedColumnsCount default, 0.5) —
-              returned so callers can explain a "9/20 drifted but drift_detected
-              False" verdict instead of looking self-contradictory
-            - 'per_column': dict mapping column name -> {'drift_score': float, 'drifted': bool}
+    Dataset count/share use only features with at least ``min_samples``
+    non-null observations on both sides. Requested but unavailable features
+    remain in ``per_column`` with null score, magnitude, and verdict so Athena
+    and QuickSight do not turn missing evidence into a zero.
     """
-    report = Report(metrics=[DataDriftPreset()])
-    snapshot = report.run(reference_data=baseline_df, current_data=current_df)
+    if min_samples < 1:
+        raise ValueError("min_samples must be at least 1")
+
+    comparable_baseline, comparable_current, per_column = _prepare_drift_inputs(
+        baseline_df, current_df, min_samples
+    )
+    result: Dict[str, Any] = {
+        "snapshot": None,
+        "drift_detected": None,
+        "drifted_columns_count": 0,
+        "drifted_columns_share": None,
+        "drift_share_threshold": DATA_DRIFT_THRESHOLD,
+        "features_requested": len(per_column),
+        "features_analyzed": 0,
+        "sample_size": len(current_df),
+        "per_column": per_column,
+    }
+
+    if comparable_baseline.empty or comparable_baseline.shape[1] == 0:
+        logger.warning("No features have enough non-null samples for drift analysis")
+        return result
+
+    report = Report(
+        metrics=[
+            DataDriftPreset(
+                num_method=DRIFT_NUM_METHOD,
+                cat_method=DRIFT_CAT_METHOD,
+                num_threshold=DRIFT_SCORE_THRESHOLD,
+                cat_threshold=DRIFT_SCORE_THRESHOLD,
+                drift_share=DATA_DRIFT_THRESHOLD,
+            )
+        ]
+    )
+    snapshot = report.run(
+        reference_data=comparable_baseline,
+        current_data=comparable_current,
+    )
+    result["snapshot"] = snapshot
 
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         snapshot.save_html(output_path)
-        logger.info(f"Data drift report saved to {output_path}")
+        logger.info("Data drift report saved to %s", output_path)
 
-    # Extract structured results from the report dict
-    metrics_list = snapshot.dict().get("metrics", [])
-    result: Dict[str, Any] = {
-        "snapshot": snapshot,
-        "drift_detected": False,
-        "drifted_columns_count": 0,
-        "drifted_columns_share": 0.0,
-        # Default from Evidently's DriftedColumnsCount; overwritten below with
-        # the value the metric actually used.
-        "drift_share_threshold": 0.5,
-        "per_column": {},
-    }
-
-    for m in metrics_list:
-        name = m.get("metric_name", "")
-        config = m.get("config", {})
-        value = m.get("value")
-
+    for metric in snapshot.dict().get("metrics", []):
+        name = metric.get("metric_name", "")
+        config = metric.get("config", {})
         if "DriftedColumnsCount" in name:
-            count = value.get("count", 0) if isinstance(value, dict) else 0
-            share = value.get("share", 0.0) if isinstance(value, dict) else 0.0
-            drift_share_threshold = float(config.get("drift_share", 0.5))
-            result["drift_share_threshold"] = drift_share_threshold
-            result["drifted_columns_count"] = int(count)
-            result["drifted_columns_share"] = float(share)
-            result["drift_detected"] = share >= drift_share_threshold
-
+            try:
+                result["drift_share_threshold"] = float(
+                    config.get("drift_share", DATA_DRIFT_THRESHOLD)
+                )
+            except (TypeError, ValueError):
+                result["drift_share_threshold"] = DATA_DRIFT_THRESHOLD
         elif "ValueDrift" in name:
-            col = config.get("column", "unknown")
-            threshold = float(config.get("threshold", 0.05))
-            method = config.get("method", "")
-            drift_score = float(value) if value is not None else 1.0
+            column = config.get("column", "unknown")
+            if column not in result["per_column"]:
+                continue
+            normalized = normalize_drift_score(
+                drift_score=metric.get("value"),
+                threshold=config.get("threshold"),
+                method=config.get("method", ""),
+            )
+            result["per_column"][column].update(normalized)
+            if normalized["drifted"] is None:
+                result["per_column"][column]["comparable"] = False
+                result["per_column"][column]["unavailable_reason"] = "metric_unavailable"
 
-            # Evidently picks the test per-column based on sample size and
-            # column type. The comparison direction depends on which test:
-            #   * p-value tests (KS, Chi-Square)   → drift when score < threshold
-            #   * distance / divergence tests      → drift when score > threshold
-            #     (Wasserstein, PSI, Jensen-Shannon, Hellinger, TVD, ...)
-            # Evidently exposes the chosen test in `config.method` but has no
-            # boolean drift flag in the per-metric dict — we compute it here.
-            is_p_value = "p_value" in method.lower() or "p-value" in method.lower()
-            drifted = drift_score < threshold if is_p_value else drift_score > threshold
-
-            # drift_magnitude is a test-agnostic "how far past the threshold":
-            #   1.0 = at threshold, >1.0 = drifted, higher = more drifted
-            # Callers can sort by this descending to get "top N drifted" without
-            # caring which test was used for which column.
-            if is_p_value:
-                # p-values: smaller = more drifted → invert ratio
-                drift_magnitude = (threshold / drift_score) if drift_score > 0 else float("inf")
-            else:
-                drift_magnitude = (drift_score / threshold) if threshold > 0 else float("inf")
-
-            result["per_column"][col] = {
-                "drift_score": drift_score,
-                "drifted": drifted,
-                "method": method,
-                "threshold": threshold,
-                "drift_magnitude": drift_magnitude,
-            }
+    compared = [
+        values
+        for values in result["per_column"].values()
+        if values.get("comparable") and values.get("drifted") is not None
+    ]
+    result["features_analyzed"] = len(compared)
+    result["drifted_columns_count"] = sum(
+        values["drifted"] is True for values in compared
+    )
+    if compared:
+        share = result["drifted_columns_count"] / len(compared)
+        result["drifted_columns_share"] = share
+        result["drift_detected"] = share >= result["drift_share_threshold"]
 
     logger.info(
-        f"Data drift report: {result['drifted_columns_count']} drifted columns "
-        f"({result['drifted_columns_share']:.1%}), overall drift: {result['drift_detected']}"
+        "Data drift report: %s/%s comparable columns drifted (share=%s, overall=%s)",
+        result["drifted_columns_count"],
+        result["features_analyzed"],
+        result["drifted_columns_share"],
+        result["drift_detected"],
     )
     return result
 
@@ -125,83 +274,81 @@ def run_classification_report(
     current_df: pd.DataFrame,
     target_column: str = "target",
     prediction_column: str = "prediction",
+    probability_column: Optional[str] = "probability",
     output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Run an Evidently binary-classification comparison on paired rows.
+
+    Labels, predictions, and optional positive-class probabilities are cleaned
+    together in each input frame, preserving row pairing. Both target and
+    predicted labels must contain classes 0 and 1 on each side; unavailable
+    cases fail with a descriptive ``ValueError`` instead of producing a chart.
     """
-    Run Evidently ClassificationPreset report comparing baseline vs current model performance.
+    required = [target_column, prediction_column]
+    if probability_column:
+        required.append(probability_column)
 
-    Both DataFrames must contain the target and prediction columns.
-
-    ⚠ Evidently quirk — both class labels (0 AND 1) must appear in BOTH
-    ``baseline_df`` and ``current_df``. If either side has only one class
-    (common when sampling a highly-imbalanced eval set with a flat LIMIT),
-    ClassificationPreset raises ``KeyError: '0'`` deep inside Evidently's
-    metric parser. Make sure the baseline covers both class labels (e.g. score
-    the whole held-out set rather than a flat-LIMIT slice of it).
-    https://github.com/evidentlyai/evidently/issues  (see ClassMetric parsing)
-
-    Args:
-        baseline_df: Reference data with target and prediction columns. Must
-            contain BOTH class labels (0 and 1).
-        current_df: Current data with target and prediction columns. Must
-            also contain BOTH class labels.
-        target_column: Name of the ground-truth label column.
-        prediction_column: Name of the predicted label column.
-        output_path: If provided, saves the HTML report to this path.
-
-    Returns:
-        Dictionary with:
-            - 'snapshot': The Evidently report snapshot
-            - 'metrics': Raw metrics dict extracted from the report
-
-    Raises:
-        ValueError: If either dataframe lacks both class labels (caught
-            early before Evidently crashes with a confusing KeyError).
-    """
-    # Pre-flight check — Evidently's KeyError is unhelpful; fail loudly here.
-    # Both `target` AND `prediction` columns must contain BOTH classes (0 AND 1)
-    # in BOTH datasets. Evidently's `ClassificationQualityByClass` internally
-    # calls sklearn's `classification_report` without `labels=` — sklearn then
-    # omits classes that never appear as predictions, and Evidently crashes
-    # with `KeyError: '0'` when it tries to read the omitted class.
-    for label, df in (("baseline_df", baseline_df), ("current_df", current_df)):
-        for col in (target_column, prediction_column):
-            unique = sorted(df[col].dropna().unique().tolist())
-            if len(unique) < 2:
+    cleaned = []
+    for label, frame in (("baseline_df", baseline_df), ("current_df", current_df)):
+        missing = [column for column in required if column not in frame.columns]
+        if missing:
+            raise ValueError(f"{label} is missing required column(s): {missing}")
+        work = frame.dropna(subset=required).copy()
+        if probability_column:
+            work[probability_column] = pd.to_numeric(
+                work[probability_column], errors="coerce"
+            )
+            work = work.dropna(subset=[probability_column])
+            if not work[probability_column].between(0.0, 1.0).all():
                 raise ValueError(
-                    f"{label}.{col} has only {len(unique)} unique value(s): {unique}. "
-                    f"Evidently ClassificationPreset needs BOTH 0 and 1 in BOTH "
-                    f"target and prediction columns of BOTH datasets. "
-                    f"If the model never predicted the minority class on this sample, "
-                    f"either increase the sample size, lower the decision threshold, "
-                    f"or stratify the upstream query to guarantee class diversity."
+                    f"{label}.{probability_column} must contain probabilities in [0, 1]"
                 )
+        for column in (target_column, prediction_column):
+            work[column] = work[column].astype(float).round().astype(int)
+            values = set(work[column].unique().tolist())
+            if not values.issubset({0, 1}):
+                raise ValueError(f"{label}.{column} contains non-binary labels: {sorted(values)}")
+            if values != {0, 1}:
+                raise ValueError(
+                    f"{label}.{column} has classes {sorted(values)}; both 0 and 1 "
+                    "are required for classification metrics"
+                )
+        if work.empty:
+            raise ValueError(f"{label} has no complete paired classification rows")
+        cleaned.append(work)
 
-    data_def = DataDefinition(
+    baseline_clean, current_clean = cleaned
+    definition = DataDefinition(
         classification=[
             BinaryClassification(
                 target=target_column,
                 prediction_labels=prediction_column,
+                prediction_probas=probability_column,
+                pos_label=1,
             )
         ]
     )
-
-    ref_dataset = Dataset.from_pandas(baseline_df, data_definition=data_def)
-    cur_dataset = Dataset.from_pandas(current_df, data_definition=data_def)
-
-    report = Report(metrics=[ClassificationPreset()])
-    snapshot = report.run(reference_data=ref_dataset, current_data=cur_dataset)
+    reference = Dataset.from_pandas(baseline_clean, data_definition=definition)
+    current = Dataset.from_pandas(current_clean, data_definition=definition)
+    snapshot = Report(metrics=[ClassificationPreset()]).run(
+        reference_data=reference,
+        current_data=current,
+    )
 
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         snapshot.save_html(output_path)
-        logger.info(f"Classification report saved to {output_path}")
+        logger.info("Classification report saved to %s", output_path)
 
-    result: Dict[str, Any] = {
+    logger.info(
+        "Classification report generated from %s baseline and %s current paired rows",
+        len(baseline_clean),
+        len(current_clean),
+    )
+    return {
         "snapshot": snapshot,
         "metrics": snapshot.dict().get("metrics", []),
+        "baseline_sample_size": len(baseline_clean),
+        "current_sample_size": len(current_clean),
+        "probability_column": probability_column,
     }
-
-    logger.info("Classification report generated successfully")
-    return result
-

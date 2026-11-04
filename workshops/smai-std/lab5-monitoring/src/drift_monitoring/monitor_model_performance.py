@@ -52,6 +52,7 @@ from src.config.config import (
     ATHENA_DATABASE,
     ATHENA_INFERENCE_TABLE,
     MIN_ROC_AUC_THRESHOLD,
+    PREDICTION_COLUMN,
     PROBABILITY_COLUMN,
 )
 from src.config import schema
@@ -166,7 +167,7 @@ class ModelPerformanceMonitor:
             model_version,
             mlflow_run_id,
             {schema.identifier_column()},
-            prediction,
+            {PREDICTION_COLUMN},
             {PROBABILITY_COLUMN},
             confidence_score,
             ground_truth,
@@ -206,23 +207,39 @@ class ModelPerformanceMonitor:
         Returns:
             Dictionary with metrics
         """
-        if len(df) < self.min_samples:
+        required = ['ground_truth', PREDICTION_COLUMN, PROBABILITY_COLUMN]
+        missing = [column for column in required if column not in df.columns]
+        if missing:
+            return {'error': 'missing_columns', 'missing_columns': missing, 'sample_count': 0}
+
+        paired = df[required].copy()
+        for column in required:
+            paired[column] = pd.to_numeric(paired[column], errors='coerce')
+        paired = paired.replace([np.inf, -np.inf], np.nan).dropna()
+
+        if len(paired) < self.min_samples:
             logger.warning(
-                f"Insufficient samples ({len(df)}) for reliable metrics "
+                f"Insufficient complete pairs ({len(paired)}) for reliable metrics "
                 f"(minimum: {self.min_samples})"
             )
-            return {'error': 'insufficient_samples', 'sample_count': len(df)}
+            return {'error': 'insufficient_samples', 'sample_count': len(paired)}
 
-        logger.info(f"Calculating metrics on {len(df):,} samples...")
+        y_true = paired['ground_truth'].round().astype(int).values
+        y_pred = paired[PREDICTION_COLUMN].round().astype(int).values
+        y_proba = paired[PROBABILITY_COLUMN].astype(float).values
+        if not set(np.unique(y_true)).issubset({0, 1}) or not set(np.unique(y_pred)).issubset({0, 1}):
+            return {'error': 'non_binary_labels', 'sample_count': len(paired)}
+        if len(np.unique(y_true)) < 2:
+            logger.warning("Ground truth is single-class; ROC-AUC is unavailable")
+            return {'error': 'single_class_ground_truth', 'sample_count': len(paired)}
+        if not np.logical_and(y_proba >= 0.0, y_proba <= 1.0).all():
+            return {'error': 'invalid_probabilities', 'sample_count': len(paired)}
 
-        # Extract predictions and ground truth
-        y_true = df['ground_truth'].values
-        y_pred = df['prediction'].values
-        y_proba = df[PROBABILITY_COLUMN].values
+        logger.info(f"Calculating metrics on {len(paired):,} complete paired samples...")
 
         # Basic metrics
         metrics = {
-            'sample_count': len(df),
+            'sample_count': len(paired),
             'positive_rate': y_true.sum() / len(y_true),
             'prediction_rate': y_pred.sum() / len(y_pred),
         }
@@ -245,7 +262,7 @@ class ModelPerformanceMonitor:
             metrics['pr_auc'] = None
 
         # Confusion matrix
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
 
         metrics['true_positives'] = int(tp)
         metrics['true_negatives'] = int(tn)

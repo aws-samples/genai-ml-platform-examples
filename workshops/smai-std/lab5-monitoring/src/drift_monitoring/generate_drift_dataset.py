@@ -81,8 +81,14 @@ RANDOM_STATE = DRIFT_GEN_RANDOM_STATE
 DRIFT_CONFIG = DRIFT_GEN_DEFAULT_CONFIG
 
 
-def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
-    """Apply drift to a specific feature based on configuration."""
+def apply_drift(
+    df: pd.DataFrame,
+    feature: str,
+    config: dict,
+    rng: np.random.Generator | None = None,
+) -> pd.DataFrame:
+    """Apply configured drift without changing missing values."""
+    rng = rng or np.random.default_rng(RANDOM_STATE)
     if feature not in df.columns:
         print(f"  Warning: Feature '{feature}' not found in dataset, skipping")
         return df
@@ -105,7 +111,7 @@ def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
         # Multiplicative drift: value = original * (factor ± noise)
         factor = config.get("factor", 1.0)
         noise = config.get("noise", 0)
-        random_factors = np.random.uniform(
+        random_factors = rng.uniform(
             factor - noise * factor,
             factor + noise * factor,
             size=len(df)
@@ -116,7 +122,7 @@ def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
         # Additive drift: value = original + (shift ± noise)
         shift = config.get("shift", 0)
         noise = config.get("noise", 0)
-        random_shifts = np.random.uniform(
+        random_shifts = rng.uniform(
             shift - noise,
             shift + noise,
             size=len(df)
@@ -137,8 +143,8 @@ def apply_drift(df: pd.DataFrame, feature: str, config: dict) -> pd.DataFrame:
     df[feature] = drifted_values
 
     # Print drift statistics
-    original_mean = original_values.mean()
-    drifted_mean = drifted_values.mean()
+    original_mean = pd.Series(original_values).mean(skipna=True)
+    drifted_mean = pd.Series(drifted_values).mean(skipna=True)
     pct_change = ((drifted_mean - original_mean) / original_mean) * 100 if original_mean != 0 else 0
 
     print(f"  {feature}:")
@@ -164,7 +170,12 @@ def generate_drifted_dataset():
 
     # Sample random rows
     print(f"\nSampling {NUM_SAMPLES} random rows...")
-    np.random.seed(RANDOM_STATE)
+    if len(df_original) < NUM_SAMPLES:
+        raise ValueError(
+            f"Source has {len(df_original)} rows; drift generation requires "
+            f"{NUM_SAMPLES} independent rows"
+        )
+    rng = np.random.default_rng(RANDOM_STATE)
     df_drifted = df_original.sample(n=NUM_SAMPLES, random_state=RANDOM_STATE).copy()
     print(f"Sampled dataset shape: {df_drifted.shape}")
 
@@ -172,7 +183,7 @@ def generate_drifted_dataset():
     print("\nApplying feature drift:")
     print("-" * 80)
     for feature, config in DRIFT_CONFIG.items():
-        df_drifted = apply_drift(df_drifted, feature, config)
+        df_drifted = apply_drift(df_drifted, feature, config, rng=rng)
 
     # Reset index
     df_drifted = df_drifted.reset_index(drop=True)

@@ -348,11 +348,11 @@ training:
 drift_thresholds:
   # Minimum acceptable ROC-AUC before alerting (monitor_model_performance.py)
   min_roc_auc: 0.85
-  # Data-drift alarm: fraction of features whose distribution moved
-  # (Evidently DataDriftPreset). 0.2 = alert if 20% of features drifted.
+  # Data-drift alarm: fraction of features whose distribution moved.
+  # Equality counts: 0.2 alerts when at least 20% of features drifted.
   data_drift: 0.20
-  # Model-drift alarm: relative ROC-AUC degradation vs the baseline.
-  # 0.05 = alert if AUC drops by 5 percentage points or more.
+  # Model-drift alarm: relative ROC-AUC loss from the registered baseline.
+  # 0.05 = alert when (baseline_auc - current_auc) / baseline_auc >= 5%.
   model_drift: 0.05
 
 # Schedule for the daily drift-monitor Lambda (EventBridge cron expression).
