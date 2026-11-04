@@ -40,8 +40,11 @@ lab2-data-prep/spark/
 lab2-data-prep/train.jsonl
 lab2-data-prep/test.jsonl
 lab2-data-prep/template.json
-# Reference-only prompt/completion rendering written by lab-2a's optional cell.
-lab2-data-prep/sft_train.jsonl
+# Serverless-format rendering written by lab-2a for the optional lab-3d.
+# The previous `sft_train.jsonl` entry never matched anything -- the notebook
+# writes these two names.
+lab2-data-prep/train_sft.jsonl
+lab2-data-prep/test_sft.jsonl
 
 # Runtime outputs in lab3-model-build. Not source:
 #   train.jsonl / test.jsonl / template.json  — lab-3b DOWNLOADS these from the
@@ -55,6 +58,9 @@ lab3-model-build/test.jsonl
 lab3-model-build/template.json
 lab3-model-build/evaluation.json
 lab3-model-build/model_card.json
+#   test_eval.jsonl                           — lab-3d's optional Section 10
+#     downloads the held-out split here to score against.
+lab3-model-build/test_eval.jsonl
 
 # Training/inference entry points written by lab-3a at runtime.
 lab3-model-build/scripts/
@@ -64,3 +70,13 @@ lab5-monitoring/shap_output/
 # Local-only runbook: session log of Lab 4A fixes and problems encountered.
 # Kept on disk as a reference but intentionally NOT committed/pushed.
 templates/CLASSIFICATION-PROJECT-TWO-REPOS.md
+
+# Generated walkthrough deck. scripts/generate-slides.py rebuilds it, cutting
+# its stage artwork from images/architecture.svg at build time -- so a
+# committed copy silently goes stale the moment that diagram changes, and it is
+# a ~2.8 MB binary that diffs as noise. slides/README.md stays tracked: it
+# documents how to rebuild and how to present it.
+slides/*.pptx
+# Scratch exports (PDF/PNG) if you render the deck for review.
+slides/*.pdf
+slides/*.png
