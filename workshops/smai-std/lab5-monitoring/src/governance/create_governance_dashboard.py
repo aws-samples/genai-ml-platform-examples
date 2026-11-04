@@ -5,8 +5,10 @@ Functions:
 - check_quicksight_subscription   — verify QuickSight is active for the account
 - verify_athena_data               — check inference/monitoring row counts in Athena
 - get_quicksight_principals        — list QuickSight user ARNs to grant permissions to
+- ensure_quicksight_service_role_policies — attach exact project IAM policies after subscription
+- ensure_quicksight_resource_permissions — add missing user grants without revocation
 - create_or_update_datasource      — create/update the Athena data source
-- grant_governance_permissions     — Lake Formation table grants (+ QuickSight service-role check)
+- grant_governance_permissions     — Lake Formation table grants
 - create_inference_dataset         — inference_responses dataset (+ calculated columns)
 - create_drift_dataset             — monitoring_responses dataset (+ calculated columns)
 - create_feature_drift_dataset     — CustomSql join of monitoring_responses + inference_responses
@@ -44,10 +46,11 @@ caller's resolved IAM identity across a superset of tables (all 7 project
 tables — harmless/idempotent to grant on all of them), so
 `grant_governance_permissions()` below calls that existing module directly
 for the table-level grants instead of reimplementing the notebook's
-subprocess-based loop. QuickSight's own data access (inline policies on its
-service role) is declared in templates/2-iam.yaml so that CloudFormation owns
-every IAM grant in the workshop; `_check_s3_permissions()` only reports whether
-those policies are in place. The `feature_drift_detail` Athena VIEW needs
+subprocess-based loop. QuickSight's own data access is declared as two
+project-scoped managed policies in templates/2-iam.yaml. The Lab 5E preflight
+attaches only those exact current-account policies after subscription creates
+its service role, then verifies the attachments before creating any assets.
+The `feature_drift_detail` Athena VIEW needs
 its own Lake Formation grant since it isn't one of the 7 tables the reused
 module covers — issued directly via boto3 in
 `grant_feature_drift_view_permissions()` (the notebook used a subprocess
@@ -83,6 +86,7 @@ from src.config.config import (
     QUICKSIGHT_ACCURACY_DATASET_NAME,
     QUICKSIGHT_ANALYSIS_ID,
     QUICKSIGHT_ANALYSIS_NAME,
+    QUICKSIGHT_ATHENA_POLICY_NAME,
     QUICKSIGHT_DASHBOARD_ID,
     QUICKSIGHT_DASHBOARD_NAME,
     QUICKSIGHT_DATASOURCE_ID,
@@ -96,9 +100,8 @@ from src.config.config import (
     QUICKSIGHT_IDENTITY_REGION,
     QUICKSIGHT_INFERENCE_DATASET_ID,
     QUICKSIGHT_INFERENCE_DATASET_NAME,
-    QUICKSIGHT_SERVICE_ROLE_NAME,
     QUICKSIGHT_S3_POLICY_NAME,
-    QUICKSIGHT_ATHENA_POLICY_NAME,
+    QUICKSIGHT_SERVICE_ROLE_NAME,
 )
 from src.setup.grant_lake_formation_permissions import (
     grant_lake_formation_permissions,
@@ -164,6 +167,332 @@ class QuickSightUnavailable(RuntimeError):
     """
 
 
+class QuickSightAccessPreflightError(QuickSightUnavailable):
+    """QuickSight's service role cannot be given the expected project access."""
+
+
+_PERMISSION_APIS = {
+    'data_source': (
+        'describe_data_source_permissions',
+        'update_data_source_permissions',
+        'DataSourceId',
+        _DATASOURCE_ACTIONS,
+    ),
+    'data_set': (
+        'describe_data_set_permissions',
+        'update_data_set_permissions',
+        'DataSetId',
+        _DATASET_ACTIONS,
+    ),
+    'analysis': (
+        'describe_analysis_permissions',
+        'update_analysis_permissions',
+        'AnalysisId',
+        _ANALYSIS_ACTIONS,
+    ),
+    'dashboard': (
+        'describe_dashboard_permissions',
+        'update_dashboard_permissions',
+        'DashboardId',
+        _DASHBOARD_ACTIONS,
+    ),
+}
+_PERMISSION_RETRYABLE_ERRORS = {
+    'ConflictException',
+    'InternalFailureException',
+    'ResourceNotFoundException',
+    'ThrottlingException',
+}
+
+
+def _client_error_code(error: Exception) -> str:
+    """Return an AWS error code when ``error`` is a botocore ClientError."""
+    if not isinstance(error, ClientError):
+        return ''
+    return error.response.get('Error', {}).get('Code', '')
+
+
+def _list_attached_policy_arns(iam_client: Any, role_name: str) -> set[str]:
+    """List every managed policy ARN attached to an IAM role."""
+    attached: set[str] = set()
+    marker = None
+    while True:
+        request = {'RoleName': role_name}
+        if marker:
+            request['Marker'] = marker
+        response = iam_client.list_attached_role_policies(**request)
+        attached.update(
+            policy['PolicyArn']
+            for policy in response.get('AttachedPolicies', [])
+        )
+        if not response.get('IsTruncated'):
+            return attached
+        marker = response.get('Marker')
+        if not marker:
+            raise QuickSightAccessPreflightError(
+                f'IAM returned a truncated attachment list for {role_name} without a marker.'
+            )
+
+
+def ensure_quicksight_service_role_policies(
+    account_id: str,
+    iam_client: Optional[Any] = None,
+    role_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+    s3_policy_name: Optional[str] = None,
+    athena_policy_name: Optional[str] = None,
+    max_attempts: int = 5,
+    retry_delay: float = 1.0,
+) -> Dict[str, Any]:
+    """Attach only this account and project's managed policies to QuickSight.
+
+    The IAM template creates both project-scoped managed policies even when a
+    workshop account has not subscribed to QuickSight yet. Once subscription
+    creates the service role, this preflight closes that ordering gap before
+    any QuickSight asset is created. It validates the exact role and policy
+    ARNs, attaches only missing policies, and verifies the resulting managed
+    policy attachments with bounded retries.
+    """
+    if max_attempts < 1:
+        raise ValueError('max_attempts must be at least 1')
+
+    resolved_role_name = role_name or QUICKSIGHT_SERVICE_ROLE_NAME
+    resolved_project_name = project_name or config.PROJECT_NAME
+    if not resolved_project_name:
+        raise QuickSightAccessPreflightError(
+            'PROJECT_NAME is empty; cannot identify the project-scoped QuickSight policies.'
+        )
+
+    expected_policy_names = {
+        'data_lake': s3_policy_name or (
+            QUICKSIGHT_S3_POLICY_NAME
+            if project_name is None
+            else f'{resolved_project_name}-QuickSightS3DataLakeAccess'
+        ),
+        'athena_access': athena_policy_name or (
+            QUICKSIGHT_ATHENA_POLICY_NAME
+            if project_name is None
+            else f'{resolved_project_name}-QuickSightAthenaAccess'
+        ),
+    }
+    canonical_policy_names = {
+        'data_lake': f'{resolved_project_name}-QuickSightS3DataLakeAccess',
+        'athena_access': f'{resolved_project_name}-QuickSightAthenaAccess',
+    }
+    if expected_policy_names != canonical_policy_names:
+        raise QuickSightAccessPreflightError(
+            'Configured QuickSight policy names do not match the current project '
+            f'{resolved_project_name!r}: expected {list(canonical_policy_names.values())}, '
+            f'got {list(expected_policy_names.values())}.'
+        )
+
+    if iam_client is None:
+        iam_client = boto3.client('iam', region_name=AWS_DEFAULT_REGION)
+
+    try:
+        role = iam_client.get_role(RoleName=resolved_role_name)['Role']
+    except Exception as error:
+        code = _client_error_code(error)
+        if code == 'NoSuchEntity':
+            raise QuickSightAccessPreflightError(
+                f'QuickSight service role {resolved_role_name!r} does not exist. '
+                'Complete the QuickSight Enterprise subscription, wait for the role, '
+                'and rerun Lab 5E.'
+            ) from error
+        raise QuickSightAccessPreflightError(
+            f'Cannot inspect QuickSight service role {resolved_role_name!r}: {error}'
+        ) from error
+
+    role_arn = role.get('Arn', '')
+    role_parts = role_arn.split(':', 5)
+    if len(role_parts) != 6 or role_parts[2] != 'iam':
+        raise QuickSightAccessPreflightError(
+            f'IAM returned an invalid ARN for {resolved_role_name!r}: {role_arn!r}.'
+        )
+    partition = role_parts[1]
+    expected_role_arn = (
+        f'arn:{partition}:iam::{account_id}:role/service-role/{resolved_role_name}'
+    )
+    if role_arn != expected_role_arn:
+        raise QuickSightAccessPreflightError(
+            f'Refusing to modify unexpected QuickSight role {role_arn!r}; '
+            f'expected exactly {expected_role_arn!r}.'
+        )
+
+    expected_policy_arns = {
+        label: f'arn:{partition}:iam::{account_id}:policy/{policy_name}'
+        for label, policy_name in expected_policy_names.items()
+    }
+    for label, policy_arn in expected_policy_arns.items():
+        try:
+            policy = iam_client.get_policy(PolicyArn=policy_arn)['Policy']
+        except Exception as error:
+            code = _client_error_code(error)
+            if code == 'NoSuchEntity':
+                raise QuickSightAccessPreflightError(
+                    f'Required project managed policy {policy_arn} does not exist. '
+                    'Deploy templates/2-iam.yaml for this PROJECT_NAME, then rerun Lab 5E.'
+                ) from error
+            raise QuickSightAccessPreflightError(
+                f'Cannot inspect required project managed policy {policy_arn}: {error}'
+            ) from error
+
+        if (
+            policy.get('Arn') != policy_arn
+            or policy.get('PolicyName') != expected_policy_names[label]
+            or policy.get('Path', '/') != '/'
+            or policy.get('IsAttachable', True) is not True
+        ):
+            raise QuickSightAccessPreflightError(
+                'Refusing to attach policy because IAM metadata does not match the '
+                f'expected current-account/current-project policy: {policy!r}.'
+            )
+
+    try:
+        attached = _list_attached_policy_arns(iam_client, resolved_role_name)
+    except Exception as error:
+        if isinstance(error, QuickSightAccessPreflightError):
+            raise
+        raise QuickSightAccessPreflightError(
+            f'Cannot list managed policies attached to {resolved_role_name!r}: {error}'
+        ) from error
+
+    missing = [
+        policy_arn
+        for policy_arn in expected_policy_arns.values()
+        if policy_arn not in attached
+    ]
+    if not missing:
+        logger.info('✓ QuickSight service role already has both project policies')
+        return {
+            'role_arn': role_arn,
+            'expected_policy_arns': expected_policy_arns,
+            'attached_now': [],
+        }
+
+    for policy_arn in missing:
+        try:
+            iam_client.attach_role_policy(
+                RoleName=resolved_role_name,
+                PolicyArn=policy_arn,
+            )
+        except Exception as error:
+            raise QuickSightAccessPreflightError(
+                f'Cannot attach required project policy {policy_arn} to '
+                f'{expected_role_arn}: {error}'
+            ) from error
+        logger.info(f'✓ Attached QuickSight project policy: {policy_arn}')
+
+    for attempt in range(max_attempts):
+        try:
+            attached = _list_attached_policy_arns(iam_client, resolved_role_name)
+        except Exception as error:
+            if attempt == max_attempts - 1:
+                raise QuickSightAccessPreflightError(
+                    f'Cannot verify managed policy attachments on {expected_role_arn}: {error}'
+                ) from error
+            time.sleep(retry_delay)
+            continue
+
+        still_missing = [policy_arn for policy_arn in missing if policy_arn not in attached]
+        if not still_missing:
+            return {
+                'role_arn': role_arn,
+                'expected_policy_arns': expected_policy_arns,
+                'attached_now': missing,
+            }
+        if attempt < max_attempts - 1:
+            time.sleep(retry_delay)
+
+    raise QuickSightAccessPreflightError(
+        f'IAM did not show the required policies on {expected_role_arn} after '
+        f'{max_attempts} checks: {still_missing}. Stop before creating QuickSight assets.'
+    )
+
+
+def ensure_quicksight_resource_permissions(
+    account_id: str,
+    resource_type: str,
+    resource_id: str,
+    quicksight_principals: List[str],
+    quicksight_client: Any,
+    max_attempts: int = 10,
+    retry_delay: float = 2.0,
+) -> Dict[str, Any]:
+    """Grant missing discovered principals without revoking existing grants."""
+    if resource_type not in _PERMISSION_APIS:
+        raise ValueError(f'Unsupported QuickSight resource type: {resource_type!r}')
+    if max_attempts < 1:
+        raise ValueError('max_attempts must be at least 1')
+
+    describe_method, update_method, id_key, actions = _PERMISSION_APIS[resource_type]
+    principals = list(dict.fromkeys(quicksight_principals))
+    if not principals:
+        raise RuntimeError(
+            f'No QuickSight principals were discovered for {resource_type} {resource_id!r}.'
+        )
+
+    grant_requested = False
+    granted_principals: List[str] = []
+    last_missing = principals
+    for attempt in range(max_attempts):
+        try:
+            response = getattr(quicksight_client, describe_method)(
+                AwsAccountId=account_id,
+                **{id_key: resource_id},
+            )
+            current = {
+                permission['Principal']: set(permission.get('Actions', []))
+                for permission in response.get('Permissions', [])
+            }
+            expected_actions = set(actions)
+            last_missing = [
+                principal
+                for principal in principals
+                if not expected_actions.issubset(current.get(principal, set()))
+            ]
+            if not last_missing:
+                return {
+                    'resource_type': resource_type,
+                    'resource_id': resource_id,
+                    'granted_principals': granted_principals,
+                }
+
+            if not grant_requested:
+                getattr(quicksight_client, update_method)(
+                    AwsAccountId=account_id,
+                    **{id_key: resource_id},
+                    GrantPermissions=[
+                        {'Principal': principal, 'Actions': actions}
+                        for principal in last_missing
+                    ],
+                )
+                granted_principals = list(last_missing)
+                grant_requested = True
+                logger.info(
+                    f'✓ Granted {resource_type} permissions to: '
+                    f'{", ".join(last_missing)}'
+                )
+        except Exception as error:
+            if (
+                _client_error_code(error) not in _PERMISSION_RETRYABLE_ERRORS
+                or attempt == max_attempts - 1
+            ):
+                raise RuntimeError(
+                    f'Cannot reconcile QuickSight permissions for {resource_type} '
+                    f'{resource_id!r}: {error}'
+                ) from error
+
+        if attempt < max_attempts - 1:
+            time.sleep(retry_delay)
+
+    raise RuntimeError(
+        f'QuickSight permissions for {resource_type} {resource_id!r} did not '
+        f'become effective after {max_attempts} checks. Missing principals: '
+        f'{last_missing}.'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Section 2/3 — read-only verification checks
 # ---------------------------------------------------------------------------
@@ -222,8 +551,8 @@ def check_quicksight_subscription(
             logger.error(
                 "QuickSight not subscribed for this account — sign up once from the "
                 "console (search for 'quick'), confirm the edition is ENTERPRISE, then "
-                "attach the data-access policies to aws-quicksight-service-role-v0 by "
-                "deploying with AttachQuickSightServiceRolePolicy=true. For bulk "
+                "rerun Lab 5E. Its preflight will attach only this project's managed "
+                "S3 and Athena policies before creating assets. For bulk provisioning, "
                 "provisioning, SUBSCRIBE_QUICKSIGHT=true "
                 "QUICKSIGHT_NOTIFICATION_EMAIL=<address> scripts/deploy-workshop.sh "
                 "does both."
@@ -233,8 +562,8 @@ def check_quicksight_subscription(
             logger.error(
                 "Cannot check QuickSight: this role lacks quicksight:DescribeAccountSettings. "
                 "QuickSight may well be subscribed — this is an IAM gap, not a sign-up gap. "
-                "Grant the quicksight:* actions listed in templates/2-iam.yaml "
-                "(QuickSightGovernanceDashboard statement) to the lab role, then re-run."
+                "Grant the QuickSightGovernance* statements from templates/2-iam.yaml "
+                "to the lab role, then re-run."
             )
             return {'subscribed': False, 'edition': None, 'reason': 'access-denied'}
         raise
@@ -383,10 +712,9 @@ def get_quicksight_principals(
     """
     Return ARNs for all QuickSight users in the account's default namespace.
 
-    Direct port of the notebook's `get_quicksight_principals()`. Falls back
-    to a wildcard Admin-group ARN if `list_users` fails or returns nothing
-    (e.g. the caller lacks quicksight:ListUsers) so dashboard resources are
-    still created with a usable (if broader) permission grant.
+    The lookup tries the configured identity region first and the asset region
+    second for accounts whose user namespace is elsewhere. It fails closed when
+    no real users can be discovered; wildcard principals are never granted.
 
     Additive region fallback: on most accounts the user namespace lives in
     the identity region, so the identity-region lookup below returns the
@@ -397,29 +725,43 @@ def get_quicksight_principals(
     Since QuickSight permission principals must exist in the SAME region as
     the resources being granted — and those resources are created in
     AWS_DEFAULT_REGION — a second lookup against AWS_DEFAULT_REGION is tried
-    before giving up on the wildcard. This path only executes when the
-    original identity-region lookup yields nothing, so existing single-region
-    behavior is unchanged.
+    before failing closed. This path only executes when the original
+    identity-region lookup yields nothing, so existing single-region behavior
+    is unchanged.
 
     Args:
         account_id: AWS account ID
         quicksight_admin_client: Optional boto3 QuickSight client bound to
             the identity region (constructed if not provided)
         identity_region: QuickSight identity region. Defaults to
-            config.QUICKSIGHT_IDENTITY_REGION. Used both for client
-            construction and the fallback ARN.
+            config.QUICKSIGHT_IDENTITY_REGION.
 
     Returns:
-        List of QuickSight user ARNs (at least one entry).
+        List of discovered QuickSight user ARNs.
+
+    Raises:
+        QuickSightUnavailable: If no concrete user principal can be discovered.
     """
     resolved_identity_region = identity_region or QUICKSIGHT_IDENTITY_REGION
 
     if quicksight_admin_client is None:
         quicksight_admin_client = boto3.client('quicksight', region_name=resolved_identity_region)
 
+    def list_user_arns(client: Any) -> List[str]:
+        arns: List[str] = []
+        next_token = None
+        while True:
+            request = {'AwsAccountId': account_id, 'Namespace': 'default'}
+            if next_token:
+                request['NextToken'] = next_token
+            response = client.list_users(**request)
+            arns.extend(user['Arn'] for user in response.get('UserList', []))
+            next_token = response.get('NextToken')
+            if not next_token:
+                return arns
+
     try:
-        users = quicksight_admin_client.list_users(AwsAccountId=account_id, Namespace='default')
-        arns = [u['Arn'] for u in users.get('UserList', [])]
+        arns = list_user_arns(quicksight_admin_client)
         if arns:
             return arns
     except Exception:
@@ -433,14 +775,17 @@ def get_quicksight_principals(
     if AWS_DEFAULT_REGION and AWS_DEFAULT_REGION != resolved_identity_region:
         try:
             asset_region_client = boto3.client('quicksight', region_name=AWS_DEFAULT_REGION)
-            users = asset_region_client.list_users(AwsAccountId=account_id, Namespace='default')
-            arns = [u['Arn'] for u in users.get('UserList', [])]
+            arns = list_user_arns(asset_region_client)
             if arns:
                 return arns
         except Exception:
             pass
 
-    return [f'arn:aws:quicksight:{resolved_identity_region}:{account_id}:user/default/Admin/*']
+    raise QuickSightUnavailable(
+        'No QuickSight users were discovered in the default namespace. Invite '
+        'the workshop identity as a QuickSight Author/Admin and ensure the lab '
+        'execution role can call quicksight:ListUsers, then rerun Lab 5E.'
+    )
 
 
 def create_or_update_datasource(
@@ -453,14 +798,12 @@ def create_or_update_datasource(
     """
     Create or update the Athena data source in QuickSight (Section 4).
 
-    Idempotent describe/create-or-update pattern: describe_data_source
-    succeeds -> update_data_source; ResourceNotFoundException -> create
-    with Permissions attached (update calls don't take Permissions —
-    matches the notebook, which only sets Permissions on create).
+    Idempotent describe/create-or-update pattern followed by additive
+    permission reconciliation for every discovered QuickSight user.
 
     Args:
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         datasource_id: Data source ID. Defaults to config.QUICKSIGHT_DATASOURCE_ID.
@@ -497,113 +840,39 @@ def create_or_update_datasource(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_source',
+        resource_id=resolved_datasource_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Data source: {resp['Arn']}")
     return resp['Arn']
 
 
 # ---------------------------------------------------------------------------
-# Section 5 — Lake Formation + S3 permissions
+# Section 5 — Lake Formation permissions
 # ---------------------------------------------------------------------------
-
-
-def _check_s3_permissions(
-    role_name: str,
-    iam_client: Any,
-) -> Dict[str, bool]:
-    """
-    Report whether the QuickSight service role has the access the dashboard needs.
-
-    QuickSight queries the data as its own service role, and those permissions
-    are declared in templates/2-iam.yaml (QuickSightServiceRoleS3Policy,
-    QuickSightServiceRoleAthenaPolicy) so that CloudFormation owns every IAM
-    grant in the workshop. Those two resources are conditional: they can only
-    attach once the account is subscribed to QuickSight and the service role
-    exists. An account that subscribed after its last deploy therefore needs the
-    gap named here, rather than getting a dashboard whose panels fail to load.
-
-    Args:
-        role_name: QuickSight service role name (e.g. QUICKSIGHT_SERVICE_ROLE_NAME)
-        iam_client: boto3 IAM client
-
-    Returns:
-        Dict with keys 'data_lake' and 'athena_access', True when that policy
-        is present on the role. An unreadable role (no iam:ListRolePolicies,
-        role absent) reports False with a warning rather than raising — every
-        other Lab 5 notebook works without QuickSight.
-    """
-    results = {'data_lake': False, 'athena_access': False}
-
-    try:
-        attached = iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
-    except Exception as e:
-        logger.warning(f"  ✗ Cannot read policies on {role_name}: {e}")
-        logger.warning(
-            "    Run scripts/deploy-workshop.sh once the account is subscribed to "
-            "QuickSight: the deploy is what grants QuickSight access to the data "
-            "bucket and Athena."
-        )
-        return results
-
-    # Policy names are project-scoped in templates/2-iam.yaml and mirrored by
-    # config.QUICKSIGHT_S3_POLICY_NAME / QUICKSIGHT_ATHENA_POLICY_NAME.
-    results['data_lake'] = QUICKSIGHT_S3_POLICY_NAME in attached
-    results['athena_access'] = QUICKSIGHT_ATHENA_POLICY_NAME in attached
-
-    for label, present in (
-        (QUICKSIGHT_S3_POLICY_NAME, results['data_lake']),
-        (QUICKSIGHT_ATHENA_POLICY_NAME, results['athena_access']),
-    ):
-        if present:
-            logger.info(f"  ✓ Policy: {label}")
-        else:
-            logger.warning(
-                f"  ✗ Policy {label} missing on {role_name} — the dashboard will be "
-                "created but its panels will fail to load data. Run "
-                "scripts/deploy-workshop.sh to attach it."
-            )
-
-    return results
 
 
 def grant_governance_permissions(
     database: Optional[str] = None,
     region: Optional[str] = None,
     lambda_role_arn: Optional[str] = None,
-    quicksight_service_role_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Grant the Lake Formation table access the dashboard needs (Section 5).
+    """Grant the Lake Formation table access the dashboard needs (Section 5).
 
-    Reuses the existing
-    `src.setup.grant_lake_formation_permissions.grant_lake_formation_permissions()`
-    (covers all 7 project tables — a harmless/idempotent superset of the 3
-    tables this dashboard actually needs — via boto3, no subprocess shell-outs)
-    rather than reimplementing the notebook's inline subprocess-based grant loop.
-
-    QuickSight's own data access is declared in templates/2-iam.yaml, so this
-    function only calls `_check_s3_permissions()` to report whether those
-    CloudFormation-owned policies are attached to the QuickSight service role.
-
-    Args:
-        database: Athena/Glue database name. Defaults to config.ATHENA_DATABASE.
-        region: AWS region. Defaults to config.AWS_DEFAULT_REGION.
-        lambda_role_arn: Drift-monitor Lambda's exec role ARN, passed through
-            to grant_lake_formation_permissions for the monitoring_responses
-            grant. Defaults to config.LAMBDA_EXEC_ROLE.
-        quicksight_service_role_name: QuickSight service role name. Defaults
-            to config.QUICKSIGHT_SERVICE_ROLE_NAME.
-
-    Returns:
-        Dict with keys: 'lake_formation' ('done'), 's3_permissions' (the
-        `_check_s3_permissions()` result dict, reporting what CloudFormation
-        has attached to the QuickSight service role).
+    QuickSight service-role IAM access is reconciled separately by
+    :func:`ensure_quicksight_service_role_policies` immediately after the
+    subscription check. Keeping that fail-closed preflight separate guarantees
+    it runs before any data source, dataset, view, analysis, or dashboard write.
     """
     resolved_database = database or ATHENA_DATABASE
     resolved_region = region or AWS_DEFAULT_REGION
-    resolved_lambda_role_arn = lambda_role_arn if lambda_role_arn is not None else LAMBDA_EXEC_ROLE
-    resolved_quicksight_service_role_name = quicksight_service_role_name or QUICKSIGHT_SERVICE_ROLE_NAME
-
-    iam_client = boto3.client('iam', region_name=resolved_region)
+    resolved_lambda_role_arn = (
+        lambda_role_arn if lambda_role_arn is not None else LAMBDA_EXEC_ROLE
+    )
 
     grant_lake_formation_permissions(
         database=resolved_database,
@@ -611,12 +880,7 @@ def grant_governance_permissions(
         lambda_role_arn=resolved_lambda_role_arn,
     )
 
-    s3_results = _check_s3_permissions(
-        role_name=resolved_quicksight_service_role_name,
-        iam_client=iam_client,
-    )
-
-    return {'lake_formation': 'done', 's3_permissions': s3_results}
+    return {'lake_formation': 'done'}
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +907,7 @@ def create_inference_dataset(
     Args:
         datasource_arn: ARN of the Athena data source
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         dataset_id: Dataset ID. Defaults to config.QUICKSIGHT_INFERENCE_DATASET_ID.
@@ -776,6 +1040,13 @@ def create_inference_dataset(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_set',
+        resource_id=resolved_dataset_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Inference dataset: {resp['Arn']}")
     return resp['Arn']
 
@@ -799,7 +1070,7 @@ def create_drift_dataset(
     Args:
         datasource_arn: ARN of the Athena data source
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         dataset_id: Dataset ID. Defaults to config.QUICKSIGHT_DRIFT_DATASET_ID.
@@ -916,6 +1187,13 @@ def create_drift_dataset(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_set',
+        resource_id=resolved_dataset_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Drift dataset: {resp['Arn']}")
     return resp['Arn']
 
@@ -942,7 +1220,7 @@ def create_feature_drift_dataset(
     Args:
         datasource_arn: ARN of the Athena data source
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         dataset_id: Dataset ID. Defaults to config.QUICKSIGHT_FEATURE_DRIFT_DATASET_ID.
@@ -1074,12 +1352,20 @@ ORDER BY m.monitoring_timestamp DESC
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_set',
+        resource_id=resolved_dataset_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Feature drift dataset: {resp['Arn']}")
     return resp['Arn']
 
 
 def create_feature_drift_detail_view(
     database: Optional[str] = None,
+    monitoring_table: Optional[str] = None,
     athena_client: Optional[Any] = None,
     output_s3: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1095,6 +1381,8 @@ def create_feature_drift_detail_view(
 
     Args:
         database: Athena database name. Defaults to config.ATHENA_DATABASE.
+        monitoring_table: Monitoring table containing per-feature JSON. Defaults
+            to config.ATHENA_MONITORING_RESPONSES_TABLE.
         athena_client: Optional boto3 Athena client (constructed if not provided)
         output_s3: S3 location for query results. Defaults to config.ATHENA_OUTPUT_S3.
 
@@ -1105,6 +1393,7 @@ def create_feature_drift_detail_view(
         RuntimeError: If the CREATE VIEW query (or the test query) fails.
     """
     resolved_database = database or ATHENA_DATABASE
+    resolved_monitoring_table = monitoring_table or ATHENA_MONITORING_RESPONSES_TABLE
     resolved_output_s3 = output_s3 or ATHENA_OUTPUT_S3
 
     if athena_client is None:
@@ -1155,9 +1444,9 @@ SELECT
             ELSE TRY(CAST(json_extract_scalar(json_format(feature_value), '$.magnitude') AS DOUBLE)) > 1.0
         END
     ) as drift_detected
-FROM {resolved_database}.monitoring_responses
+FROM {resolved_database}.{resolved_monitoring_table}
 CROSS JOIN UNNEST(
-    CAST(json_parse(per_feature_drift_scores) AS MAP(VARCHAR, JSON))
+    TRY(CAST(json_parse(per_feature_drift_scores) AS MAP(VARCHAR, JSON)))
 ) AS t(feature_name, feature_value)
 WHERE per_feature_drift_scores IS NOT NULL
     AND per_feature_drift_scores != 'null'
@@ -1286,7 +1575,7 @@ def create_feature_level_dataset(
     Args:
         datasource_arn: ARN of the Athena data source
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         dataset_id: Dataset ID. Defaults to config.QUICKSIGHT_FEATURE_LEVEL_DATASET_ID.
@@ -1367,6 +1656,13 @@ def create_feature_level_dataset(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_set',
+        resource_id=resolved_dataset_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Feature-level dataset: {resp['Arn']}")
     return resp['Arn']
 
@@ -1390,7 +1686,7 @@ def create_accuracy_dataset(
     Args:
         datasource_arn: ARN of the Athena data source
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         quicksight_client: Optional boto3 QuickSight client bound to the
             asset region (constructed if not provided)
         dataset_id: Dataset ID. Defaults to config.QUICKSIGHT_ACCURACY_DATASET_ID.
@@ -1523,6 +1819,13 @@ ORDER BY i.request_timestamp DESC
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='data_set',
+        resource_id=resolved_dataset_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Accuracy dataset ARN: {resp['Arn']}")
     return resp['Arn']
 
@@ -2391,7 +2694,7 @@ def create_or_update_analysis(
 
     Args:
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         dataset_arns: Dict with keys 'inference', 'drift', 'feature_drift',
             'feature_level', 'accuracy' mapping to dataset ARNs
         quicksight_client: Optional boto3 QuickSight client bound to the
@@ -2441,7 +2744,7 @@ def create_or_update_analysis(
             analysis_resp = quicksight_client.describe_analysis(AwsAccountId=account_id, AnalysisId=resolved_analysis_id)
             status = analysis_resp['Analysis']['Status']
 
-            if status == 'CREATION_SUCCESSFUL':
+            if status in ('CREATION_SUCCESSFUL', 'UPDATE_SUCCESSFUL'):
                 logger.info("  ✓ Analysis update successful")
                 break
             elif status in ('CREATION_FAILED', 'UPDATE_FAILED', 'DELETED'):
@@ -2470,6 +2773,13 @@ def create_or_update_analysis(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='analysis',
+        resource_id=resolved_analysis_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     logger.info(f"✓ Analysis: {resp['Arn']}")
     return resp['Arn']
 
@@ -2501,7 +2811,7 @@ def publish_dashboard(
 
     Args:
         account_id: AWS account ID
-        quicksight_principals: QuickSight user ARNs to grant on create
+        quicksight_principals: QuickSight user ARNs to ensure on the resource
         dataset_arns: Dict with keys 'inference', 'drift', 'feature_drift',
             'feature_level', 'accuracy' mapping to dataset ARNs
         quicksight_client: Optional boto3 QuickSight client bound to the
@@ -2592,6 +2902,13 @@ def publish_dashboard(
         else:
             raise
 
+    ensure_quicksight_resource_permissions(
+        account_id=account_id,
+        resource_type='dashboard',
+        resource_id=resolved_dashboard_id,
+        quicksight_principals=quicksight_principals,
+        quicksight_client=quicksight_client,
+    )
     dashboard_url = f'https://{resolved_region}.quicksight.aws.amazon.com/sn/dashboards/{resolved_dashboard_id}'
     logger.info(f"✓ Dashboard: {dashboard_url}")
     return {
@@ -2735,11 +3052,12 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
     Build/refresh the full QuickSight governance dashboard.
 
     Top-level orchestrator wiring together every section of the notebook in
-    order: resolve account -> subscription check -> Athena data check ->
-    principals -> data source -> Lake Formation/S3 permissions -> inference
-    dataset -> drift dataset -> feature drift dataset -> feature_drift_detail
-    view (+ its Lake Formation grant) -> feature-level dataset -> accuracy
-    dataset -> analysis -> dashboard -> (best-effort) embed URL.
+    order: resolve account -> subscription check -> QuickSight service-role
+    policy preflight -> Athena data check -> principals -> data source -> Lake
+    Formation permissions -> verified feature_drift_detail view (+ its Lake
+    Formation grant) -> inference dataset -> drift dataset -> feature drift
+    dataset -> feature-level dataset -> accuracy dataset -> analysis -> dashboard
+    -> (best-effort) embed URL.
 
     This is the entry point `lab5e-governance-dashboard.ipynb` calls.
 
@@ -2755,14 +3073,16 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
         'datasource_arn', 'inference_dataset_arn', 'drift_dataset_arn',
         'feature_drift_dataset_arn', 'feature_level_dataset_arn',
         'accuracy_dataset_arn', 'athena_verification' (verify_athena_data()
-        result dict), 'embed_url' (str or None), 'quicksight_subscribed'
-        (bool), 'quicksight_edition' (str or None).
+        result dict), 'quicksight_service_role_permissions' (preflight result),
+        'embed_url' (str or None), 'quicksight_subscribed' (bool), and
+        'quicksight_edition' (str or None).
     """
     resolved_region = region or AWS_DEFAULT_REGION
 
     quicksight_admin_client = boto3.client('quicksight', region_name=QUICKSIGHT_IDENTITY_REGION)
     quicksight_client = boto3.client('quicksight', region_name=resolved_region)
     athena_client = boto3.client('athena', region_name=resolved_region)
+    iam_client = boto3.client('iam', region_name=resolved_region)
     sts_client = boto3.client('sts', region_name=resolved_region)
 
     account_id = sts_client.get_caller_identity()['Account']
@@ -2780,9 +3100,9 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
             raise QuickSightUnavailable(
                 f"This role cannot call QuickSight in account {account_id} "
                 f"(quicksight:DescribeAccountSettings denied). QuickSight itself may be "
-                f"subscribed — the missing piece is IAM. Attach the quicksight:* actions "
-                f"from templates/2-iam.yaml (QuickSightGovernanceDashboard statement) to the lab "
-                f"execution role, then re-run this notebook."
+                f"subscribed — the missing piece is IAM. Attach the QuickSightGovernance* "
+                f"statements from templates/2-iam.yaml to the lab execution role, then re-run "
+                f"this notebook."
             )
         raise QuickSightUnavailable(
             f"QuickSight is not subscribed for account {account_id}. Sign up once per "
@@ -2793,6 +3113,11 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
         )
     elif subscription['edition'] == 'STANDARD':
         logger.warning("Definition API requires Enterprise edition")
+
+    service_role_permissions = ensure_quicksight_service_role_policies(
+        account_id=account_id,
+        iam_client=iam_client,
+    )
 
     data_check = verify_athena_data(athena_client=athena_client)
     if not data_check['has_drift_data']:
@@ -2814,6 +3139,12 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
 
     grant_governance_permissions(region=resolved_region)
 
+    # Create and verify the prerequisite view before any dataset writes. A bad
+    # view definition must fail the run before QuickSight can retain a dataset
+    # that references a missing or invalid view.
+    create_feature_drift_detail_view(athena_client=athena_client)
+    grant_feature_drift_view_permissions(region=resolved_region)
+
     inference_arn = create_inference_dataset(
         datasource_arn, account_id, quicksight_principals, quicksight_client=quicksight_client,
     )
@@ -2823,11 +3154,6 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
     feature_drift_arn = create_feature_drift_dataset(
         datasource_arn, account_id, quicksight_principals, quicksight_client=quicksight_client,
     )
-
-    # feature_drift_detail view must exist before the feature-level dataset
-    # references it.
-    create_feature_drift_detail_view(athena_client=athena_client)
-    grant_feature_drift_view_permissions(region=resolved_region)
 
     feature_level_arn = create_feature_level_dataset(
         datasource_arn, account_id, quicksight_principals, quicksight_client=quicksight_client,
@@ -2865,6 +3191,7 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
         'feature_level_dataset_arn': feature_level_arn,
         'accuracy_dataset_arn': accuracy_arn,
         'athena_verification': data_check,
+        'quicksight_service_role_permissions': service_role_permissions,
         'embed_url': embed_url,
         'quicksight_subscribed': subscription['subscribed'],
         'quicksight_edition': subscription['edition'],

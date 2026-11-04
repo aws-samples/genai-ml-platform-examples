@@ -230,19 +230,14 @@ TEARDOWN=true ./scripts/deploy-workshop.sh   # stacks only, no bucket cleanup
 
 ### QuickSight prerequisites (one-time per account)
 
-Only **Lab 5E** (`lab5-monitoring/lab5e-governance-dashboard.ipynb`) needs QuickSight. Every other lab runs without it. There is no CloudFormation resource for a QuickSight subscription, so it is a separate, opt-in step — and it has two halves either way:
+Only **Lab 5E** (`lab5-monitoring/lab5e-governance-dashboard.ipynb`) needs QuickSight. Every other lab runs without it. There is no CloudFormation resource for a QuickSight subscription, so subscription stays a separate, explicit opt-in step.
 
-1. subscribe the account to **Enterprise** edition (billable, one-time, account-global);
-2. deploy the stack with `AttachQuickSightServiceRolePolicy=true` so the data-access policies land on `aws-quicksight-service-role-v0`.
-
-The ordering is not optional: an IAM policy resource fails outright if the role it targets does not exist, and that role is created by the subscription. That is why `AttachQuickSightServiceRolePolicy` defaults to `false` — a stack deployed before the subscription would otherwise roll back entirely. And skipping half 2 is the usual cause of a dashboard that publishes but whose panels all fail to load, because QuickSight reads Athena and S3 as its own service role, *not* as the notebook's execution role.
+The IAM stack always creates two project-scoped managed policies for Lab 5E. If QuickSight is already subscribed, CloudFormation attaches them to `aws-quicksight-service-role-v0` during deployment. If infrastructure was provisioned first and the subscription was completed later, Lab 5E runs an idempotent preflight before creating any assets. The preflight resolves only the current account and project's two policy ARNs, attaches only whichever are missing, verifies both attachments, and stops with an actionable error if the role or either policy is absent. It never adds broad AWS-managed S3 access.
 
 **The default path is the console**, during Lab 5E. The workshop docs
-(`model-governance-at-scale-with-sagemaker-ai`, `content/lab/lab-5/lab-5e/`) walk it with
-screenshots, and are the canonical version; the summary here is for anyone working from this
-repo alone.
+(`model-governance-at-scale-with-sagemaker-ai`, `content/lab/lab-5/lab-5e/`) walk through subscription with screenshots and are the canonical version; the summary here is for anyone working from this repo alone.
 
-*Half 1 — subscribe.* Search the console for `quick`: you'll get two entries, **Amazon Quick**
+*Subscribe manually.* Search the console for `quick`: you'll get two entries, **Amazon Quick**
 (the suite the BI product now lives in) and **QuickSight** (the classic entry). Either works. On
 the form, set a globally unique account name and a notification email, and leave
 **Authentication method** on its default (*Password-based or Single-Sign On*, the equivalent of
@@ -257,24 +252,7 @@ aws quicksight describe-account-settings --aws-account-id "${ACCOUNT_ID}" \
   --region us-east-1 --query 'AccountSettings.Edition' --output text
 ```
 
-*Half 2 — grant the service role access.* Now that `aws-quicksight-service-role-v0` exists, re-run
-the deploy limited to the IAM stack. The script detects the service role and sets
-`AttachQuickSightServiceRolePolicy=true` itself, so there is no parameter to pass:
-
-```bash
-ONLY_STACKS=iam ./scripts/deploy-workshop.sh
-```
-
-That touches only `<project>-iam`, so it is minutes rather than the 20-40 of a full deploy — which
-is the practical benefit of the stacks being independent. A plain `./scripts/deploy-workshop.sh`
-reaches the same end state and is safe to re-run, but it walks all six stacks.
-
-Where you cannot update the stack at all, attach the two `PolicyDocument` blocks from `templates/2-iam.yaml`
-directly with `aws iam put-role-policy`, using the project-scoped names
-`${ProjectName}-QuickSightS3DataLakeAccess` and `${ProjectName}-QuickSightAthenaAccess` — these are
-project-scoped so multiple projects can share the account-global QuickSight service role, and
-`create_governance_dashboard.py` matches them by name (via `config.QUICKSIGHT_S3_POLICY_NAME` /
-`QUICKSIGHT_ATHENA_POLICY_NAME`).
+After subscription finishes, run Lab 5E. Its preflight waits for the service role to exist, verifies the two managed policies created by `templates/2-iam.yaml`, and attaches any missing policy before it creates the Athena data source, datasets, view, analysis, or dashboard. Re-running the lab is a no-op for attachments that are already present. You can still run `ONLY_STACKS=iam ./scripts/deploy-workshop.sh`; the script detects the role and lets CloudFormation attach the same policies, but a second deployment is no longer required for the manual-subscription path.
 
 **Automating both halves instead.** For provisioning accounts in bulk rather than teaching from
 them, the deploy script folds the whole thing into one run:
@@ -307,8 +285,9 @@ nobody read.
 | Symptom | Cause |
 |---|---|
 | Notebook reports "QuickSight not subscribed" | No subscription, or the caller lacks `quicksight:DescribeAccountSettings` — the notebook cannot tell these apart and says so |
-| Dashboard created, panels show an error | QuickSight's service role has no access to the data bucket or Athena — redeploy with `AttachQuickSightServiceRolePolicy=true` |
-| `AccessDeniedException` partway through the build | The execution role has some QuickSight permissions but not all — apply the `QuickSightGovernanceDashboard` statement from `templates/2-iam.yaml` |
+| Dashboard build stops at IAM preflight | QuickSight service role or one of the two current-project managed policies is missing; finish subscription or deploy `templates/2-iam.yaml` for the same `PROJECT_NAME` |
+| Dashboard opens but a new user lacks an asset | Re-run Lab 5E; it adds every discovered QuickSight user to existing resources without revoking other principals |
+| `AccessDeniedException` partway through the build | The execution role has some QuickSight permissions but not all — apply the `QuickSightGovernance*` statements from `templates/2-iam.yaml` |
 | Subscription call fails with an account-name or region error | The account is already subscribed in a different region (set `QUICKSIGHT_IDENTITY_REGION`), or the name is taken (set `QUICKSIGHT_ACCOUNT_NAME`) |
 
 ### 2. Run Lab 0 Setup (once per JupyterLab space)

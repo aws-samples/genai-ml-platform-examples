@@ -11,6 +11,8 @@ Lab 5D uses `src.drift_monitoring.monitoring_session.MonitoringSession` to:
 4. calculate data and model drift; and
 5. persist one monitoring row for MLflow, Athena, and the Lab 5E QuickSight dashboard.
 
+Lab 5E uses `src.governance.create_governance_dashboard` to create or refresh the QuickSight governance assets. Before any asset write, it verifies the account's QuickSight service role and idempotently attaches only the two current-project managed policies created by `templates/2-iam.yaml`. It also adds newly discovered QuickSight users to existing assets without revoking other principals.
+
 Install the package and notebook dependencies from this directory with:
 
 ```bash

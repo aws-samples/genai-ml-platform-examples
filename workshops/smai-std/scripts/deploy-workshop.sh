@@ -147,7 +147,7 @@
 #                   QuickSight account name (default: <PROJECT_NAME>-<acct>).
 #   VERIFY_QUICKSIGHT_IAM
 #                   'true' (default) or 'false' - after deploying, confirm the
-#                   execution roles really carry the QuickSightGovernanceDashboard
+#                   execution roles really carry the QuickSightGovernance*
 #                   actions Lab 5E needs (2-iam.yaml). Best-effort: warns only.
 #   SKIP_QS_POLICY  'false' (default) or 'true' - force
 #                   AttachQuickSightServiceRolePolicy=false even when the
@@ -880,20 +880,20 @@ if [ "${VERIFY_QUICKSIGHT_IAM}" = "true" ] && is_selected iam; then
     elif [ -n "${denied}" ]; then
       warn "${role_arn##*/} is MISSING QuickSight actions: ${denied}"
       warn "  Lab 5E will report 'Cannot check QuickSight'. The grant is the"
-      warn "  QuickSightGovernanceDashboard statement in templates/2-iam.yaml."
+      warn "  QuickSightGovernance* statements in templates/2-iam.yaml."
       warn "  Re-run this script from a checkout that contains it."
     else
       log "  QuickSight grant present on ${role_arn##*/}"
     fi
   done
 
-  # Second half of Lab 5E's permissions: what QuickSight itself may read. These
-  # are the conditional AWS::IAM::Policy resources in 2-iam.yaml, so this only
-  # confirms the condition was satisfied at deploy time.
+  # Best-case path for Lab 5E's data access: CloudFormation attached the two
+  # managed policies because the service role existed before IAM deployment.
+  # Manual subscription after deployment is covered later by Lab 5E's preflight.
   if [ "${ATTACH_QS_POLICY}" = "true" ]; then
-    qs_role_policies="$(aws iam list-role-policies \
+    qs_role_policies="$(aws iam list-attached-role-policies \
       --role-name aws-quicksight-service-role-v0 \
-      --query 'PolicyNames' --output text 2>/dev/null || echo "__ERROR__")"
+      --query 'AttachedPolicies[].PolicyName' --output text 2>/dev/null || echo "__ERROR__")"
     if [ "${qs_role_policies}" = "__ERROR__" ]; then
       warn "Could not list policies on aws-quicksight-service-role-v0; skipping."
     else
