@@ -867,14 +867,20 @@ Resources:
             Resource:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightS3DataLakeAccess"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightAthenaAccess"
+          # AttachRolePolicy authorizes against the role only; a policy ARN in
+          # Resource restricts nothing. The iam:PolicyARN condition is what
+          # limits attachment to the two project policies.
           - Sid: QuickSightProjectPolicyAttach
             Effect: Allow
             Action:
               - iam:AttachRolePolicy
             Resource:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/aws-quicksight-service-role-v0"
-              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightS3DataLakeAccess"
-              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightAthenaAccess"
+            Condition:
+              ArnEquals:
+                iam:PolicyARN:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightS3DataLakeAccess"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightAthenaAccess"
       Roles:
         - !Ref UserASageMakerExecutionRole
         - !Ref UserBSageMakerExecutionRole
