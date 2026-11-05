@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DRIFT_NUM_METHOD = "jensenshannon"
 DRIFT_CAT_METHOD = "jensenshannon"
 DRIFT_SCORE_THRESHOLD = 0.1
-MIN_FEATURE_SAMPLES = 50
+MIN_FEATURE_SAMPLES = 300  # Below this, JS distance on undrifted data often exceeds 0.1
 
 LOWER_IS_MORE_DRIFT = "lower_is_more_drift"
 HIGHER_IS_MORE_DRIFT = "higher_is_more_drift"

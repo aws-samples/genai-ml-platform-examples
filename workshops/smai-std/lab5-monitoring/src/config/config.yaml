@@ -355,6 +355,16 @@ drift_thresholds:
   # 0.05 = alert when (baseline_auc - current_auc) / baseline_auc >= 5%.
   model_drift: 0.05
 
+# ---------------------------------------------------------------------------
+# Lab 5D monitoring-run membership
+# ---------------------------------------------------------------------------
+# Each Lab 5D run tags every inference row for the endpoint that no earlier run
+# has tagged, up to an Athena-timed cutoff. Rows that land after the cutoff are
+# picked up by the next run. Untagged rows older than lookback_hours are left
+# out, so the first run in an account does not sweep the whole table history.
+monitoring_capture:
+  lookback_hours: 24
+
 # Schedule for the daily drift-monitor Lambda (EventBridge cron expression).
 # Read by notebook 3 Section 7.1 as DRIFT_MONITOR_SCHEDULE for display. The
 # actual EventBridge rule is created by scripts/deploy_lambda_container.sh

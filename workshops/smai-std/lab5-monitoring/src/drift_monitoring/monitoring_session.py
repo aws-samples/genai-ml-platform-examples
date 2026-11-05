@@ -1,8 +1,8 @@
 """Cohesive, importable orchestration for the Lab 5D fresh-run workflow.
 
 The notebook deliberately delegates mechanics to :class:`MonitoringSession`.
-Each session starts a new capture window before endpoint traffic, waits for the
-expected capture rows, tags those rows once, and uses that persisted tag for
+Each run claims every inference row that no earlier run has tagged, up to an
+Athena-timed cutoff, tags those rows once, and uses that persisted tag for
 ground truth, drift reports, model metrics, and dashboard persistence.
 """
 
@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
+import warnings
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -38,13 +39,22 @@ from src.config.config import (
     MIN_ROC_AUC_THRESHOLD,
     MLFLOW_MODEL_NAME,
     MODEL_DRIFT_THRESHOLD,
+    MONITORING_CAPTURE_LOOKBACK_HOURS,
     PREDICTION_COLUMN,
     PROBABILITY_COLUMN,
     resolve_endpoint_name,
 )
 from src.train_pipeline.athena.athena_client import AthenaClient
 
-MIN_MONITORING_SAMPLES = 50
+# Smallest batch whose Jensen-Shannon scores sit below the 0.1 threshold when
+# nothing has drifted. On the bank-marketing data, 101 rows raised a dataset
+# drift alarm on every undrifted sample; 300 raised none while still detecting
+# the configured drift scenario every time.
+MIN_MONITORING_SAMPLES = 300
+# Endpoint containers stamp request_timestamp with their own clock, while run
+# boundaries come from Athena. This allowance only paces the wait for the
+# session's own traffic; it never decides run membership.
+CLOCK_SKEW_ALLOWANCE = timedelta(seconds=60)
 
 
 def _sql_string(value: str) -> str:
@@ -59,7 +69,7 @@ def _naive_utc(value: Any) -> datetime:
 
 
 def _timestamp_literal(value: datetime) -> str:
-    return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
+    return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
 
 
 def _sql_value(value: Any) -> str:
@@ -106,27 +116,33 @@ def evaluate_model_drift(
 
 @dataclass
 class CaptureWindow:
-    """Membership boundary and row counts for one fresh monitoring run."""
+    """Membership boundary and row counts for one since-last-run monitoring run.
+
+    Members are the endpoint's untagged rows with ``lookback_start <=
+    request_timestamp <= ended_at``. ``sent_rows`` counts this session's own
+    traffic and only paces the wait for asynchronous captures.
+    """
 
     monitoring_run_id: str
     started_at: datetime
+    lookback_start: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    expected_rows: int = 0
+    sent_rows: int = 0
     tagged_rows: int = 0
+    older_untagged_rows: int = 0
 
     @property
     def is_closed(self) -> bool:
-        return self.ended_at is not None and self.tagged_rows == self.expected_rows
+        return self.ended_at is not None and self.tagged_rows > 0
 
 
 class MonitoringSession:
-    """Run the Lab 5D endpoint-to-dashboard path for one isolated row set.
+    """Run the Lab 5D endpoint-to-dashboard path for one monitoring run.
 
-    ``monitoring_run_id`` is the durable batch key. After capture closes, every
-    downstream query selects by this key rather than by a rolling lookback or a
-    previous monitoring-table timestamp. This makes an empty monitoring table
-    and repeated notebook runs behave the same way and prevents pre-run or
-    late-arriving rows from leaking into the comparison.
+    A run covers all endpoint traffic since the previous run: every row that no
+    earlier run has tagged. ``monitoring_run_id`` is the durable batch key.
+    After capture closes, every downstream query selects by this key, so a row
+    belongs to exactly one run and late-arriving rows roll into the next run.
     """
 
     def __init__(
@@ -137,7 +153,13 @@ class MonitoringSession:
         glue_client: Optional[Any] = None,
         region: str = AWS_DEFAULT_REGION,
         min_samples: int = MIN_MONITORING_SAMPLES,
+        capture_lookback_hours: float = MONITORING_CAPTURE_LOOKBACK_HOURS,
     ) -> None:
+        if min_samples < 1:
+            raise ValueError("min_samples must be at least 1")
+        if not np.isfinite(capture_lookback_hours) or capture_lookback_hours <= 0:
+            raise ValueError("capture_lookback_hours must be a positive number")
+
         self.region = region
         self.endpoint_name = endpoint_name or ENDPOINT_NAME or resolve_endpoint_name()
         if not self.endpoint_name:
@@ -150,6 +172,7 @@ class MonitoringSession:
         )
         self.glue = glue_client or boto3.client("glue", region_name=region)
         self.min_samples = min_samples
+        self.capture_lookback_hours = capture_lookback_hours
         self.features = schema.feature_names()
         self.target_column = schema.target_column()
         self.window: Optional[CaptureWindow] = None
@@ -167,6 +190,7 @@ class MonitoringSession:
             "feature_count": len(self.features),
             "target_column": self.target_column,
             "minimum_samples": self.min_samples,
+            "capture_lookback_hours": self.capture_lookback_hours,
             "feature_drift_method": "jensenshannon",
             "feature_drift_score_threshold": 0.1,
             "dataset_drift_share_threshold": DATA_DRIFT_THRESHOLD,
@@ -191,16 +215,18 @@ class MonitoringSession:
 
     def _athena_now(self) -> datetime:
         result = self.athena.execute_query(
-            "SELECT CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) AS now_utc"
+            "SELECT CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS now_utc"
         )
         if result.empty or pd.isna(result["now_utc"].iloc[0]):
             raise RuntimeError("Athena did not return a capture timestamp")
         return _naive_utc(result["now_utc"].iloc[0])
 
     def start_run(self) -> CaptureWindow:
-        """Open a new server-timed capture window before endpoint traffic."""
-        if self.window and not self.window.is_closed:
-            raise RuntimeError("The current capture window is still open")
+        """Start a new run; it will claim every row since the previous run.
+
+        Starting over is always safe: an unclosed run has tagged nothing, so
+        its traffic simply belongs to the next run that closes.
+        """
         started_at = self._athena_now()
         run_id = f"notebook-drift-{started_at:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
         existing = self.athena.execute_query(
@@ -209,7 +235,11 @@ class MonitoringSession:
         )
         if int(existing["n"].iloc[0]) != 0:
             raise RuntimeError(f"Generated monitoring_run_id already exists: {run_id}")
-        self.window = CaptureWindow(run_id, started_at)
+        self.window = CaptureWindow(
+            run_id,
+            started_at,
+            lookback_start=started_at - timedelta(hours=self.capture_lookback_hours),
+        )
         self.data_drift_results = None
         self.model_results = None
         self.mlflow_result = None
@@ -268,11 +298,11 @@ class MonitoringSession:
 
     def send_drift_traffic(
         self,
-        count: int = 101,
+        count: int = MIN_MONITORING_SAMPLES,
         csv_path: Path = CSV_DRIFTED_DATA,
         random_state: int = 123,
     ) -> Dict[str, Any]:
-        """Send complete generated rows after opening a fresh capture window."""
+        """Send complete generated rows as traffic for the current run."""
         if self.window is None:
             self.start_run()
         elif self.window.ended_at is not None:
@@ -298,13 +328,13 @@ class MonitoringSession:
                 responses.append(self.invoke_endpoint(row[self.features].to_dict()))
             except Exception as exc:
                 errors.append(str(exc))
+        self.window.sent_rows += len(responses)
         if errors:
             raise RuntimeError(
                 f"{len(errors)} of {count} endpoint invocations failed; capture was not closed. "
                 f"First error: {errors[0]}"
             )
 
-        self.window.expected_rows = len(responses)
         predictions = [item["prediction"] for item in responses]
         return {
             "sent": len(responses),
@@ -316,97 +346,174 @@ class MonitoringSession:
             "latency_p95_ms": float(np.percentile([r["latency_ms"] for r in responses], 95)),
         }
 
+    def _capture_bounds(self) -> tuple[datetime, datetime]:
+        """Return the run's lookback start and the session-traffic pacing bound."""
+        lookback_start = self.window.lookback_start or (
+            self.window.started_at - timedelta(hours=self.capture_lookback_hours)
+        )
+        return lookback_start, self.window.started_at - CLOCK_SKEW_ALLOWANCE
+
     def close_capture(
         self,
         timeout_seconds: int = 240,
         poll_seconds: int = 10,
     ) -> Dict[str, Any]:
-        """Wait for exactly the sent rows, close the window, and tag membership.
+        """Tag every untagged row since the last run and close this run.
 
-        The method fails if more than the expected number appears in the window,
-        which detects concurrent traffic instead of silently mixing it into this
-        run. Rows arriving after the chosen upper bound remain untagged and are
-        excluded from every downstream query.
+        Members are this endpoint's rows with no ``monitoring_run_id`` and a
+        ``request_timestamp`` between the lookback start and an Athena-timed
+        cutoff. Rows tagged by earlier runs are excluded, and rows that land
+        after the cutoff stay untagged for the next run. This session's own
+        traffic only decides how long to wait for asynchronous captures.
+        Nothing is tagged unless at least ``min_samples`` rows qualify, so a
+        failed close can be retried after sending more traffic or waiting.
         """
-        if self.window is None or self.window.expected_rows <= 0:
-            raise RuntimeError("Send drift traffic before closing capture")
+        if self.window is None:
+            raise RuntimeError("Start a run before closing capture")
+        if timeout_seconds < 0 or poll_seconds < 0:
+            raise ValueError("timeout_seconds and poll_seconds cannot be negative")
         if self.window.is_closed:
             return self.capture_evidence()
 
         endpoint = _sql_string(self.endpoint_name)
-        lower = _timestamp_literal(self.window.started_at)
+        lookback_start, session_start = self._capture_bounds()
+        lower = _timestamp_literal(lookback_start)
+        session_lower = _timestamp_literal(session_start)
+        sent = self.window.sent_rows
         deadline = time.monotonic() + timeout_seconds
-        observed = 0
-        last = pd.DataFrame()
-        while time.monotonic() <= deadline:
+        while True:
+            # The same CURRENT_TIMESTAMP bounds the count and becomes the cutoff,
+            # so ``observed`` is exactly what the tag statement will claim.
             query = f"""
-                SELECT COUNT(*) AS n,
-                       CAST(MIN(request_timestamp) AS TIMESTAMP(3)) AS first_seen,
-                       CAST(MAX(request_timestamp) AS TIMESTAMP(3)) AS last_seen
+                SELECT SUM(CASE WHEN request_timestamp >= {lower} THEN 1 ELSE 0 END) AS n,
+                       SUM(CASE WHEN request_timestamp >= {session_lower} THEN 1 ELSE 0 END) AS session_rows,
+                       SUM(CASE WHEN request_timestamp < {lower} THEN 1 ELSE 0 END) AS older_untagged_rows,
+                       MIN(CASE WHEN request_timestamp >= {lower} THEN request_timestamp END) AS first_seen,
+                       MAX(CASE WHEN request_timestamp >= {lower} THEN request_timestamp END) AS last_seen,
+                       CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS polled_at
                 FROM {ATHENA_DATABASE}.{ATHENA_INFERENCE_TABLE}
                 WHERE endpoint_name = {endpoint}
                   AND monitoring_run_id IS NULL
-                  AND request_timestamp >= {lower}
+                  AND request_timestamp <= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6))
             """
-            last = self.athena.execute_query(query)
-            observed = int(last["n"].iloc[0]) if not last.empty else 0
-            if observed > self.window.expected_rows:
-                raise RuntimeError(
-                    f"Capture saw {observed} rows but sent {self.window.expected_rows}. "
-                    "Stop concurrent endpoint traffic and start a new run."
-                )
-            if observed == self.window.expected_rows:
+            result = self.athena.execute_query(query)
+            if result.empty:
+                raise RuntimeError("Athena returned no capture poll evidence")
+            row = result.iloc[0]
+            if pd.isna(row["polled_at"]):
+                raise RuntimeError("Athena did not return the capture cutoff")
+            cutoff = _naive_utc(row["polled_at"])
+            if cutoff < self.window.started_at:
+                raise RuntimeError("Capture cutoff is earlier than the run start")
+            observed = 0 if pd.isna(row["n"]) else int(row["n"])
+            session_rows = 0 if pd.isna(row["session_rows"]) else int(row["session_rows"])
+            older = (
+                0 if pd.isna(row["older_untagged_rows"]) else int(row["older_untagged_rows"])
+            )
+            if observed:
+                if pd.isna(row["first_seen"]) or pd.isna(row["last_seen"]):
+                    raise RuntimeError("Capture row timestamps are incomplete")
+                first_seen = _naive_utc(row["first_seen"])
+                last_seen = _naive_utc(row["last_seen"])
+                if not lookback_start <= first_seen <= last_seen <= cutoff:
+                    raise RuntimeError(
+                        "Captured row timestamps fall outside the capture window"
+                    )
+            if session_rows >= sent or time.monotonic() >= deadline:
                 break
             time.sleep(poll_seconds)
-        else:
-            raise TimeoutError(
-                f"Capture timed out with {observed}/{self.window.expected_rows} rows"
+
+        if observed < self.min_samples:
+            raise RuntimeError(
+                f"Only {observed} untagged rows since the last run; at least "
+                f"{self.min_samples} are required. Nothing was tagged: send more "
+                "traffic or wait for captures to land, then close again."
+            )
+        if session_rows < sent:
+            warnings.warn(
+                f"{sent - session_rows} of this session's {sent} requests had not "
+                "landed by the cutoff. They stay untagged and will be included in "
+                "the next run.",
+                RuntimeWarning,
+                stacklevel=2,
             )
 
-        ended_at = _naive_utc(last["last_seen"].iloc[0])
-        upper = _timestamp_literal(ended_at)
         run_id = _sql_string(self.window.monitoring_run_id)
-        tag_sql = f"""
+        self.athena.execute_query(
+            f"""
             UPDATE {ATHENA_DATABASE}.{ATHENA_INFERENCE_TABLE}
             SET monitoring_run_id = {run_id}
             WHERE endpoint_name = {endpoint}
               AND monitoring_run_id IS NULL
               AND request_timestamp >= {lower}
-              AND request_timestamp <= {upper}
-        """
-        self.athena.execute_query(tag_sql, return_results=False)
-        self.window.ended_at = ended_at
+              AND request_timestamp <= {_timestamp_literal(cutoff)}
+            """,
+            return_results=False,
+        )
+        self.window.lookback_start = lookback_start
+        self.window.ended_at = cutoff
+        self.window.older_untagged_rows = older
         evidence = self.capture_evidence()
-        if evidence["tagged_rows"] != self.window.expected_rows:
+        # Rows landing between the poll and the tag only add members; fewer
+        # means another run claimed rows concurrently.
+        if evidence["tagged_rows"] < observed:
             raise RuntimeError(
-                f"Tagged {evidence['tagged_rows']} rows; expected {self.window.expected_rows}"
+                f"Tagged {evidence['tagged_rows']} rows but {observed} qualified. "
+                "Another monitoring run claimed rows concurrently; start a new run."
             )
         self.window.tagged_rows = evidence["tagged_rows"]
         return evidence
 
     def capture_evidence(self) -> Dict[str, Any]:
-        """Read persisted run membership and its effective timestamp bounds."""
+        """Read persisted membership and describe where the run's rows came from."""
         if self.window is None:
             raise RuntimeError("No run has started")
+        lookback_start, session_start = self._capture_bounds()
         result = self.athena.execute_query(
             f"""
             SELECT COUNT(*) AS tagged_rows,
-                   CAST(MIN(request_timestamp) AS TIMESTAMP(3)) AS first_seen,
-                   CAST(MAX(request_timestamp) AS TIMESTAMP(3)) AS last_seen,
+                   SUM(CASE WHEN request_timestamp < {_timestamp_literal(session_start)}
+                       THEN 1 ELSE 0 END) AS earlier_traffic_rows,
+                   MIN(request_timestamp) AS first_seen,
+                   MAX(request_timestamp) AS last_seen,
                    SUM(CASE WHEN ground_truth IS NULL THEN 1 ELSE 0 END) AS unlabeled_rows
             FROM {ATHENA_DATABASE}.{ATHENA_INFERENCE_TABLE}
             WHERE monitoring_run_id = {_sql_string(self.window.monitoring_run_id)}
             """
         )
+        if result.empty:
+            raise RuntimeError("Athena returned no tagged capture evidence")
         row = result.iloc[0]
+        tagged = int(row["tagged_rows"])
+
+        first_seen = row["first_seen"]
+        last_seen = row["last_seen"]
+        if tagged:
+            if pd.isna(first_seen) or pd.isna(last_seen):
+                raise RuntimeError("Tagged rows have invalid timestamp boundaries")
+            first_seen = _naive_utc(first_seen)
+            last_seen = _naive_utc(last_seen)
+            ended_at = self.window.ended_at
+            if first_seen < lookback_start or first_seen > last_seen:
+                raise RuntimeError("Tagged rows fall outside the capture window")
+            if ended_at is not None and last_seen > ended_at:
+                raise RuntimeError("Tagged rows fall outside the capture window")
+        elif pd.notna(first_seen) or pd.notna(last_seen):
+            raise RuntimeError("Zero tagged rows returned timestamp boundaries")
+
+        earlier = row["earlier_traffic_rows"]
+        unlabeled = row["unlabeled_rows"]
         return {
             "monitoring_run_id": self.window.monitoring_run_id,
-            "capture_window_start": self.window.started_at,
+            "capture_window_start": lookback_start,
             "capture_window_end": self.window.ended_at,
-            "tagged_rows": int(row["tagged_rows"]),
-            "first_tagged_timestamp": row["first_seen"],
-            "last_tagged_timestamp": row["last_seen"],
-            "unlabeled_rows": int(row["unlabeled_rows"] or 0),
+            "sent_rows": self.window.sent_rows,
+            "tagged_rows": tagged,
+            "earlier_traffic_rows": 0 if pd.isna(earlier) else int(earlier),
+            "older_untagged_rows_excluded": self.window.older_untagged_rows,
+            "first_tagged_timestamp": first_seen,
+            "last_tagged_timestamp": last_seen,
+            "unlabeled_rows": 0 if pd.isna(unlabeled) else int(unlabeled),
         }
 
     def apply_simulated_ground_truth(self, seed: int = 42) -> Dict[str, Any]:
@@ -428,18 +535,20 @@ class MonitoringSession:
             monitoring_run_id=self.window.monitoring_run_id,
             batch_id=self.window.monitoring_run_id,
         )
+        # Rows from earlier traffic may already carry labels; the simulator
+        # labels only the rest, and coverage below proves the run is complete.
         simulation = simulator.simulate_and_write(limit=None)
-        if simulation["updates_created"] != self.window.tagged_rows:
-            raise RuntimeError(
-                f"Created {simulation['updates_created']} labels for "
-                f"{self.window.tagged_rows} tagged rows"
-            )
         updater = GroundTruthUpdater(
             athena_client=self.athena,
             monitoring_run_id=self.window.monitoring_run_id,
         )
         update = updater.update_ground_truth_batch()
         coverage = updater.get_coverage_statistics()
+        if int(coverage["total_predictions"]) != self.window.tagged_rows:
+            raise RuntimeError(
+                f"Ground-truth coverage found {coverage['total_predictions']} run rows; "
+                f"expected {self.window.tagged_rows} tagged rows"
+            )
         if int(coverage["with_ground_truth"]) != self.window.tagged_rows:
             raise RuntimeError(
                 f"Only {coverage['with_ground_truth']}/{self.window.tagged_rows} run rows were labeled"
@@ -477,6 +586,11 @@ class MonitoringSession:
             ORDER BY request_timestamp, inference_id
             """
         )
+        if len(raw) != self.window.tagged_rows:
+            raise RuntimeError(
+                f"Data-drift query returned {len(raw)}/{self.window.tagged_rows} "
+                "tagged run rows"
+            )
         current_rows = []
         for payload in raw["input_features"]:
             parsed = json.loads(payload)
@@ -512,6 +626,11 @@ class MonitoringSession:
             ORDER BY request_timestamp, inference_id
             """
         )
+        if len(current_rows) != self.window.tagged_rows:
+            raise RuntimeError(
+                f"Model-drift query returned {len(current_rows)}/{self.window.tagged_rows} "
+                "labeled tagged rows"
+            )
         complete_current = current_rows[
             ["ground_truth", PREDICTION_COLUMN, PROBABILITY_COLUMN]
         ].apply(pd.to_numeric, errors="coerce").dropna()
@@ -599,6 +718,10 @@ class MonitoringSession:
         drift = self.data_drift_results
         model = self.model_results or {}
         metrics = model.get("metrics")
+        if drift and int(drift["sample_size"]) != self.window.tagged_rows:
+            raise RuntimeError("Data-drift sample count does not match tagged rows")
+        if metrics and int(metrics["sample_count"]) > self.window.tagged_rows:
+            raise RuntimeError("Model-metric sample count exceeds tagged rows")
 
         if log_to_mlflow:
             from src.drift_monitoring.log_monitoring_to_mlflow import (
@@ -721,8 +844,10 @@ class MonitoringSession:
             )
         evidence = result.iloc[0].to_dict()
         tagged = int(evidence["tagged_rows"])
+        if tagged != self.window.tagged_rows:
+            raise RuntimeError("Persisted run tagged count does not match capture evidence")
         if pd.notna(evidence.get("data_sample_size")) and int(evidence["data_sample_size"]) != tagged:
             raise RuntimeError("Persisted data_sample_size does not match tagged rows")
-        if pd.notna(evidence.get("model_sample_size")) and int(evidence["model_sample_size"]) != int(evidence["labeled_rows"]):
-            raise RuntimeError("Persisted model_sample_size does not match labeled rows")
+        if pd.notna(evidence.get("model_sample_size")) and int(evidence["model_sample_size"]) > int(evidence["labeled_rows"]):
+            raise RuntimeError("Persisted model_sample_size exceeds labeled rows")
         return evidence

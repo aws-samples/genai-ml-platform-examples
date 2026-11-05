@@ -511,6 +511,18 @@ MODEL_DRIFT_THRESHOLD: float = float(
     _drift_cfg.get("model_drift", os.environ.get("MODEL_DRIFT_THRESHOLD", "0.05"))
 )
 
+# Lab 5D monitoring-run membership. Each run claims every untagged inference
+# row since the previous run, bounded by this lookback so a first run in an
+# account does not sweep the table's entire history.
+MONITORING_CAPTURE_LOOKBACK_HOURS: float = float(
+    _get(
+        "monitoring_capture",
+        "lookback_hours",
+        "MONITORING_CAPTURE_LOOKBACK_HOURS",
+        "24",
+    )
+)
+
 # EventBridge schedule for the drift-monitor Lambda.
 _drift_mon_cfg = _yaml_cfg.get("drift_monitor", {}) if isinstance(
     _yaml_cfg.get("drift_monitor"), dict
