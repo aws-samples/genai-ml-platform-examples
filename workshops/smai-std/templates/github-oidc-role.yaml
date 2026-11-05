@@ -35,6 +35,17 @@ Parameters:
     NoEcho: true
     Description: GitHub Personal Access Token with 'repo' and 'workflow' scopes
     MinLength: 40
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: >
+      Optional. ARN of an IAM managed policy to set as the permissions boundary
+      on the role this stack creates. Leave empty in your own account. In a
+      Workshop Studio event, use the ParticipantBoundaryPolicyArn output of the
+      workshop stack - the event's participant role can only create roles that
+      carry that boundary.
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
 Resources:
   GitHubPATSecret:
     Type: AWS::SecretsManager::Secret
@@ -54,6 +65,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: GitHubActionsOIDCRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
