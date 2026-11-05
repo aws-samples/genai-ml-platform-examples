@@ -26,7 +26,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import uuid
 
 import pandas as pd
@@ -72,6 +72,8 @@ class GroundTruthSimulator:
         feature_drift_impact: float = 0.0,
         model_drift_magnitude: float = 0.0,
         seed: int = 42,
+        monitoring_run_id: Optional[str] = None,
+        batch_id: Optional[str] = None,
     ):
         """
         Initialize ground truth simulator.
@@ -85,11 +87,17 @@ class GroundTruthSimulator:
             feature_drift_impact: Accuracy reduction due to feature drift (0.0-1.0)
             model_drift_magnitude: Direct model accuracy degradation (0.0-1.0)
             seed: Random seed for reproducibility
+            monitoring_run_id: If provided, label only inference rows already
+                tagged as members of this monitoring run.
+            batch_id: Stable identifier persisted on every generated update.
+                Defaults to ``monitoring_run_id`` when one is provided.
 
         Effective accuracy = max(0.5, accuracy - feature_drift_impact - model_drift_magnitude).
         """
         self.client = athena_client
         self.endpoint_name = endpoint_name
+        self.monitoring_run_id = monitoring_run_id
+        self.batch_id = batch_id or monitoring_run_id
         self.accuracy = accuracy
         self.positive_confirmation_days = positive_confirmation_days
         self.negative_confirmation_days = negative_confirmation_days
@@ -99,7 +107,7 @@ class GroundTruthSimulator:
         # Effective accuracy: base minus both drift impacts, floored at 50%.
         self.effective_accuracy = max(0.5, accuracy - feature_drift_impact - model_drift_magnitude)
 
-        np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
 
         logger.info("Initialized GroundTruthSimulator:")
         logger.info(f"  Base accuracy        : {accuracy:.2f}")
@@ -128,7 +136,12 @@ class GroundTruthSimulator:
         """
 
         if self.endpoint_name:
-            query += f" AND endpoint_name = '{self.endpoint_name}'"
+            endpoint = self.endpoint_name.replace("'", "''")
+            query += f" AND endpoint_name = '{endpoint}'"
+
+        if self.monitoring_run_id:
+            run_id = self.monitoring_run_id.replace("'", "''")
+            query += f" AND monitoring_run_id = '{run_id}'"
 
         query += " ORDER BY request_timestamp DESC"
 
@@ -176,7 +189,7 @@ class GroundTruthSimulator:
 
         if num_errors > 0:
             # Randomly select which predictions to flip
-            error_indices = np.random.choice(df.index, size=num_errors, replace=False)
+            error_indices = self.rng.choice(df.index, size=num_errors, replace=False)
 
             # Flip the ground truth for these errors
             df.loc[error_indices, ACTUAL_TARGET_COL] = ~df.loc[error_indices, ACTUAL_TARGET_COL]
@@ -211,7 +224,7 @@ class GroundTruthSimulator:
         # Positive class cases: faster confirmation (1-7 days)
         positive_mask = df[ACTUAL_TARGET_COL]
         if positive_mask.any():
-            positive_delays = np.random.uniform(
+            positive_delays = self.rng.uniform(
                 self.positive_confirmation_days[0],
                 self.positive_confirmation_days[1],
                 size=positive_mask.sum()
@@ -221,7 +234,7 @@ class GroundTruthSimulator:
         # Negative class cases: slower confirmation (1-30 days)
         negative_mask = ~positive_mask
         if negative_mask.any():
-            negative_delays = np.random.uniform(
+            negative_delays = self.rng.uniform(
                 self.negative_confirmation_days[0],
                 self.negative_confirmation_days[1],
                 size=negative_mask.sum()
@@ -261,13 +274,13 @@ class GroundTruthSimulator:
         ]
 
         positive_mask = df[ACTUAL_TARGET_COL]
-        df.loc[positive_mask, 'confirmation_source'] = np.random.choice(
+        df.loc[positive_mask, 'confirmation_source'] = self.rng.choice(
             positive_sources,
             size=positive_mask.sum()
         )
 
         negative_mask = ~positive_mask
-        df.loc[negative_mask, 'confirmation_source'] = np.random.choice(
+        df.loc[negative_mask, 'confirmation_source'] = self.rng.choice(
             negative_sources,
             size=negative_mask.sum()
         )
@@ -286,6 +299,8 @@ class GroundTruthSimulator:
 
         # Create updates dataframe with Athena schema
         id_col = schema.identifier_column()
+        created_at = datetime.now()
+        batch_id = self.batch_id or f'simulated_{created_at.strftime("%Y%m%d_%H%M%S")}'
         updates = pd.DataFrame({
             id_col: df[id_col],
             'inference_id': df['inference_id'],
@@ -301,9 +316,9 @@ class GroundTruthSimulator:
             'false_positive': df['false_positive'],
             'false_negative': df['false_negative'],
             'window_id': np.int32(1),  # Default window
-            'batch_id': f'simulated_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
-            'created_at': datetime.now(),
-            'updated_at': datetime.now(),
+            'batch_id': batch_id,
+            'created_at': created_at,
+            'updated_at': created_at,
         })
 
         logger.info(f"Created {len(updates):,} ground truth updates")
@@ -360,7 +375,9 @@ class GroundTruthSimulator:
                 'actual_positive': 0,
                 'false_positives': 0,
                 'false_negatives': 0,
-                'accuracy': self.accuracy,
+                'accuracy': self.effective_accuracy,
+                'monitoring_run_id': self.monitoring_run_id,
+                'batch_id': self.batch_id,
             }
 
         # Simulate ground truth
@@ -379,7 +396,12 @@ class GroundTruthSimulator:
             'actual_positive': int(df[ACTUAL_TARGET_COL].sum()),
             'false_positives': int(df['false_positive'].sum()),
             'false_negatives': int(df['false_negative'].sum()),
-            'accuracy': self.accuracy,
+            'accuracy': float(
+                (df['prediction'].astype(bool) == df[ACTUAL_TARGET_COL]).mean()
+            ),
+            'configured_accuracy': self.effective_accuracy,
+            'monitoring_run_id': self.monitoring_run_id,
+            'batch_id': updates['batch_id'].iloc[0] if not updates.empty else None,
         }
 
         logger.info("=" * 80)

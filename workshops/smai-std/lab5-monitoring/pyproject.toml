@@ -9,7 +9,7 @@ dependencies = [
     "boto3>=1.36.0",
     "xgboost>=2.1.0",
     "scikit-learn>=1.5.0",
-    "pandas>=2.2.0",
+    "pandas>=2.2.0,<3.0",      # Evidently 0.7 imports pandas internals removed in pandas 3
     "numpy>=1.26.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.2",
@@ -20,7 +20,7 @@ dependencies = [
     "pyathena>=3.8.0",         # Athena SQL client
     "pyarrow>=17.0.0",         # Parquet support for Iceberg
     "plotly>=5.24.0",          # Interactive visualizations
-    "evidently>=0.5.0",        # ML monitoring with data drift detection
+    "evidently>=0.7.21,<0.8.0", # Uses the tested Evidently 0.7 Report/DataDriftPreset API
     "statsmodels>=0.14.4",     # Required by Evidently for statistical tests
     "shap>=0.46.0",            # SHAP explainability (>=0.46 pulls numba>=0.59 / llvmlite>=0.42 with Py3.12 wheels)
     "numba>=0.59.0",           # Pinned explicitly so the resolver never backtracks to the Py3.9-only 0.47

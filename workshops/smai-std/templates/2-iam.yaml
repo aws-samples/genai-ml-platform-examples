@@ -65,13 +65,13 @@ Parameters:
       - 'true'
       - 'false'
     Description: >
-      Whether to attach the Lab 5E data-access policy to QuickSight's service
-      role (aws-quicksight-service-role-v0). Defaults to 'false' because that
-      role does not exist until the account is subscribed to QuickSight, and
-      AWS::IAM::Policy fails on a missing role, which would roll the whole
-      deployment back. scripts/deploy-workshop.sh subscribes QuickSight before
-      deploying and then sets this to 'true' once it can confirm the role
-      exists, so a normal deploy needs no manual toggle.
+      Whether CloudFormation should attach the Lab 5E managed data-access
+      policies to QuickSight's service role (aws-quicksight-service-role-v0).
+      The policies are always created; only attachment is conditional because
+      the role does not exist until the account is subscribed. The deploy script
+      subscribes first when explicitly requested and sets this to 'true' once it
+      confirms the role exists. If subscription happens after deployment, the
+      Lab 5E preflight attaches the same two policies before creating assets.
 
 Conditions:
   ShouldCreateSCRoles: !Equals [!Ref CreateServiceCatalogRoles, 'true']
@@ -856,53 +856,139 @@ Resources:
             Resource:
               - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/SageMaker-*"
           # Lab 5E builds the governance dashboard programmatically through the
-          # QuickSight Definition API. Every action below is one that
-          # src/governance/create_governance_dashboard.py actually calls; without
-          # them the notebook can only report that QuickSight is unreachable.
-          # Resource is "*" because the account-level calls this needs
-          # (DescribeAccountSettings, ListUsers) reject resource-level ARNs, and
-          # the create* calls are what mint the resources the rest would scope to.
+          # QuickSight Definition API. The QuickSight Service Authorization
+          # reference defines which resource type each API action supports, so
+          # account, discovery, creation, and per-resource access are separated.
           # Signing QuickSight up for the account is still a one-time manual
           # step — IAM cannot grant that.
-          - Sid: QuickSightGovernanceDashboard
+          # DescribeAccountSettings has no resource type in the Service
+          # Authorization reference, so it is the only action in this wildcard
+          # statement.
+          - Sid: QuickSightGovernanceAccountSettings
             Effect: Allow
             Action:
               - quicksight:DescribeAccountSettings
+            Resource: "*"
+          # ListUsers supports user resources, but the lab discovers the users
+          # dynamically and may query a QuickSight identity region different from
+          # this stack's region. Limit discovery to this account's default user
+          # namespace across regions; exact user ARNs are not known beforehand.
+          - Sid: QuickSightGovernanceUserDiscovery
+            Effect: Allow
+            Action:
               - quicksight:ListUsers
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:*:${AWS::AccountId}:user/default/*"
+          # CreateDataSource has no resource type in the Service Authorization
+          # reference. The fixed data source ID cannot be used to scope this
+          # action, so it remains alone on Resource "*".
+          - Sid: QuickSightGovernanceDataSourceCreate
+            Effect: Allow
+            Action:
               - quicksight:CreateDataSource
+            Resource: "*"
+          - Sid: QuickSightGovernanceDataSource
+            Effect: Allow
+            Action:
               - quicksight:DescribeDataSource
               - quicksight:UpdateDataSource
               - quicksight:DeleteDataSource
               - quicksight:PassDataSource
+              - quicksight:DescribeDataSourcePermissions
+              - quicksight:UpdateDataSourcePermissions
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:datasource/bank-marketing-governance-athena-datasource"
+          # CreateDataSet authorizes against the referenced data source, not the
+          # new dataset ARN, according to the Service Authorization reference.
+          - Sid: QuickSightGovernanceDataSetCreate
+            Effect: Allow
+            Action:
               - quicksight:CreateDataSet
-              - quicksight:DescribeDataSet
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:datasource/bank-marketing-governance-athena-datasource"
+          # UpdateDataSet supports both dataset and referenced-data-source
+          # resource types. Keep it separate so both sides use their exact ARNs.
+          - Sid: QuickSightGovernanceDataSetUpdate
+            Effect: Allow
+            Action:
               - quicksight:UpdateDataSet
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:datasource/bank-marketing-governance-athena-datasource"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-inference-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-drift-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-feature-drift-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-feature-level-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-inference-dataset-accuracy"
+          - Sid: QuickSightGovernanceDataSets
+            Effect: Allow
+            Action:
+              - quicksight:DescribeDataSet
               - quicksight:DeleteDataSet
               - quicksight:PassDataSet
+              - quicksight:DescribeDataSetPermissions
+              - quicksight:UpdateDataSetPermissions
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-inference-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-drift-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-feature-drift-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-feature-level-dataset"
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dataset/bank-marketing-governance-inference-dataset-accuracy"
+          - Sid: QuickSightGovernanceAnalysis
+            Effect: Allow
+            Action:
               - quicksight:CreateAnalysis
               - quicksight:DescribeAnalysis
               - quicksight:UpdateAnalysis
               - quicksight:DeleteAnalysis
+              - quicksight:DescribeAnalysisPermissions
+              - quicksight:UpdateAnalysisPermissions
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:analysis/bank-marketing-governance-analysis"
+          - Sid: QuickSightGovernanceDashboard
+            Effect: Allow
+            Action:
               - quicksight:CreateDashboard
               - quicksight:DescribeDashboard
               - quicksight:UpdateDashboard
               - quicksight:UpdateDashboardPublishedVersion
               - quicksight:DeleteDashboard
               - quicksight:GetDashboardEmbedUrl
-            Resource: "*"
-          # Read-only, so Lab 5E can report whether the conditional
-          # QuickSightServiceRole*Policy resources below are attached and tell
-          # the user to redeploy instead of producing a dashboard whose panels
-          # fail to load. Granting them is CloudFormation's job, not the
-          # notebook's, so no write actions are included here.
+              - quicksight:DescribeDashboardPermissions
+              - quicksight:UpdateDashboardPermissions
+            Resource:
+              - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dashboard/bank-marketing-governance-dashboard"
+          # Lab 5E closes the manual-subscription ordering gap itself. These
+          # actions are limited to reading the exact QuickSight service role and
+          # two current-account/current-project managed policies, then attaching
+          # only those policies when they are missing.
           - Sid: QuickSightServiceRoleInspect
             Effect: Allow
             Action:
-              - iam:ListRolePolicies
-              - iam:GetRolePolicy
+              - iam:GetRole
+              - iam:ListAttachedRolePolicies
             Resource:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/aws-quicksight-service-role-v0"
-              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-quicksight-service-role-v0"
+          - Sid: QuickSightProjectPolicyInspect
+            Effect: Allow
+            Action:
+              - iam:GetPolicy
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightS3DataLakeAccess"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightAthenaAccess"
+          # AttachRolePolicy authorizes against the role only; a policy ARN in
+          # Resource restricts nothing. The iam:PolicyARN condition is what
+          # limits attachment to the two project policies.
+          - Sid: QuickSightProjectPolicyAttach
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/aws-quicksight-service-role-v0"
+            Condition:
+              ArnEquals:
+                iam:PolicyARN:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightS3DataLakeAccess"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-QuickSightAthenaAccess"
       Roles:
         - !Ref UserASageMakerExecutionRole
         - !Ref UserBSageMakerExecutionRole
@@ -917,21 +1003,21 @@ Resources:
   # Security & permissions"; declaring it here keeps every IAM grant in the
   # workshop inside CloudFormation (and removes it on teardown).
   #
-  # AWS::IAM::Policy attaches to a role BY NAME, so it works on a role this
-  # stack does not own — but the role must already exist, and it only appears
-  # once the account is subscribed to QuickSight. Hence the condition: the
-  # deploy script subscribes first, confirms the role, then flips the parameter.
-  # Without these policies the dashboard is created and then fails to load data.
+  # AWS::IAM::ManagedPolicy can exist before the service role. The policies are
+  # always created so Lab 5E can attach them after a manual subscription. When
+  # the deploy script subscribes first and confirms the role, CloudFormation
+  # preserves the best case by attaching them during the IAM deployment.
   QuickSightServiceRoleS3Policy:
-    Type: AWS::IAM::Policy
-    Condition: ShouldAttachQuickSightServiceRolePolicy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
       # Project-scoped so multiple projects can share the account-global
-      # QuickSight service role without a policy-name collision. Name matched by
-      # create_governance_dashboard.py's _check_s3_permissions() via config.py.
-      PolicyName: !Sub '${ProjectName}-QuickSightS3DataLakeAccess'
-      Roles:
-        - aws-quicksight-service-role-v0
+      # QuickSight service role without a policy-name collision. The Lab 5E
+      # preflight resolves this exact current-account ARN via config.py.
+      ManagedPolicyName: !Sub '${ProjectName}-QuickSightS3DataLakeAccess'
+      Roles: !If
+        - ShouldAttachQuickSightServiceRolePolicy
+        - [aws-quicksight-service-role-v0]
+        - !Ref AWS::NoValue
       PolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -957,24 +1043,20 @@ Resources:
               - s3:ListBucket
               - s3:GetBucketLocation
             Resource:
-              - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-*"
-              - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-*/*"
+              - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::Region}-${AWS::AccountId}"
+              - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::Region}-${AWS::AccountId}/*"
 
   # Athena access for QuickSight, the equivalent of the console's "Amazon Athena"
-  # checkbox. Written inline rather than attaching the AWS-managed
-  # AWSQuicksightAthenaAccess policy because ManagedPolicyArns is a property of
-  # AWS::IAM::Role: CloudFormation cannot attach a managed policy to a role it
-  # does not own. The trade-off is that this action list is maintained here.
+  # checkbox. Kept in a project-scoped managed policy so it can be created before
+  # the service role and attached by the Lab 5E preflight after subscription.
   QuickSightServiceRoleAthenaPolicy:
-    Type: AWS::IAM::Policy
-    Condition: ShouldAttachQuickSightServiceRolePolicy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      # Project-scoped so multiple projects can share the account-global
-      # QuickSight service role without a policy-name collision. Name matched by
-      # create_governance_dashboard.py's _check_s3_permissions() via config.py.
-      PolicyName: !Sub '${ProjectName}-QuickSightAthenaAccess'
-      Roles:
-        - aws-quicksight-service-role-v0
+      ManagedPolicyName: !Sub '${ProjectName}-QuickSightAthenaAccess'
+      Roles: !If
+        - ShouldAttachQuickSightServiceRolePolicy
+        - [aws-quicksight-service-role-v0]
+        - !Ref AWS::NoValue
       PolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -2202,6 +2284,14 @@ Resources:
 
 
 Outputs:
+  QuickSightS3DataLakeAccessPolicyArn:
+    Description: Current-project managed policy Lab 5E ensures on the QuickSight service role
+    Value: !Ref QuickSightServiceRoleS3Policy
+
+  QuickSightAthenaAccessPolicyArn:
+    Description: Current-project managed policy Lab 5E ensures on the QuickSight service role
+    Value: !Ref QuickSightServiceRoleAthenaPolicy
+
   ProductSageMakerExecutionRoleArn:
     Value: !GetAtt ProductSageMakerExecutionRole.Arn
     Export:

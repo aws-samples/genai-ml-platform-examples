@@ -323,7 +323,7 @@ def score_evaluation_baseline(
     scored = pd.DataFrame(
         {
             "target": y.values,
-            "prediction": (proba >= threshold).astype(int),
+            "prediction": (proba > threshold).astype(int),
             "probability": proba,
         }
     )

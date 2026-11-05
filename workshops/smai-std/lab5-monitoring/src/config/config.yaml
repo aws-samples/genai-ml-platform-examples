@@ -348,12 +348,22 @@ training:
 drift_thresholds:
   # Minimum acceptable ROC-AUC before alerting (monitor_model_performance.py)
   min_roc_auc: 0.85
-  # Data-drift alarm: fraction of features whose distribution moved
-  # (Evidently DataDriftPreset). 0.2 = alert if 20% of features drifted.
+  # Data-drift alarm: fraction of features whose distribution moved.
+  # Equality counts: 0.2 alerts when at least 20% of features drifted.
   data_drift: 0.20
-  # Model-drift alarm: relative ROC-AUC degradation vs the baseline.
-  # 0.05 = alert if AUC drops by 5 percentage points or more.
+  # Model-drift alarm: relative ROC-AUC loss from the registered baseline.
+  # 0.05 = alert when (baseline_auc - current_auc) / baseline_auc >= 5%.
   model_drift: 0.05
+
+# ---------------------------------------------------------------------------
+# Lab 5D monitoring-run membership
+# ---------------------------------------------------------------------------
+# Each Lab 5D run tags every inference row for the endpoint that no earlier run
+# has tagged, up to an Athena-timed cutoff. Rows that land after the cutoff are
+# picked up by the next run. Untagged rows older than lookback_hours are left
+# out, so the first run in an account does not sweep the whole table history.
+monitoring_capture:
+  lookback_hours: 24
 
 # Schedule for the daily drift-monitor Lambda (EventBridge cron expression).
 # Read by notebook 3 Section 7.1 as DRIFT_MONITOR_SCHEDULE for display. The

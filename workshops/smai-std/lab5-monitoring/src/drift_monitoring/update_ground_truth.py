@@ -64,6 +64,7 @@ class GroundTruthUpdater:
         athena_client: Optional[AthenaClient] = None,
         dry_run: bool = False,
         force: bool = False,
+        monitoring_run_id: Optional[str] = None,
     ):
         """
         Initialize ground truth updater.
@@ -72,10 +73,21 @@ class GroundTruthUpdater:
             athena_client: Athena client (creates default if None)
             dry_run: If True, only preview changes without executing
             force: If True, override existing ground truth values
+            monitoring_run_id: If provided, update only inference rows tagged
+                as members of this monitoring run.
         """
         self.client = athena_client or AthenaClient()
         self.dry_run = dry_run
         self.force = force
+        self.monitoring_run_id = monitoring_run_id
+
+    def _run_filter(self, alias: str = "ir") -> str:
+        """Return an escaped SQL predicate for the selected monitoring run."""
+        if not self.monitoring_run_id:
+            return ""
+        run_id = self.monitoring_run_id.replace("'", "''")
+        prefix = f"{alias}." if alias else ""
+        return f" AND {prefix}monitoring_run_id = '{run_id}'"
 
     def get_pending_updates_count(
         self,
@@ -99,6 +111,7 @@ class GroundTruthUpdater:
         INNER JOIN {ATHENA_DATABASE}.{ATHENA_GROUND_TRUTH_UPDATES_TABLE} gtu
             ON ir.inference_id = gtu.inference_id
         WHERE {'ir.ground_truth IS NULL' if not self.force else '1=1'}
+        {self._run_filter()}
         """
 
         if window_hours:
@@ -155,6 +168,7 @@ class GroundTruthUpdater:
         INNER JOIN {ATHENA_DATABASE}.{ATHENA_GROUND_TRUTH_UPDATES_TABLE} gtu
             ON ir.inference_id = gtu.inference_id
         WHERE {'ir.ground_truth IS NULL' if not self.force else '1=1'}
+        {self._run_filter()}
         """
 
         if window_hours:
@@ -203,6 +217,7 @@ class GroundTruthUpdater:
         INNER JOIN {ATHENA_DATABASE}.{ATHENA_GROUND_TRUTH_UPDATES_TABLE} gtu
             ON ir.inference_id = gtu.inference_id
         WHERE {'ir.ground_truth IS NULL' if not self.force else '1=1'}
+        {self._run_filter()}
         """
 
         if window_hours:
@@ -303,6 +318,7 @@ class GroundTruthUpdater:
                 INNER JOIN {ATHENA_DATABASE}.{ATHENA_GROUND_TRUTH_UPDATES_TABLE} gtu
                     ON ir.inference_id = gtu.inference_id
                 WHERE {ground_truth_filter}
+                {self._run_filter()}
                 {window_filter}
             )
             WHERE rn = 1
@@ -365,6 +381,7 @@ class GroundTruthUpdater:
                     LIMIT 1
                 )
             WHERE {ground_truth_filter}
+                {self._run_filter(alias="")}
                 AND inference_id IN (
                     SELECT DISTINCT inference_id
                     FROM {ATHENA_DATABASE}.{ATHENA_GROUND_TRUTH_UPDATES_TABLE}
@@ -419,7 +436,9 @@ class GroundTruthUpdater:
             CAST(MAX(request_timestamp) AS TIMESTAMP(3)) as latest_prediction,
             CAST(MIN(ground_truth_timestamp) AS TIMESTAMP(3)) as earliest_ground_truth,
             CAST(MAX(ground_truth_timestamp) AS TIMESTAMP(3)) as latest_ground_truth
-        FROM {ATHENA_DATABASE}.{ATHENA_INFERENCE_TABLE}
+        FROM {ATHENA_DATABASE}.{ATHENA_INFERENCE_TABLE} ir
+        WHERE 1=1
+        {self._run_filter()}
         """
 
         result = self.client.execute_query(query)

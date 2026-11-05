@@ -499,9 +499,9 @@ MIN_ROC_AUC_THRESHOLD: float = float(
     _drift_cfg.get("min_roc_auc", os.environ.get("MIN_ROC_AUC_THRESHOLD", "0.85"))
 )
 # 🔁 SYNC: lambda_drift_monitor.py:58 — Lambda fallback: 0.2. Data-drift
-# threshold: fraction of features whose distribution must shift (Evidently
-# DataDriftPreset) before alerting. Used by notebook 3 cells 56 (CloudWatch
-# alarms) and 62 (alert config).
+# threshold: fraction of features whose distribution must shift. Equality
+# counts as dataset drift. Passed to Evidently DataDriftPreset by
+# evidently_reports.py and displayed as the dataset-share reference line.
 DATA_DRIFT_THRESHOLD: float = float(
     _drift_cfg.get("data_drift", os.environ.get("DATA_DRIFT_THRESHOLD", "0.20"))
 )
@@ -509,6 +509,18 @@ DATA_DRIFT_THRESHOLD: float = float(
 # threshold: relative ROC-AUC degradation vs baseline.
 MODEL_DRIFT_THRESHOLD: float = float(
     _drift_cfg.get("model_drift", os.environ.get("MODEL_DRIFT_THRESHOLD", "0.05"))
+)
+
+# Lab 5D monitoring-run membership. Each run claims every untagged inference
+# row since the previous run, bounded by this lookback so a first run in an
+# account does not sweep the table's entire history.
+MONITORING_CAPTURE_LOOKBACK_HOURS: float = float(
+    _get(
+        "monitoring_capture",
+        "lookback_hours",
+        "MONITORING_CAPTURE_LOOKBACK_HOURS",
+        "24",
+    )
 )
 
 # EventBridge schedule for the drift-monitor Lambda.
@@ -668,9 +680,10 @@ QUICKSIGHT_DASHBOARD_ID: str = "bank-marketing-governance-dashboard"
 QUICKSIGHT_DASHBOARD_NAME: str = "Bank Marketing Governance"
 QUICKSIGHT_SERVICE_ROLE_NAME: str = "aws-quicksight-service-role-v0"
 
-# Inline policies the workshop attaches to the (account-global) QuickSight
-# service role, declared in templates/2-iam.yaml. Project-scoped so multiple
-# projects can share aws-quicksight-service-role-v0 without a policy-name
-# collision. Must stay in sync with the PolicyName values in 2-iam.yaml.
+# Managed policies the workshop makes available to the (account-global)
+# QuickSight service role, declared in templates/2-iam.yaml. Project-scoped so
+# multiple projects can share aws-quicksight-service-role-v0 without a policy
+# name collision. Lab 5E resolves their current-account ARNs from these names
+# and attaches them after a manual subscription when CloudFormation could not.
 QUICKSIGHT_S3_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightS3DataLakeAccess"
 QUICKSIGHT_ATHENA_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightAthenaAccess"

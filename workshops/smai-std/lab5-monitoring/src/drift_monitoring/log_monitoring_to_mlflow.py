@@ -110,15 +110,28 @@ def log_monitoring_to_mlflow(
             # --- Log Evidently data drift metrics + HTML report ---
             print("\n[3/5] Logging data drift results...")
             if drift_results and isinstance(drift_results, dict):
-                mlflow.log_metric('drift_detected', 1 if drift_results.get('drift_detected') else 0)
-                mlflow.log_metric('drifted_columns_count', drift_results.get('drifted_columns_count', 0))
-                mlflow.log_metric('drifted_columns_share', drift_results.get('drifted_columns_share', 0))
+                detected = drift_results.get('drift_detected')
+                if detected is not None:
+                    mlflow.log_metric('drift_detected', 1 if detected else 0)
+                drifted_count = drift_results.get('drifted_columns_count')
+                if isinstance(drifted_count, (int, float)):
+                    mlflow.log_metric('drifted_columns_count', drifted_count)
+                drifted_share = drift_results.get('drifted_columns_share')
+                if isinstance(drifted_share, (int, float)):
+                    mlflow.log_metric('drifted_columns_share', drifted_share)
 
-                # Log per-column drift scores
+                # Log only available finite values. Missing feature evidence stays
+                # absent in MLflow, matching the NULL persisted for Athena/QuickSight.
                 per_column_count = 0
                 for col, info in drift_results.get('per_column', {}).items():
-                    mlflow.log_metric(f'drift_score_{col}', info.get('drift_score', 0))
-                    per_column_count += 1
+                    raw_score = info.get('drift_score')
+                    magnitude = info.get('drift_magnitude')
+                    if isinstance(raw_score, (int, float)):
+                        mlflow.log_metric(f'drift_score_{col}', raw_score)
+                    if isinstance(magnitude, (int, float)):
+                        mlflow.log_metric(f'drift_magnitude_{col}', magnitude)
+                    if raw_score is not None or magnitude is not None:
+                        per_column_count += 1
 
                 print(f"  ✓ Logged drift metrics (drifted: {drift_results.get('drifted_columns_count', 0)})")
                 print(f"  ✓ Logged {per_column_count} per-column drift scores")
