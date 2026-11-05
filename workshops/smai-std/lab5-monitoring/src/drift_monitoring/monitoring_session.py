@@ -611,6 +611,8 @@ class MonitoringSession:
         """Score paired labels/predictions/probabilities for this run only."""
         if self.window is None or not self.window.is_closed:
             raise RuntimeError("Close capture before calculating model drift")
+        from sklearn.metrics import roc_auc_score
+
         from src.drift_monitoring.baseline import score_evaluation_baseline
         from src.drift_monitoring.evidently_reports import run_classification_report
         from src.drift_monitoring.monitor_model_performance import (
@@ -703,6 +705,13 @@ class MonitoringSession:
             self.model_results = result
             return result
 
+        # Compare against the AUC reproduced from the same artifact and snapshot
+        # just scored above. baseline.json's recorded value can be stale or
+        # wrong (a recorded 0.5 would hide any real degradation).
+        result["recorded_baseline_roc_auc"] = result["baseline_roc_auc"]
+        result["baseline_roc_auc"] = float(
+            roc_auc_score(baseline_scored["target"], baseline_scored["probability"])
+        )
         baseline_auc = result["baseline_roc_auc"]
         current_auc = metrics.get("roc_auc")
         result.update(evaluate_model_drift(baseline_auc, current_auc))
