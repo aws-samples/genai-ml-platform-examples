@@ -200,7 +200,7 @@
       <text x="20" y="238">• Endpoint config + instance sizing</text>
 
       <text x="12" y="264" font-weight="bold" fill="#0F8B5F">Validation</text>
-      <text x="20" y="281">• lab-4-endpoint-testing.ipynb</text>
+      <text x="20" y="281">• lab-4b-endpoint-testing.ipynb</text>
       <text x="20" y="297">• Sample payload invocation</text>
       <text x="20" y="313">• Confirm InService + response shape</text>
 

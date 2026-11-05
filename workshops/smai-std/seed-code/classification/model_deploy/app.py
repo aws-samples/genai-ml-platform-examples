@@ -20,6 +20,7 @@ from deploy_endpoint.deploy_endpoint_stack import DeployEndpointStack
 from config.constants import (
     DEPLOY_ACCOUNT,
     DEFAULT_DEPLOYMENT_REGION,
+    MODEL_PACKAGE_GROUP_NAME,
 )
 
 
@@ -30,9 +31,12 @@ dev_env = Environment(
     region=DEFAULT_DEPLOYMENT_REGION
 )
 
+# One stack per model. The deploy repo is shared across every model created from
+# the project template, so a fixed stack name would make each model's deploy
+# replace the previous model's endpoint.
 endpoint_stack = DeployEndpointStack(
-    app, 
-    "sagemaker-endpoint-stack", 
+    app,
+    f"{MODEL_PACKAGE_GROUP_NAME}-endpoint-stack",
     env=dev_env
 )
 

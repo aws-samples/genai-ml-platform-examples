@@ -100,7 +100,7 @@ What to know before you plan a session around Lab 3D:
 
 **Lab 4 – Model Deploy** (`lab4-model-deploy/`) · _ML Engineer / Gov Officer_
 Automating build and deployment onto **SMAI** endpoints with GitHub Actions, where the Model Registry **approval status is the control point** between the two personas: the ML Engineer owns the pipeline, the Gov Officer decides what passes through it. The automation blueprint lives in `seed-code/` (see below).
-- `lab-4-endpoint-testing.ipynb` – Validates an `InService` endpoint with sample payloads.
+- `lab-4b-endpoint-testing.ipynb` – **Lab 4B.** Acceptance test for the Lab 4A deploy: finds the `<ModelName>-model-group-endpoint` endpoint, confirms it serves an Approved Model Registry version, and tests it with JSON, CSV, evaluation-set, and malformed requests. (Lab 4C, GenAI CI/CD, runs from the `seed-code/llm-fine-tuning/` repos and has no notebook here.)
 - Deploying with the `SQS_QUEUE_URL` environment variable set is what turns on inference capture for Lab 5.
 
 **Lab 5 – Monitoring** (`lab5-monitoring/`) · _Ops / Gov Officer_

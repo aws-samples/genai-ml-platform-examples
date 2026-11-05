@@ -692,7 +692,7 @@ def build(a):
           "Llama 3.2 3B, fine-tuned"],
          ["Prepared in", "Lab 2B–2E (pick one), then 2F", "Lab 2A"],
          ["Built in", "Lab 3A", "Lab 3B + 3C, optionally 3D"],
-         ["Deployed in", "Lab 4A", "Lab 4B + 4C"],
+         ["Deployed in", "Lab 4A, tested in 4B", "Lab 4C"],
          ["Monitored in", "Labs 5A–5F", "Labs 5A–5C"]],
         "0:17 (2 min). People get lost later if they do not know there are two "
         "parallel tracks. Say which track your audience should prioritise if "
@@ -914,8 +914,8 @@ def build(a):
          "Capture is a deployment-time switch: set SQS_QUEUE_URL and the "
          "endpoint's predictions start landing in Iceberg for stage 5."],
         [("4A", "ML CI/CD: build from Iceberg, register, approve, deploy"),
-         ("4B", "GenAI CI/CD: the same flow for the fine-tuned model"),
-         ("4C", "endpoint testing: validate the deployed endpoint")],
+         ("4B", "ML endpoint testing: validate the 4A endpoint"),
+         ("4C", "GenAI CI/CD: the same flow for the fine-tuned model")],
         "0:45 (5 min). Walk the event chain once: push, pipeline, register as "
         "pending, human approves, event fires, CDK deploys, endpoint serves. "
         "Then ask the governance question out loud - who in your organisation "
@@ -1016,7 +1016,7 @@ def build(a):
           "3B before 3C — 3C reads what 3B pinned"],
          ["Lab 3D", "Optional, after 3C",
           "Needs 2A only; region-limited"],
-         ["Lab 4", "4A for ML; 4B then 4C for GenAI",
+         ["Lab 4", "4A then 4B for ML; 4C for GenAI",
           "Deploy with SQS_QUEUE_URL set to feed Lab 5"],
          ["Lab 5", "5A → 5B → 5C, then 5D, 5E, 5F",
           "5B/5C reuse 5A's SNS topic; 5E reads 5D's rows"]],

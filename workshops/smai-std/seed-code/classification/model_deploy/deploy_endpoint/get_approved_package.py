@@ -38,6 +38,9 @@ def get_approved_package():
             ModelPackageGroupName=MODEL_PACKAGE_GROUP_NAME,
             ModelApprovalStatus="Approved",
             SortBy="CreationTime",
+            # The API defaults to Ascending; without this the oldest approved
+            # version is deployed once the group has more than one.
+            SortOrder="Descending",
             MaxResults=100,
         )
         approved_packages = response["ModelPackageSummaryList"]
@@ -48,6 +51,7 @@ def get_approved_package():
                 ModelPackageGroupName=MODEL_PACKAGE_GROUP_NAME,
                 ModelApprovalStatus="Approved",
                 SortBy="CreationTime",
+                SortOrder="Descending",
                 MaxResults=100,
                 NextToken=response["NextToken"],
             )
