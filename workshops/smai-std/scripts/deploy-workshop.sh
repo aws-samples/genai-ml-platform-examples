@@ -887,9 +887,26 @@ if [ "${VERIFY_QUICKSIGHT_IAM}" = "true" ] && is_selected iam; then
     fi
   done
 
-  # Best-case path for Lab 5E's data access: CloudFormation attached the two
-  # managed policies because the service role existed before IAM deployment.
-  # Manual subscription after deployment is covered later by Lab 5E's preflight.
+  # Lab 5E's data source runs as this stack's role, so the account-wide
+  # QuickSight service role is not on its path. Report the run-as role first;
+  # the service-role check below only matters for console-built data sources.
+  qs_ds_role="${PROJECT_NAME}-qs-datasource-role"
+  qs_ds_policies="$(aws iam list-attached-role-policies --role-name "${qs_ds_role}" \
+    --query 'AttachedPolicies[].PolicyName' --output text 2>/dev/null || echo "__ERROR__")"
+  if [ "${qs_ds_policies}" = "__ERROR__" ]; then
+    warn "Lab 5E run-as role ${qs_ds_role} not found -- the IAM stack did not deploy it."
+  else
+    for policy in "${PROJECT_NAME}-QuickSightS3DataLakeAccess" "${PROJECT_NAME}-QuickSightAthenaAccess"; do
+      case " ${qs_ds_policies} " in
+        *" ${policy} "*) log "  ${policy} attached to ${qs_ds_role}" ;;
+        *) warn "${policy} is MISSING from ${qs_ds_role} -- Lab 5E's data source will fail." ;;
+      esac
+    done
+  fi
+
+  # Optional: CloudFormation also attached the two managed policies to the
+  # account-wide service role because it existed before IAM deployment. Lab 5E
+  # does not need this; it helps data sources built by hand in the console.
   if [ "${ATTACH_QS_POLICY}" = "true" ]; then
     qs_role_policies="$(aws iam list-attached-role-policies \
       --role-name aws-quicksight-service-role-v0 \
@@ -900,8 +917,7 @@ if [ "${VERIFY_QUICKSIGHT_IAM}" = "true" ] && is_selected iam; then
       for policy in "${PROJECT_NAME}-QuickSightS3DataLakeAccess" "${PROJECT_NAME}-QuickSightAthenaAccess"; do
         case " ${qs_role_policies} " in
           *" ${policy} "*) log "  ${policy} attached to the QuickSight service role" ;;
-          *) warn "${policy} is MISSING from aws-quicksight-service-role-v0 -- Lab 5E's"
-             warn "  dashboard will render but its panels will fail to load data." ;;
+          *) log "  ${policy} not on aws-quicksight-service-role-v0 (only console-built data sources need it)" ;;
         esac
       done
     fi

@@ -233,7 +233,12 @@ TEARDOWN=true ./scripts/deploy-workshop.sh   # stacks only, no bucket cleanup
 
 Only **Lab 5E** (`lab5-monitoring/lab5e-governance-dashboard.ipynb`) needs QuickSight. Every other lab runs without it. There is no CloudFormation resource for a QuickSight subscription, so subscription stays a separate, explicit opt-in step.
 
-The IAM stack always creates two project-scoped managed policies for Lab 5E. If QuickSight is already subscribed, CloudFormation attaches them to `aws-quicksight-service-role-v0` during deployment. If infrastructure was provisioned first and the subscription was completed later, Lab 5E runs an idempotent preflight before creating any assets. The preflight resolves only the current account and project's two policy ARNs, attaches only whichever are missing, verifies both attachments, and stops with an actionable error if the role or either policy is absent. It never adds broad AWS-managed S3 access.
+Everything else Lab 5E needs is provisioned by the IAM stack, before or after the subscription:
+
+- a run-as role, `<project>-qs-datasource-role`, trusted only by `quicksight.amazonaws.com` and carrying two project-scoped policies (`<project>-QuickSightS3DataLakeAccess`, `<project>-QuickSightAthenaAccess`). Lab 5E names it on its Athena data source (`AthenaParameters.RoleArn`) and queries through `<project>-workgroup`, so QuickSight assumes that role instead of the account-wide service role;
+- permissions for the SageMaker execution roles to create the dashboard's QuickSight assets and to pass that one role to QuickSight.
+
+So the dashboard does not depend on the console-only *Quick access to AWS services* setting, and the deployment never modifies `aws-quicksight-service-role-v0`.
 
 **The default path is the console**, during Lab 5E. The workshop docs
 (`model-governance-at-scale-with-sagemaker-ai`, `content/lab/lab-5/lab-5e/`) walk through subscription with screenshots and are the canonical version; the summary here is for anyone working from this repo alone.
@@ -253,18 +258,19 @@ aws quicksight describe-account-settings --aws-account-id "${ACCOUNT_ID}" \
   --region us-east-1 --query 'AccountSettings.Edition' --output text
 ```
 
-After subscription finishes, run Lab 5E. Its preflight waits for the service role to exist, verifies the two managed policies created by `templates/2-iam.yaml`, and attaches any missing policy before it creates the Athena data source, datasets, view, analysis, or dashboard. Re-running the lab is a no-op for attachments that are already present. You can still run `ONLY_STACKS=iam ./scripts/deploy-workshop.sh`; the script detects the role and lets CloudFormation attach the same policies, but a second deployment is no longer required for the manual-subscription path.
+After subscription finishes, run Lab 5E. No further deployment is needed: the build cell prints `Data source runs as …-qs-datasource-role` and creates the data source, datasets, view, analysis, and dashboard.
 
-**Automating both halves instead.** For provisioning accounts in bulk rather than teaching from
-them, the deploy script folds the whole thing into one run:
+**Subscribing automatically instead.** For provisioning accounts in bulk rather than teaching from
+them, the deploy script can subscribe in the same run:
 
 ```bash
 SUBSCRIBE_QUICKSIGHT=true QUICKSIGHT_NOTIFICATION_EMAIL=you@example.com \
   ./scripts/deploy-workshop.sh
 ```
 
-Subscribes, waits for provisioning, confirms the service role, then deploys with the parameter
-set. Already-subscribed accounts are detected and left alone. The flag defaults to `false`
+Subscribes, waits for provisioning, then deploys. Already-subscribed accounts are detected and
+left alone. An API subscription creates no QuickSight user, so add one before running Lab 5E
+(see below). The flag defaults to `false`
 because the subscription is billable and permanent, and should not be a side effect of a deploy
 nobody read.
 
@@ -277,9 +283,9 @@ nobody read.
 | `QUICKSIGHT_ACCOUNT_NAME` | `<PROJECT_NAME>-<account>` | **Permanent**; must be globally unique |
 | `VERIFY_QUICKSIGHT_IAM` | `true` | Post-deploy check that the execution roles carry the Lab 5E actions |
 
-**Why the edition needs verifying.** The sign-up form asks only for an account name, notification email, default data region, authentication method, and encryption key — nothing about editions — so a console signup gives you no way to tell which one you got. An account that landed on Standard upgrades from *Manage QuickSight → Account settings*; the downgrade is not supported.
+**Why the edition needs verifying.** The sign-up form asks only for an account name, notification email, default data region, authentication method, and encryption key — nothing about editions — so a console signup gives you no way to tell which one you got. An account that landed on Standard upgrades from *Manage account → Account settings*; the downgrade is not supported.
 
-**To open the dashboard in the QuickSight UI yourself** (the notebook does not need this): create a QuickSight **Author** or **Admin** user for your identity under *Manage QuickSight → Manage users*.
+**QuickSight users.** Lab 5E shares the dashboard with every QuickSight user it finds and stops with *"No QuickSight users"* if there are none. A console sign-up makes you the first admin; after an API subscription, add an **Author** or **Admin** user under *Manage account → Manage users*.
 
 **Troubleshooting:**
 

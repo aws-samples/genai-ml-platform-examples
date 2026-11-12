@@ -687,3 +687,19 @@ QUICKSIGHT_SERVICE_ROLE_NAME: str = "aws-quicksight-service-role-v0"
 # and attaches them after a manual subscription when CloudFormation could not.
 QUICKSIGHT_S3_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightS3DataLakeAccess"
 QUICKSIGHT_ATHENA_POLICY_NAME: str = f"{PROJECT_NAME}-QuickSightAthenaAccess"
+
+# Run-as role for the dashboard's Athena data source (QuickSightDataSourceRole
+# in templates/2-iam.yaml). When it exists, QuickSight assumes it instead of the
+# account-wide service role, so the build does not depend on the console-only
+# "QuickSight access to AWS services" setting. Stacks deployed before the role
+# existed fall back to the account-wide service role. The data source then
+# queries through the project workgroup, whose enforced result location is in
+# the data bucket the role can write to.
+QUICKSIGHT_DATASOURCE_ROLE_NAME: str = os.environ.get(
+    "QUICKSIGHT_DATASOURCE_ROLE_NAME", f"{PROJECT_NAME}-qs-datasource-role"
+)
+QUICKSIGHT_DATASOURCE_WORKGROUP: str = os.environ.get(
+    "QUICKSIGHT_DATASOURCE_WORKGROUP", f"{PROJECT_NAME}-workgroup"
+)
+# Workgroup used on the account-wide service-role path (unchanged behavior).
+QUICKSIGHT_FALLBACK_WORKGROUP: str = "primary"

@@ -481,7 +481,7 @@ class _UnusedClient:
     pass
 
 
-def _stub_dashboard_dependencies(monkeypatch, events, *, view_error=None):
+def _stub_dashboard_dependencies(monkeypatch, events, *, view_error=None, run_as_role=None):
     monkeypatch.setattr(
         gov.boto3,
         'client',
@@ -493,12 +493,14 @@ def _stub_dashboard_dependencies(monkeypatch, events, *, view_error=None):
         'check_quicksight_subscription',
         {'subscribed': True, 'edition': 'ENTERPRISE', 'reason': None},
     )
+    _record(monkeypatch, events, 'resolve_datasource_role', run_as_role)
     _record(
         monkeypatch,
         events,
         'ensure_quicksight_service_role_policies',
         {'attached_now': []},
     )
+    _record(monkeypatch, events, 'grant_datasource_role_lake_formation', {'lake_formation_managed': False})
     _record(
         monkeypatch,
         events,
@@ -543,6 +545,7 @@ def test_dashboard_operation_order_runs_preflight_and_verified_view_first(monkey
 
     assert events == [
         'check_quicksight_subscription',
+        'resolve_datasource_role',
         'ensure_quicksight_service_role_policies',
         'verify_athena_data',
         'get_quicksight_principals',
@@ -691,7 +694,12 @@ def test_iam_template_has_exact_reconciliation_scope_and_managed_policies():
 
     attach = _find_statement(template, 'QuickSightProjectPolicyAttach')
     assert attach['Action'] == ['iam:AttachRolePolicy']
-    assert {item['!Sub'] for item in attach['Resource']} == policy_arns | {role_arn}
+    # AttachRolePolicy authorizes against the role only; the iam:PolicyARN
+    # condition is what limits which policies can be attached.
+    assert {item['!Sub'] for item in attach['Resource']} == {role_arn}
+    assert {
+        item['!Sub'] for item in attach['Condition']['ArnEquals']['iam:PolicyARN']
+    } == policy_arns
 
     quicksight_policy = resources['CloudWatchLogsPolicy']['Properties']['PolicyDocument']
     quicksight_statements = {
@@ -893,3 +901,186 @@ def test_quicksight_runtime_calls_are_covered_by_iam_template():
         for method in method_names
     }
     assert runtime_actions <= policy_actions
+
+
+class FailingDataSourceClient(FakeDataSourceClient):
+    def __init__(self, message):
+        super().__init__()
+        self.message = message
+        self.deleted = False
+        self.polls = 0
+
+    def describe_data_source(self, **kwargs):
+        if not self.exists:
+            raise _client_error('ResourceNotFoundException', 'DescribeDataSource')
+        self.polls += 1
+        if self.polls == 1:
+            return {'DataSource': {'Arn': 'arn:fake:data-source', 'Status': 'CREATION_IN_PROGRESS'}}
+        return {'DataSource': {
+            'Arn': 'arn:fake:data-source', 'Status': 'CREATION_FAILED',
+            'ErrorInfo': {'Type': 'GENERIC_SQL_FAILURE', 'Message': self.message},
+        }}
+
+    def delete_data_source(self, **kwargs):
+        self.deleted = True
+        self.exists = False
+
+
+def test_failed_data_source_without_service_access_stops_with_console_fix(monkeypatch):
+    monkeypatch.setattr(gov.time, 'sleep', lambda _: None)
+    client = FailingDataSourceClient(
+        'The QuickSight service role required to access your AWS resources has not been created yet.'
+    )
+    with pytest.raises(gov.QuickSightUnavailable, match='QuickSight access to AWS services'):
+        gov.create_or_update_datasource(
+            account_id=ACCOUNT_ID, quicksight_principals=[USER_A],
+            quicksight_client=client, datasource_id='data-source-id',
+        )
+    assert client.deleted, 'failed creation must be deleted so the next run recreates it'
+    assert client.update_calls == [], 'permissions must not be reconciled on a failed source'
+
+
+def test_failed_data_source_other_errors_are_reported(monkeypatch):
+    monkeypatch.setattr(gov.time, 'sleep', lambda _: None)
+    client = FailingDataSourceClient('Workgroup primary is not found')
+    with pytest.raises(gov.QuickSightUnavailable, match='Workgroup primary is not found'):
+        gov.create_or_update_datasource(
+            account_id=ACCOUNT_ID, quicksight_principals=[USER_A],
+            quicksight_client=client, datasource_id='data-source-id',
+        )
+
+
+RUN_AS_ROLE_ARN = f'arn:aws:iam::{ACCOUNT_ID}:role/test-project-qs-datasource-role'
+
+
+def test_run_as_role_skips_service_role_preflight_and_grants_before_use(monkeypatch):
+    events: list[str] = []
+    _stub_dashboard_dependencies(monkeypatch, events, run_as_role=RUN_AS_ROLE_ARN)
+    datasource_kwargs = {}
+
+    def record_datasource(*args, **kwargs):
+        events.append('create_or_update_datasource')
+        datasource_kwargs.update(kwargs)
+        return 'arn:datasource'
+
+    monkeypatch.setattr(gov, 'create_or_update_datasource', record_datasource)
+
+    result = gov.create_dashboard(region='us-east-1')
+
+    assert 'ensure_quicksight_service_role_policies' not in events
+    assert datasource_kwargs['role_arn'] == RUN_AS_ROLE_ARN
+    assert result['quicksight_service_role_permissions'] == {
+        'mode': 'run-as-role', 'role_arn': RUN_AS_ROLE_ARN, 'attached_now': [],
+    }
+    grants = [i for i, e in enumerate(events) if e == 'grant_datasource_role_lake_formation']
+    assert len(grants) == 2
+    assert grants[0] < events.index('create_or_update_datasource')
+    assert events.index('create_feature_drift_detail_view') < grants[1] < events.index('create_inference_dataset')
+
+
+class _RoleIam:
+    def __init__(self, error=None, trust_service='quicksight.amazonaws.com'):
+        self.error, self.trust_service = error, trust_service
+
+    def get_role(self, RoleName):
+        if self.error:
+            raise _client_error(self.error, 'GetRole')
+        return {'Role': {'Arn': RUN_AS_ROLE_ARN, 'AssumeRolePolicyDocument': {
+            'Statement': [{'Effect': 'Allow', 'Principal': {'Service': self.trust_service},
+                           'Action': 'sts:AssumeRole'}]}}}
+
+
+def test_resolve_datasource_role_returns_arn_or_falls_back():
+    assert gov.resolve_datasource_role(iam_client=_RoleIam()) == RUN_AS_ROLE_ARN
+    # Older stacks: the role does not exist, or the execution role cannot read it.
+    assert gov.resolve_datasource_role(iam_client=_RoleIam('NoSuchEntity')) is None
+    assert gov.resolve_datasource_role(iam_client=_RoleIam('AccessDenied')) is None
+    with pytest.raises(gov.QuickSightAccessPreflightError, match='does not trust'):
+        gov.resolve_datasource_role(iam_client=_RoleIam(trust_service='lambda.amazonaws.com'))
+
+
+def test_datasource_uses_role_and_project_workgroup_only_with_run_as_role(monkeypatch):
+    monkeypatch.setattr(gov.time, 'sleep', lambda _: None)
+    with_role = FakeDataSourceClient()
+    gov.create_or_update_datasource(
+        account_id=ACCOUNT_ID, quicksight_principals=[USER_A],
+        quicksight_client=with_role, datasource_id='data-source-id', role_arn=RUN_AS_ROLE_ARN,
+    )
+    params = with_role.create_calls[0]['DataSourceParameters']['AthenaParameters']
+    assert params == {'WorkGroup': gov.QUICKSIGHT_DATASOURCE_WORKGROUP, 'RoleArn': RUN_AS_ROLE_ARN}
+
+    without_role = FakeDataSourceClient()
+    gov.create_or_update_datasource(
+        account_id=ACCOUNT_ID, quicksight_principals=[USER_A],
+        quicksight_client=without_role, datasource_id='data-source-id',
+    )
+    assert without_role.create_calls[0]['DataSourceParameters']['AthenaParameters'] == {'WorkGroup': 'primary'}
+
+
+def test_run_as_role_failure_does_not_print_console_fix(monkeypatch):
+    monkeypatch.setattr(gov.time, 'sleep', lambda _: None)
+    client = FailingDataSourceClient('Unable to assume role')
+    with pytest.raises(gov.QuickSightUnavailable, match='run-as role') as exc:
+        gov.create_or_update_datasource(
+            account_id=ACCOUNT_ID, quicksight_principals=[USER_A],
+            quicksight_client=client, datasource_id='data-source-id', role_arn=RUN_AS_ROLE_ARN,
+        )
+    assert 'Security & permissions' not in str(exc.value)
+
+
+class _LakeFormation:
+    def __init__(self, managed):
+        self.managed, self.grants = managed, []
+
+    def get_data_lake_settings(self):
+        defaults = [] if self.managed else [{'Principal': {'DataLakePrincipalIdentifier': 'IAM_ALLOWED_PRINCIPALS'}}]
+        return {'DataLakeSettings': {'CreateDatabaseDefaultPermissions': defaults}}
+
+    def grant_permissions(self, **kwargs):
+        self.grants.append(kwargs)
+
+
+def test_lake_formation_grants_only_in_managed_mode():
+    iam_mode = _LakeFormation(managed=False)
+    assert gov.grant_datasource_role_lake_formation(RUN_AS_ROLE_ARN, lf_client=iam_mode)['lake_formation_managed'] is False
+    assert iam_mode.grants == []
+
+    managed = _LakeFormation(managed=True)
+    gov.grant_datasource_role_lake_formation(RUN_AS_ROLE_ARN, database='db', lf_client=managed)
+    granted = {(g['Resource']['Table']['Name'], g['Permissions'][0]) for g in managed.grants}
+    assert granted == {
+        (t, p)
+        for t in (gov.ATHENA_INFERENCE_TABLE, gov.ATHENA_MONITORING_RESPONSES_TABLE, gov.ATHENA_GROUND_TRUTH_UPDATES_TABLE)
+        for p in ('SELECT', 'DESCRIBE')
+    }
+    assert all(g['Principal']['DataLakePrincipalIdentifier'] == RUN_AS_ROLE_ARN for g in managed.grants)
+
+
+def _iam_statements(template_path):
+    template = yaml.load(template_path.read_text(), Loader=CloudFormationLoader)
+    return template
+
+
+@pytest.mark.parametrize('template_path', [
+    Path(__file__).resolve().parents[2] / 'templates' / '2-iam.yaml',
+])
+def test_template_declares_scoped_run_as_role(template_path):
+    template = _iam_statements(template_path)
+    role = template['Resources']['QuickSightDataSourceRole']['Properties']
+    assert role['RoleName'] == {'!Sub': '${ProjectName}-qs-datasource-role'}
+    trust = role['AssumeRolePolicyDocument']['Statement']
+    assert trust == [{'Effect': 'Allow', 'Principal': {'Service': 'quicksight.amazonaws.com'},
+                      'Action': 'sts:AssumeRole'}]
+    assert role['ManagedPolicyArns'] == [
+        {'!Ref': 'QuickSightServiceRoleS3Policy'}, {'!Ref': 'QuickSightServiceRoleAthenaPolicy'},
+    ]
+    role_arn = 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-qs-datasource-role'
+    passrole = _find_statement(template, 'QuickSightDataSourceRolePass')
+    assert passrole['Action'] == ['iam:PassRole']
+    assert passrole['Resource'] == [{'!Sub': role_arn}]
+    assert passrole['Condition'] == {'StringEquals': {'iam:PassedToService': 'quicksight.amazonaws.com'}}
+    inspect = _find_statement(template, 'QuickSightDataSourceRoleInspect')
+    assert inspect['Action'] == ['iam:GetRole'] and inspect['Resource'] == [{'!Sub': role_arn}]
+    results = _find_statement(template, 'ProjectWorkgroupResults')
+    assert 'athena-results/*' in results['Resource'][0]['!Sub']
+    assert gov.QUICKSIGHT_DATASOURCE_ROLE_NAME.endswith('-qs-datasource-role')

@@ -957,6 +957,24 @@ Resources:
               - quicksight:UpdateDashboardPermissions
             Resource:
               - !Sub "arn:${AWS::Partition}:quicksight:${AWS::Region}:${AWS::AccountId}:dashboard/bank-marketing-governance-dashboard"
+          # Lab 5E run-as role: the notebook checks it exists (older stacks fall
+          # back to the account-wide service role) and passes it on the data
+          # source. PassRole is limited to this one role and to QuickSight.
+          - Sid: QuickSightDataSourceRoleInspect
+            Effect: Allow
+            Action:
+              - iam:GetRole
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-qs-datasource-role"
+          - Sid: QuickSightDataSourceRolePass
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-qs-datasource-role"
+            Condition:
+              StringEquals:
+                iam:PassedToService: quicksight.amazonaws.com
           # Lab 5E closes the manual-subscription ordering gap itself. These
           # actions are limited to reading the exact QuickSight service role and
           # two current-account/current-project managed policies, then attaching
@@ -1045,6 +1063,17 @@ Resources:
             Resource:
               - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::Region}-${AWS::AccountId}"
               - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::Region}-${AWS::AccountId}/*"
+          # With the run-as role (QuickSightDataSourceRole below) the data source
+          # queries through ${ProjectName}-workgroup, which enforces results into
+          # athena-results/ in the data bucket. Reads are covered above.
+          - Sid: ProjectWorkgroupResults
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:AbortMultipartUpload
+              - s3:ListMultipartUploadParts
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ProjectName}-data-${AWS::AccountId}-${AWS::Region}/athena-results/*"
 
   # Athena access for QuickSight, the equivalent of the console's "Amazon Athena"
   # checkbox. Kept in a project-scoped managed policy so it can be created before
@@ -1114,6 +1143,32 @@ Resources:
             Effect: Allow
             Action: lakeformation:GetDataAccess
             Resource: "*"
+
+  # Lab 5E run-as role for the dashboard's Athena data source
+  # (AthenaParameters.RoleArn). When a data source names a role, QuickSight
+  # assumes it instead of the account-wide service role, so the dashboard works
+  # even if "QuickSight access to AWS services" was never saved in the console.
+  # That setting has no API (CreateAccountSubscription cannot set default
+  # resource access), and API or new "Amazon Quick" sign-ups leave it unset.
+  # It also keeps the workshop from modifying the account-global
+  # aws-quicksight-service-role-v0. The trust policy matches AWS's documented
+  # example for QuickSight run-as roles; QuickSight does not document
+  # aws:SourceAccount/aws:SourceArn for this assume, so no condition is added.
+  QuickSightDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-qs-datasource-role'
+      Description: 'Lab 5E: QuickSight assumes this role for the governance dashboard Athena data source.'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: quicksight.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref QuickSightServiceRoleS3Policy
+        - !Ref QuickSightServiceRoleAthenaPolicy
 
   # Dedicated Athena workgroup for the workshop. The account's built-in
   # "primary" workgroup has no result location configured, so interactive
@@ -2291,6 +2346,10 @@ Outputs:
   QuickSightAthenaAccessPolicyArn:
     Description: Current-project managed policy Lab 5E ensures on the QuickSight service role
     Value: !Ref QuickSightServiceRoleAthenaPolicy
+
+  QuickSightDataSourceRoleArn:
+    Description: Run-as role QuickSight assumes for the Lab 5E governance data source
+    Value: !GetAtt QuickSightDataSourceRole.Arn
 
   ProductSageMakerExecutionRoleArn:
     Value: !GetAtt ProductSageMakerExecutionRole.Arn

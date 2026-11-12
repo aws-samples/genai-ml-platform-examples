@@ -31,7 +31,7 @@ parameters of the later stacks.
 | Stack | Template | Relevance to Lab 5 |
 |---|---|---|
 | `<prefix>-networking` | `1-networking.yaml` | VPC, two private subnets, public subnet + NAT, security groups, 11 VPC endpoints (S3, SageMaker API/Runtime/Studio, STS, SSM, CloudWatch, Logs, ECR) — the domain runs VpcOnly |
-| `<prefix>-iam` | `2-iam.yaml` | Execution roles and every policy Lab 5 needs, including the two QuickSight service-role policies and the MLflow data-plane grants |
+| `<prefix>-iam` | `2-iam.yaml` | Execution roles and every policy Lab 5 needs, including the Lab 5E QuickSight run-as role and its two policies, and the MLflow data-plane grants |
 | `<prefix>-sagemaker` | `3-sagemaker.yaml` | Domain, user profiles, JupyterLab space, MLflow app, S3 buckets, S3 Access Grants |
 | `<prefix>-inference-capture` | `4-inference-capture.yaml` | **The Lab 5 data plane**: `inference_responses`, `monitoring_responses`, `ground_truth_updates` + the SQS→Lambda capture pipeline |
 | `<prefix>-data-prep` | `5-data-prep.yaml` | `training_data` and `evaluation_data` (the drift baselines) + the Lab 2C/2D EMR resources |
@@ -45,7 +45,7 @@ parameters of the later stacks.
 > fixed-name resource.
 
 Because the stacks are independent, a change to one template touches only that
-stack — useful for Lab 5E, where the QuickSight policies live in the IAM stack:
+stack — useful for Lab 5E, where the QuickSight run-as role lives in the IAM stack:
 
 ```bash
 ONLY_STACKS=iam ./scripts/deploy-workshop.sh      # minutes, not 20-40
@@ -165,9 +165,8 @@ only after finishing Lab 5.
 The QuickSight **account subscription** has no CloudFormation resource, so it
 happens outside the stack — once per AWS account, and billable. The default path
 is the **console**, from notebook 5E itself: search the console for `quick` and
-sign up. The workshop docs walk it, and doing it by hand is deliberate, because
-the subscription and the data-access grant below are two separate events and
-watching them happen separately is the governance point of the lab.
+sign up. The workshop docs walk it. Subscribing is the only QuickSight step a
+participant does; the data access below is provisioned with the stack.
 
 The sign-up form has no edition selector, and 5E needs **Enterprise** (the
 Definition API it publishes through is an Enterprise feature), so verify rather
@@ -190,31 +189,28 @@ That requests Enterprise with `IAM_AND_QUICKSIGHT` authentication in
 *Password-based or Single-Sign On* is the same thing. The flag defaults to `false`
 because both the identity region and the QuickSight account name are permanent.
 
-**QuickSight's access to the data is CloudFormation-owned.** QuickSight reads
-Athena and S3 as its own service role — `aws-quicksight-service-role-v0` — *not*
-as the notebook's execution role. `templates/2-iam.yaml` attaches
-`QuickSightServiceRoleS3Policy` (data bucket + Athena results) and
-`QuickSightServiceRoleAthenaPolicy` (Athena/Glue read) to that role, in place of
-the console's *Manage QuickSight → Security & permissions* toggles.
+**QuickSight's access to the data is CloudFormation-owned.** `templates/2-iam.yaml`
+creates a run-as role, `<ProjectName>-qs-datasource-role`, trusted only by
+`quicksight.amazonaws.com` and carrying two project-scoped policies:
+`QuickSightServiceRoleS3Policy` (data bucket reads, plus Athena results under
+`athena-results/`) and `QuickSightServiceRoleAthenaPolicy` (Athena execution and
+Glue reads on the monitoring database). Lab 5E names the role on the dashboard's
+Athena data source (`AthenaParameters.RoleArn`) and queries through
+`<ProjectName>-workgroup`, so QuickSight assumes it instead of the account-wide
+service role `aws-quicksight-service-role-v0`. The execution roles may pass this
+one role to QuickSight only.
 
-Both are conditional on `AttachQuickSightServiceRolePolicy`, which defaults to
-`false`: an IAM policy resource fails outright if its target role does not exist,
-and that role is created by the subscription. Subscribing from the console during
-5E therefore always leaves the stack a step behind. Re-run the deploy limited to
-the IAM stack — the script detects the service role however the subscription
-happened and sets the parameter itself:
+The role does not depend on the subscription, so it exists before anyone
+subscribes, and nothing has to be redeployed afterwards. It also avoids the
+console's *Quick access to AWS services* setting, which has no API, changes
+access for the whole account, and cannot be saved by a Workshop Studio
+participant.
 
-```bash
-ONLY_STACKS=iam ./scripts/deploy-workshop.sh
-```
-
-Without those policies the dashboard is created successfully but every panel
-fails to load.
-
-Two things notebook 5E does not need, but a human browsing the dashboard does: a
-QuickSight **Author/Admin** user for your IAM/SSO identity (*Manage QuickSight →
-Manage users*), and `QUICKSIGHT_IDENTITY_REGION` in `.env` if the account's
-identity region differs from `AWS_DEFAULT_REGION`.
+Two more account-level prerequisites: at least one QuickSight **Author/Admin**
+user (a console sign-up creates one; after an API subscription, add it under
+*Manage account → Manage users*), because the build shares the dashboard with
+those users and stops if there are none; and `QUICKSIGHT_IDENTITY_REGION` in
+`.env` if the account's identity region differs from `AWS_DEFAULT_REGION`.
 
 > **If the deploy reports QuickSight as not subscribed when it is**, the identity
 > region is wrong. QuickSight has one identity endpoint per account, fixed when
