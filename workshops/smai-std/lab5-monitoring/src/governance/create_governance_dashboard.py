@@ -61,8 +61,10 @@ functional reason to shell out here — using boto3 directly keeps this
 module consistent with every other AWS call it makes).
 """
 
+import json
 import logging
 import time
+from urllib.parse import unquote
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -91,8 +93,11 @@ from src.config.config import (
     QUICKSIGHT_DASHBOARD_NAME,
     QUICKSIGHT_DATASOURCE_ID,
     QUICKSIGHT_DATASOURCE_NAME,
+    QUICKSIGHT_DATASOURCE_ROLE_NAME,
+    QUICKSIGHT_DATASOURCE_WORKGROUP,
     QUICKSIGHT_DRIFT_DATASET_ID,
     QUICKSIGHT_DRIFT_DATASET_NAME,
+    QUICKSIGHT_FALLBACK_WORKGROUP,
     QUICKSIGHT_FEATURE_DRIFT_DATASET_ID,
     QUICKSIGHT_FEATURE_DRIFT_DATASET_NAME,
     QUICKSIGHT_FEATURE_LEVEL_DATASET_ID,
@@ -104,6 +109,8 @@ from src.config.config import (
     QUICKSIGHT_SERVICE_ROLE_NAME,
 )
 from src.setup.grant_lake_formation_permissions import (
+    _grant as _grant_lake_formation,
+    _is_lf_managed,
     grant_lake_formation_permissions,
 )
 
@@ -232,6 +239,54 @@ def _list_attached_policy_arns(iam_client: Any, role_name: str) -> set[str]:
             raise QuickSightAccessPreflightError(
                 f'IAM returned a truncated attachment list for {role_name} without a marker.'
             )
+
+
+def resolve_datasource_role(
+    iam_client: Optional[Any] = None,
+    role_name: Optional[str] = None,
+) -> Optional[str]:
+    """Return the ARN of the run-as role for the data source, or None.
+
+    The role is QuickSightDataSourceRole in templates/2-iam.yaml. With it, the
+    data source sets ``AthenaParameters.RoleArn`` and QuickSight assumes this
+    role instead of the account-wide service role. Per the QuickSight docs, the
+    account-wide role and its scope-down policies are then ignored, so the
+    console-only "QuickSight access to AWS services" setting is not needed.
+
+    None means the stack predates the role: it does not exist, or the
+    execution role has no iam:GetRole on it (older stacks granted neither).
+    The caller then uses the account-wide service role as before.
+    """
+    resolved_role_name = role_name or QUICKSIGHT_DATASOURCE_ROLE_NAME
+    if iam_client is None:
+        iam_client = boto3.client('iam', region_name=AWS_DEFAULT_REGION)
+    try:
+        role = iam_client.get_role(RoleName=resolved_role_name)['Role']
+    except ClientError as exc:
+        code = _client_error_code(exc)
+        if code in ('NoSuchEntity', 'NoSuchEntityException', 'AccessDenied', 'AccessDeniedException'):
+            logger.info(
+                f"Run-as role {resolved_role_name} unavailable ({code}); "
+                "using the account-wide QuickSight service role."
+            )
+            return None
+        raise
+
+    trust = role.get('AssumeRolePolicyDocument') or {}
+    if isinstance(trust, str):
+        trust = json.loads(unquote(trust))
+    principals = []
+    for statement in trust.get('Statement', []):
+        if statement.get('Effect') != 'Allow':
+            continue
+        service = (statement.get('Principal') or {}).get('Service', [])
+        principals.extend([service] if isinstance(service, str) else service)
+    if 'quicksight.amazonaws.com' not in principals:
+        raise QuickSightAccessPreflightError(
+            f"{role['Arn']} does not trust quicksight.amazonaws.com, so QuickSight "
+            "cannot assume it. Redeploy templates/2-iam.yaml."
+        )
+    return role['Arn']
 
 
 def ensure_quicksight_service_role_policies(
@@ -549,13 +604,11 @@ def check_quicksight_subscription(
         code = e.response['Error']['Code']
         if code == 'ResourceNotFoundException':
             logger.error(
-                "QuickSight not subscribed for this account — sign up once from the "
-                "console (search for 'quick'), confirm the edition is ENTERPRISE, then "
-                "rerun Lab 5E. Its preflight will attach only this project's managed "
-                "S3 and Athena policies before creating assets. For bulk provisioning, "
-                "provisioning, SUBSCRIBE_QUICKSIGHT=true "
-                "QUICKSIGHT_NOTIFICATION_EMAIL=<address> scripts/deploy-workshop.sh "
-                "does both."
+                "QuickSight is not subscribed for this account. Subscribe once, outside "
+                "this notebook, then rerun Lab 5E: at a Workshop Studio event, run the "
+                "CloudShell commands on the Lab 5E page (create-account-subscription; "
+                "the subscriber becomes the first admin); in your own account, sign up from the console "
+                "(search for 'quick') and confirm the edition is ENTERPRISE."
             )
             return {'subscribed': False, 'edition': None, 'reason': 'not-subscribed'}
         if code in ('AccessDeniedException', 'UnrecognizedClientException'):
@@ -788,15 +841,130 @@ def get_quicksight_principals(
     )
 
 
+_SERVICE_ACCESS_NOT_SET_UP = 'service role required to access your aws resources has not been created'
+
+
+def _wait_for_data_source(
+    account_id: str,
+    datasource_id: str,
+    quicksight_client: Any,
+    role_arn: Optional[str] = None,
+    timeout_seconds: int = 120,
+    poll_interval: int = 3,
+) -> None:
+    """Wait for an asynchronous create/update and fail with the fix, not later.
+
+    ``create_data_source`` returns while the source is still
+    CREATION_IN_PROGRESS. If it then fails, nothing reports it until the first
+    dataset call raises a much less obvious error. A failed *creation* is
+    deleted so the next run recreates it instead of updating a dead resource.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        source = quicksight_client.describe_data_source(
+            AwsAccountId=account_id, DataSourceId=datasource_id,
+        )['DataSource']
+        status = source.get('Status', '')
+        if not status.endswith('_IN_PROGRESS') or time.monotonic() >= deadline:
+            break
+        time.sleep(poll_interval)
+
+    if not status.endswith('_FAILED'):
+        return
+
+    error = source.get('ErrorInfo') or {}
+    detail = f"{error.get('Type', 'UNKNOWN')}: {error.get('Message', 'no message')}"
+    if status == 'CREATION_FAILED':
+        try:
+            quicksight_client.delete_data_source(AwsAccountId=account_id, DataSourceId=datasource_id)
+        except ClientError as exc:
+            logger.warning(f"Could not delete failed data source {datasource_id}: {exc}")
+
+    if role_arn:
+        raise QuickSightUnavailable(
+            f"QuickSight data source {datasource_id} {status} ({detail}) using run-as role "
+            f"{role_arn}. Check that the role trusts quicksight.amazonaws.com and carries the "
+            "project's QuickSightS3DataLakeAccess and QuickSightAthenaAccess policies "
+            "(templates/2-iam.yaml), then re-run this cell."
+        )
+    if _SERVICE_ACCESS_NOT_SET_UP in detail.lower():
+        raise QuickSightUnavailable(
+            f"QuickSight data source {status} ({detail}).\n"
+            "QuickSight has not been told to use its service role for AWS data, because the\n"
+            "'Quick access to AWS services' settings were never saved, and this account has no\n"
+            "run-as role: it was not provisioned with the current templates/2-iam.yaml, which\n"
+            "creates <project>-qs-datasource-role so this setting is never needed. To use this\n"
+            "account anyway, an account admin can save the setting once in the console:\n"
+            f"  1. Sign in to the Quick console in {QUICKSIGHT_IDENTITY_REGION} as an admin.\n"
+            "  2. Profile icon (top right) -> Manage account -> Permissions -> AWS resources\n"
+            "     (older consoles: Manage QuickSight -> Security & permissions).\n"
+            "  3. Under 'Quick access to AWS services' (or 'QuickSight access to AWS services') choose Manage.\n"
+            "  4. Keep 'Use Quick-managed role (default)' selected.\n"
+            "  5. Tick Amazon Athena and Amazon S3. Under S3 -> Select S3 buckets, select the lab's\n"
+            "     data bucket and the aws-athena-query-results-* bucket if listed, and enable\n"
+            "     'Write permission for Athena Workgroup'. AWS Glue Data Catalog is not needed.\n"
+            "  6. Save, then re-run this cell.\n"
+            "At a Workshop Studio event, Save returns 'Not authorized': the participant role\n"
+            "denies editing the AWSQuickSight* policies, by design. Tell the event owner that\n"
+            "the account was provisioned from an outdated template."
+        )
+    raise QuickSightUnavailable(f"QuickSight data source {datasource_id} {status} ({detail}).")
+
+
+def grant_datasource_role_lake_formation(
+    role_arn: str,
+    database: Optional[str] = None,
+    region: Optional[str] = None,
+    lf_client: Optional[Any] = None,
+    tables: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Grant the run-as role SELECT/DESCRIBE on what the datasets read.
+
+    The QuickSight docs note that Lake Formation still applies to a run-as
+    role. Under IAM_ALLOWED_PRINCIPALS (this workshop's default) IAM alone
+    decides, so this is a no-op; in an LF-managed catalog the role needs its
+    own grants, exactly like the notebook caller does.
+    """
+    resolved_database = database or ATHENA_DATABASE
+    if lf_client is None:
+        lf_client = boto3.client('lakeformation', region_name=region or AWS_DEFAULT_REGION)
+    if not _is_lf_managed(lf_client):
+        return {'lake_formation_managed': False, 'results': []}
+    if tables is None:
+        tables = [
+            ATHENA_INFERENCE_TABLE,
+            ATHENA_MONITORING_RESPONSES_TABLE,
+            ATHENA_GROUND_TRUTH_UPDATES_TABLE,
+        ]
+    results = [
+        _grant_lake_formation(lf_client, role_arn, resolved_database, table, permission)
+        for table in tables
+        for permission in ('SELECT', 'DESCRIBE')
+    ]
+    failures = [r for r in results if r.startswith('✗')]
+    if failures:
+        raise QuickSightUnavailable(
+            'Lake Formation grants for the QuickSight run-as role failed:\n  ' + '\n  '.join(failures)
+        )
+    return {'lake_formation_managed': True, 'results': results}
+
+
 def create_or_update_datasource(
     account_id: str,
     quicksight_principals: List[str],
     quicksight_client: Optional[Any] = None,
     datasource_id: Optional[str] = None,
     datasource_name: Optional[str] = None,
+    role_arn: Optional[str] = None,
+    workgroup: Optional[str] = None,
 ) -> str:
     """
     Create or update the Athena data source in QuickSight (Section 4).
+
+    With ``role_arn`` (the run-as role from :func:`resolve_datasource_role`),
+    QuickSight assumes that role for every query on this source and queries
+    through the project workgroup. Without it, the account-wide service role
+    and the ``primary`` workgroup are used, as before the run-as role existed.
 
     Idempotent describe/create-or-update pattern followed by additive
     permission reconciliation for every discovered QuickSight user.
@@ -809,6 +977,9 @@ def create_or_update_datasource(
         datasource_id: Data source ID. Defaults to config.QUICKSIGHT_DATASOURCE_ID.
         datasource_name: Data source display name. Defaults to
             config.QUICKSIGHT_DATASOURCE_NAME.
+        role_arn: Optional run-as role ARN for ``AthenaParameters.RoleArn``.
+        workgroup: Athena workgroup. Defaults to the project workgroup with a
+            run-as role, otherwise ``primary``.
 
     Returns:
         The data source ARN.
@@ -819,11 +990,19 @@ def create_or_update_datasource(
     if quicksight_client is None:
         quicksight_client = boto3.client('quicksight', region_name=AWS_DEFAULT_REGION)
 
+    athena_parameters: Dict[str, str] = {
+        'WorkGroup': workgroup or (
+            QUICKSIGHT_DATASOURCE_WORKGROUP if role_arn else QUICKSIGHT_FALLBACK_WORKGROUP
+        ),
+    }
+    if role_arn:
+        athena_parameters['RoleArn'] = role_arn
+
     common = dict(
         AwsAccountId=account_id,
         DataSourceId=resolved_datasource_id,
         Name=resolved_datasource_name,
-        DataSourceParameters={'AthenaParameters': {'WorkGroup': 'primary'}},
+        DataSourceParameters={'AthenaParameters': athena_parameters},
     )
     try:
         quicksight_client.describe_data_source(AwsAccountId=account_id, DataSourceId=resolved_datasource_id)
@@ -839,6 +1018,8 @@ def create_or_update_datasource(
             )
         else:
             raise
+
+    _wait_for_data_source(account_id, resolved_datasource_id, quicksight_client, role_arn=role_arn)
 
     ensure_quicksight_resource_permissions(
         account_id=account_id,
@@ -1835,6 +2016,28 @@ ORDER BY i.request_timestamp DESC
 # ---------------------------------------------------------------------------
 
 
+def _kpi_options() -> Dict[str, Any]:
+    """KPI display options shared by every KPI visual.
+
+    Each KPI answers "what is the latest value?", so it shows the newest day's
+    actual value with a sparkline of the trend. QuickSight's built-in
+    period-over-period comparison is deliberately hidden: with a DAY trend
+    group it rendered "Cannot compare values" for ROC-AUC and compared
+    non-adjacent days for drift share, even with explicit comparison options.
+    The trend charts on each sheet already show the day-to-day movement.
+
+    No SortConfiguration on purpose: QuickSight's default trend-group order
+    makes the newest day the primary value and draws the sparkline
+    chronologically. An explicit ASC sort showed the oldest day instead.
+    """
+    return {
+        'PrimaryValueDisplayType': 'ACTUAL',
+        'SecondaryValue': {'Visibility': 'HIDDEN'},
+        'TrendArrows': {'Visibility': 'HIDDEN'},
+        'Sparkline': {'Visibility': 'VISIBLE', 'Type': 'LINE', 'TooltipVisibility': 'VISIBLE'},
+    }
+
+
 def build_model_drift_visuals() -> List[Dict[str, Any]]:
     """
     Build the "Model Drift Trends" tab (Sheet 1).
@@ -2012,7 +2215,8 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'm8-val', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'm8-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }
@@ -2273,7 +2477,8 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'd7-val', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'd7-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }
@@ -2514,7 +2719,8 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'f6-val', 'Column': flcol('drift_magnitude'), 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'f6-trend', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }
@@ -3114,10 +3320,24 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
     elif subscription['edition'] == 'STANDARD':
         logger.warning("Definition API requires Enterprise edition")
 
-    service_role_permissions = ensure_quicksight_service_role_policies(
-        account_id=account_id,
-        iam_client=iam_client,
-    )
+    # Prefer the stack's run-as role: QuickSight then never consults the
+    # account-wide service role, so the console-only "access to AWS services"
+    # setting and the shared aws-quicksight-service-role-v0 are left alone.
+    # Stacks that predate the role keep the original preflight.
+    datasource_role_arn = resolve_datasource_role(iam_client=iam_client)
+    if datasource_role_arn:
+        logger.info(f"Data source runs as {datasource_role_arn}")
+        service_role_permissions = {
+            'mode': 'run-as-role',
+            'role_arn': datasource_role_arn,
+            'attached_now': [],
+        }
+    else:
+        service_role_permissions = ensure_quicksight_service_role_policies(
+            account_id=account_id,
+            iam_client=iam_client,
+        )
+        service_role_permissions['mode'] = 'account-service-role'
 
     data_check = verify_athena_data(athena_client=athena_client)
     if not data_check['has_drift_data']:
@@ -3131,10 +3351,15 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
         account_id=account_id, quicksight_admin_client=quicksight_admin_client,
     )
 
+    if datasource_role_arn:
+        # Before the data source: QuickSight tests the connection on create.
+        grant_datasource_role_lake_formation(datasource_role_arn, region=resolved_region)
+
     datasource_arn = create_or_update_datasource(
         account_id=account_id,
         quicksight_principals=quicksight_principals,
         quicksight_client=quicksight_client,
+        role_arn=datasource_role_arn,
     )
 
     grant_governance_permissions(region=resolved_region)
@@ -3144,6 +3369,10 @@ def create_dashboard(region: Optional[str] = None) -> Dict[str, Any]:
     # that references a missing or invalid view.
     create_feature_drift_detail_view(athena_client=athena_client)
     grant_feature_drift_view_permissions(region=resolved_region)
+    if datasource_role_arn:
+        grant_datasource_role_lake_formation(
+            datasource_role_arn, region=resolved_region, tables=[FEATURE_DRIFT_DETAIL_VIEW],
+        )
 
     inference_arn = create_inference_dataset(
         datasource_arn, account_id, quicksight_principals, quicksight_client=quicksight_client,

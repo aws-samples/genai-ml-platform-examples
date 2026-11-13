@@ -27,7 +27,7 @@ history. Configure it with `monitoring_capture.lookback_hours` in
 `MONITORING_CAPTURE_LOOKBACK_HOURS`. If fewer than 300 rows qualify, nothing is
 tagged and closing can be retried.
 
-Lab 5E uses `src.governance.create_governance_dashboard` to create or refresh the QuickSight governance assets. Before any asset write, it verifies the account's QuickSight service role and idempotently attaches only the two current-project managed policies created by `templates/2-iam.yaml`. It also adds newly discovered QuickSight users to existing assets without revoking other principals.
+Lab 5E uses `src.governance.create_governance_dashboard` to create or refresh the QuickSight governance assets. Its Athena data source runs as the stack's `<project>-qs-datasource-role` (`AthenaParameters.RoleArn`), provisioned by `templates/2-iam.yaml`, so it does not depend on or modify the account-wide QuickSight service role. It also adds newly discovered QuickSight users to existing assets without revoking other principals.
 
 Install the package and notebook dependencies from this directory with:
 
