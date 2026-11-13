@@ -261,7 +261,7 @@ aws quicksight describe-account-settings --aws-account-id "${ACCOUNT_ID}" \
 After subscription finishes, run Lab 5E. No further deployment is needed: the build cell prints `Data source runs as …-qs-datasource-role` and creates the data source, datasets, view, analysis, and dashboard.
 
 **Subscribing automatically instead.** For provisioning accounts in bulk rather than teaching from
-them, the deploy script can subscribe in the same run:
+them, the deploy script can subscribe in the same run. Run it where you run the rest of the deployment (CloudShell or your terminal, with permission to subscribe). It is not a notebook step, and it doesn't apply to Workshop Studio event accounts, which are provisioned for you.
 
 ```bash
 SUBSCRIBE_QUICKSIGHT=true QUICKSIGHT_NOTIFICATION_EMAIL=you@example.com \
@@ -269,8 +269,8 @@ SUBSCRIBE_QUICKSIGHT=true QUICKSIGHT_NOTIFICATION_EMAIL=you@example.com \
 ```
 
 Subscribes, waits for provisioning, then deploys. Already-subscribed accounts are detected and
-left alone. An API subscription creates no QuickSight user, so add one before running Lab 5E
-(see below). The flag defaults to `false`
+left alone. The identity that runs it becomes the first QuickSight admin; register any other
+identity that will open the dashboard before running Lab 5E (see below). The flag defaults to `false`
 because the subscription is billable and permanent, and should not be a side effect of a deploy
 nobody read.
 
@@ -285,7 +285,7 @@ nobody read.
 
 **Why the edition needs verifying.** The sign-up form asks only for an account name, notification email, default data region, authentication method, and encryption key — nothing about editions — so a console signup gives you no way to tell which one you got. An account that landed on Standard upgrades from *Manage account → Account settings*; the downgrade is not supported.
 
-**QuickSight users.** Lab 5E shares the dashboard with every QuickSight user it finds and stops with *"No QuickSight users"* if there are none. A console sign-up makes you the first admin; after an API subscription, add an **Author** or **Admin** user under *Manage account → Manage users*.
+**QuickSight users.** Lab 5E shares the dashboard with every QuickSight user it finds and stops with *"No QuickSight users"* if there are none. Whoever subscribes, through the console or the API, becomes the first admin. To open the dashboard as a different identity, add it as an **Author** or **Admin** under *Manage account → Manage users*.
 
 **Troubleshooting:**
 

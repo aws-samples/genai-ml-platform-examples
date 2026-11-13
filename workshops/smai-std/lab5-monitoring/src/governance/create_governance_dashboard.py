@@ -604,13 +604,11 @@ def check_quicksight_subscription(
         code = e.response['Error']['Code']
         if code == 'ResourceNotFoundException':
             logger.error(
-                "QuickSight not subscribed for this account — sign up once from the "
-                "console (search for 'quick'), confirm the edition is ENTERPRISE, then "
-                "rerun Lab 5E. Its preflight will attach only this project's managed "
-                "S3 and Athena policies before creating assets. For bulk provisioning, "
-                "provisioning, SUBSCRIBE_QUICKSIGHT=true "
-                "QUICKSIGHT_NOTIFICATION_EMAIL=<address> scripts/deploy-workshop.sh "
-                "does both."
+                "QuickSight is not subscribed for this account. Subscribe once, outside "
+                "this notebook, then rerun Lab 5E: at a Workshop Studio event, run the "
+                "CloudShell commands on the Lab 5E page (create-account-subscription; "
+                "the subscriber becomes the first admin); in your own account, sign up from the console "
+                "(search for 'quick') and confirm the edition is ENTERPRISE."
             )
             return {'subscribed': False, 'edition': None, 'reason': 'not-subscribed'}
         if code in ('AccessDeniedException', 'UnrecognizedClientException'):
@@ -2018,6 +2016,30 @@ ORDER BY i.request_timestamp DESC
 # ---------------------------------------------------------------------------
 
 
+def _kpi_options(decimal_places: int = 2) -> Dict[str, Any]:
+    """KPI display options shared by every KPI visual.
+
+    With a DAY trend group and more than one day of runs, a KPI without
+    explicit options shows the period-over-period *comparison* as its primary
+    value, and QuickSight renders "Cannot compare values" there. Show the
+    actual latest value instead, with the day-over-day difference and a trend
+    arrow as secondary information.
+    """
+    return {
+        'PrimaryValueDisplayType': 'ACTUAL',
+        'Comparison': {
+            'ComparisonMethod': 'DIFFERENCE',
+            'ComparisonFormat': {
+                'NumberDisplayFormatConfiguration': {
+                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimal_places},
+                },
+            },
+        },
+        'SecondaryValue': {'Visibility': 'VISIBLE'},
+        'TrendArrows': {'Visibility': 'VISIBLE'},
+    }
+
+
 def build_model_drift_visuals() -> List[Dict[str, Any]]:
     """
     Build the "Model Drift Trends" tab (Sheet 1).
@@ -2195,7 +2217,8 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'm8-val', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'm8-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }
@@ -2456,7 +2479,8 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'd7-val', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'd7-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }
@@ -2697,7 +2721,8 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
                 'FieldWells': {
                     'Values': [{'NumericalMeasureField': {'FieldId': 'f6-val', 'Column': flcol('drift_magnitude'), 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'f6-trend', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
-                }
+                },
+                'KPIOptions': _kpi_options(),
             }
         }
     }

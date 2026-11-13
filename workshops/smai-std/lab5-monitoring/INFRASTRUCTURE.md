@@ -178,7 +178,7 @@ aws quicksight describe-account-settings --aws-account-id <account> \
 ```
 
 `scripts/deploy-workshop.sh` can subscribe instead, for provisioning accounts in
-bulk:
+bulk. Run it where you run the rest of the deployment (CloudShell or your terminal, with permission to subscribe). It is not a notebook step, and it doesn't apply to Workshop Studio event accounts, which are provisioned for you.
 
 ```bash
 SUBSCRIBE_QUICKSIGHT=true QUICKSIGHT_NOTIFICATION_EMAIL=you@example.com ./scripts/deploy-workshop.sh
@@ -207,8 +207,8 @@ access for the whole account, and cannot be saved by a Workshop Studio
 participant.
 
 Two more account-level prerequisites: at least one QuickSight **Author/Admin**
-user (a console sign-up creates one; after an API subscription, add it under
-*Manage account → Manage users*), because the build shares the dashboard with
+user (whoever subscribes, through the console or the API, becomes the first admin;
+add other identities under *Manage account → Manage users*), because the build shares the dashboard with
 those users and stops if there are none; and `QUICKSIGHT_IDENTITY_REGION` in
 `.env` if the account's identity region differs from `AWS_DEFAULT_REGION`.
 
