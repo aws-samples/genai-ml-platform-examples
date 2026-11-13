@@ -1099,7 +1099,6 @@ def test_every_kpi_shows_actual_value_not_comparison():
         # The built-in comparison rendered "Cannot compare values"; keep it hidden.
         assert options['SecondaryValue'] == {'Visibility': 'HIDDEN'}
         assert 'Comparison' not in options
-        trend_id = config['FieldWells']['TrendGroups'][0]['DateDimensionField']['FieldId']
-        assert config['SortConfiguration']['TrendGroupSort'] == [
-            {'FieldSort': {'FieldId': trend_id, 'Direction': 'ASC'}}
-        ]
+        # Default trend-group order puts the newest day first; an explicit
+        # ASC sort made the KPI show the oldest day.
+        assert 'SortConfiguration' not in config
