@@ -1087,12 +1087,19 @@ def test_template_declares_scoped_run_as_role(template_path):
 
 
 def test_every_kpi_shows_actual_value_not_comparison():
-    # Without explicit options, a KPI with a DAY trend group and 2+ days of
-    # runs shows the comparison as its primary value -> "Cannot compare values".
+    # With a DAY trend group and 2+ days of runs, QuickSight's comparison
+    # rendered "Cannot compare values"; each KPI shows the latest actual value.
     visuals = gov._build_all_visuals()
     kpis = [v['KPIVisual'] for sheet in visuals.values() for v in sheet if 'KPIVisual' in v]
     assert {k['VisualId'] for k in kpis} == {'m8-latest-auc', 'd7-latest-share', 'f6-highest-score'}
     for kpi in kpis:
-        options = kpi['ChartConfiguration']['KPIOptions']
+        config = kpi['ChartConfiguration']
+        options = config['KPIOptions']
         assert options['PrimaryValueDisplayType'] == 'ACTUAL'
-        assert options['Comparison']['ComparisonMethod'] == 'DIFFERENCE'
+        # The built-in comparison rendered "Cannot compare values"; keep it hidden.
+        assert options['SecondaryValue'] == {'Visibility': 'HIDDEN'}
+        assert 'Comparison' not in options
+        trend_id = config['FieldWells']['TrendGroups'][0]['DateDimensionField']['FieldId']
+        assert config['SortConfiguration']['TrendGroupSort'] == [
+            {'FieldSort': {'FieldId': trend_id, 'Direction': 'ASC'}}
+        ]

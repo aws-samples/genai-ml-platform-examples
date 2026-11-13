@@ -2016,28 +2016,27 @@ ORDER BY i.request_timestamp DESC
 # ---------------------------------------------------------------------------
 
 
-def _kpi_options(decimal_places: int = 2) -> Dict[str, Any]:
+def _kpi_options() -> Dict[str, Any]:
     """KPI display options shared by every KPI visual.
 
-    With a DAY trend group and more than one day of runs, a KPI without
-    explicit options shows the period-over-period *comparison* as its primary
-    value, and QuickSight renders "Cannot compare values" there. Show the
-    actual latest value instead, with the day-over-day difference and a trend
-    arrow as secondary information.
+    Each KPI answers "what is the latest value?", so it shows the newest day's
+    actual value with a sparkline of the trend. QuickSight's built-in
+    period-over-period comparison is deliberately hidden: with a DAY trend
+    group it rendered "Cannot compare values" for ROC-AUC and compared
+    non-adjacent days for drift share, even with explicit comparison options.
+    The trend charts on each sheet already show the day-to-day movement.
     """
     return {
         'PrimaryValueDisplayType': 'ACTUAL',
-        'Comparison': {
-            'ComparisonMethod': 'DIFFERENCE',
-            'ComparisonFormat': {
-                'NumberDisplayFormatConfiguration': {
-                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimal_places},
-                },
-            },
-        },
-        'SecondaryValue': {'Visibility': 'VISIBLE'},
-        'TrendArrows': {'Visibility': 'VISIBLE'},
+        'SecondaryValue': {'Visibility': 'HIDDEN'},
+        'TrendArrows': {'Visibility': 'HIDDEN'},
+        'Sparkline': {'Visibility': 'VISIBLE', 'Type': 'LINE', 'TooltipVisibility': 'VISIBLE'},
     }
+
+
+def _kpi_sort(trend_field_id: str) -> Dict[str, Any]:
+    """Sort the trend group by date ascending so "latest" is the newest day."""
+    return {'TrendGroupSort': [{'FieldSort': {'FieldId': trend_field_id, 'Direction': 'ASC'}}]}
 
 
 def build_model_drift_visuals() -> List[Dict[str, Any]]:
@@ -2218,6 +2217,7 @@ def build_model_drift_visuals() -> List[Dict[str, Any]]:
                     'Values': [{'NumericalMeasureField': {'FieldId': 'm8-val', 'Column': dcol('current_roc_auc'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'm8-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
                 },
+                'SortConfiguration': _kpi_sort('m8-trend'),
                 'KPIOptions': _kpi_options(),
             }
         }
@@ -2480,6 +2480,7 @@ def build_data_drift_visuals() -> List[Dict[str, Any]]:
                     'Values': [{'NumericalMeasureField': {'FieldId': 'd7-val', 'Column': dcol('drifted_columns_share'), 'AggregationFunction': {'SimpleNumericalAggregation': 'AVERAGE'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'd7-trend', 'Column': dcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
                 },
+                'SortConfiguration': _kpi_sort('d7-trend'),
                 'KPIOptions': _kpi_options(),
             }
         }
@@ -2722,6 +2723,7 @@ def build_feature_drift_visuals() -> List[Dict[str, Any]]:
                     'Values': [{'NumericalMeasureField': {'FieldId': 'f6-val', 'Column': flcol('drift_magnitude'), 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}}],
                     'TrendGroups': [{'DateDimensionField': {'FieldId': 'f6-trend', 'Column': flcol('monitoring_timestamp'), 'DateGranularity': 'DAY'}}],
                 },
+                'SortConfiguration': _kpi_sort('f6-trend'),
                 'KPIOptions': _kpi_options(),
             }
         }
