@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1120" viewBox="0 0 1180 1120" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#5A6B7B"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="1120" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="40" y="44" font-size="22" font-weight="bold" fill="#16222F">From an AD group to a HyperPod compute quota</text>
+  <text x="40" y="70" font-size="13.5" fill="#5A6B7B">Each link is a real AWS or Kubernetes resource. Example values are for alice on team search-ranking.</text>
+
+  <!-- ===== Left lifecycle brackets ===== -->
+  <!-- Identity side: box 1 -->
+  <rect x="40" y="110" width="230" height="96" rx="8" fill="#F7F5FF" stroke="#7A5AF8" stroke-dasharray="6 4"/>
+  <text x="56" y="142" font-size="12" font-weight="bold" fill="#5B3FD6" letter-spacing="1">IDENTITY SIDE</text>
+  <text x="56" y="162" font-size="11.5" fill="#6B5BA8">Managed in Active Directory,</text>
+  <text x="56" y="179" font-size="11.5" fill="#6B5BA8">sent by your IdP at sign-in</text>
+
+  <!-- Per user: box 2 -->
+  <rect x="40" y="246" width="230" height="96" rx="8" fill="#EEF8F2" stroke="#3E9E6B" stroke-dasharray="6 4"/>
+  <text x="56" y="278" font-size="12" font-weight="bold" fill="#0A6E3D" letter-spacing="1">PER USER</text>
+  <text x="56" y="298" font-size="11.5" fill="#2F6B4A">Created by the provisioning</text>
+  <text x="56" y="315" font-size="11.5" fill="#2F6B4A">function at first sign-in</text>
+
+  <!-- Per team: boxes 3-7 -->
+  <rect x="40" y="382" width="230" height="640" rx="8" fill="#FFF7ED" stroke="#D45B07" stroke-dasharray="6 4"/>
+  <text x="56" y="414" font-size="12" font-weight="bold" fill="#B54708" letter-spacing="1">PER TEAM</text>
+  <text x="56" y="434" font-size="11.5" fill="#8A5A2B">Created once, at team onboarding,</text>
+  <text x="56" y="451" font-size="11.5" fill="#8A5A2B">in infrastructure as code</text>
+  <text x="56" y="720" font-size="11.5" fill="#8A5A2B">The namespace and both</text>
+  <text x="56" y="737" font-size="11.5" fill="#8A5A2B">Kueue queues are created</text>
+  <text x="56" y="754" font-size="11.5" fill="#8A5A2B">automatically by the</text>
+  <text x="56" y="771" font-size="11.5" fill="#8A5A2B">compute quota.</text>
+
+  <!-- ===== Chain boxes (x 300-760) ===== -->
+  <!-- 1 AD group -->
+  <rect x="300" y="110" width="460" height="96" rx="8" fill="#F7F5FF" stroke="#C4B5FD" stroke-width="1.4"/>
+  <text x="320" y="138" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">1  AD GROUP</text>
+  <text x="320" y="164" font-size="16" font-weight="bold" fill="#16222F">validate-search-ranking</text>
+  <text x="320" y="188" font-size="12" fill="#5A6B7B">arrives in the SAML assertion's groups claim</text>
+
+  <!-- 2 Studio user profile -->
+  <rect x="300" y="246" width="460" height="96" rx="8" fill="#EAF6EF" stroke="#7CC79B" stroke-width="1.4"/>
+  <text x="320" y="274" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">2  STUDIO USER PROFILE</text>
+  <text x="320" y="300" font-size="16" font-weight="bold" fill="#16222F">alice-corp-example-com</text>
+  <text x="320" y="324" font-size="12" fill="#5A6B7B">tags: ADGroup, Team, studiouserid</text>
+
+  <!-- 3 Execution role: the pivot -->
+  <rect x="300" y="382" width="460" height="96" rx="8" fill="#FFF4E5" stroke="#D45B07" stroke-width="3"/>
+  <text x="320" y="410" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">3  EXECUTION ROLE</text>
+  <rect x="616" y="396" width="128" height="22" rx="11" fill="#D45B07"/>
+  <text x="680" y="411" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">THE PIVOT</text>
+  <text x="320" y="436" font-size="16" font-weight="bold" fill="#16222F">hpq-automation-validate-search-ranking</text>
+  <text x="320" y="460" font-size="12" fill="#5A6B7B">shared by the team; Studio session name = the user</text>
+
+  <!-- 4 EKS access entry -->
+  <rect x="300" y="518" width="460" height="96" rx="8" fill="#F4F6F8" stroke="#C3CCD5" stroke-width="1.4"/>
+  <text x="320" y="546" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">4  EKS ACCESS ENTRY</text>
+  <text x="320" y="572" font-size="16" font-weight="bold" fill="#16222F">5 HyperPod cluster-access policies</text>
+  <text x="320" y="596" font-size="12" fill="#5A6B7B">Training, Inference and Space scoped to the team namespace</text>
+
+  <!-- 5 Namespace -->
+  <rect x="300" y="654" width="460" height="96" rx="8" fill="#F4F6F8" stroke="#C3CCD5" stroke-width="1.4"/>
+  <text x="320" y="682" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">5  NAMESPACE</text>
+  <text x="320" y="708" font-size="16" font-weight="bold" fill="#16222F">hyperpod-ns-validate-search-ranking</text>
+  <text x="320" y="732" font-size="12" fill="#5A6B7B">named from the quota's TeamName</text>
+
+  <!-- 6 Kueue queue -->
+  <rect x="300" y="790" width="460" height="96" rx="8" fill="#F4F6F8" stroke="#C3CCD5" stroke-width="1.4"/>
+  <text x="320" y="818" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">6  KUEUE QUEUE</text>
+  <text x="320" y="844" font-size="16" font-weight="bold" fill="#16222F">LocalQueue → ClusterQueue</text>
+  <text x="320" y="868" font-size="12" fill="#5A6B7B">every workload needs label kueue.x-k8s.io/queue-name</text>
+
+  <!-- 7 Compute quota -->
+  <rect x="300" y="926" width="460" height="96" rx="8" fill="#EAF6EF" stroke="#7CC79B" stroke-width="1.4"/>
+  <text x="320" y="954" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">7  COMPUTE QUOTA</text>
+  <text x="320" y="980" font-size="16" font-weight="bold" fill="#16222F">validate-search-ranking-quota</text>
+  <text x="320" y="1004" font-size="12" fill="#5A6B7B">1 x ml.m5.2xlarge (8 CPU); LendAndBorrow or DontLend</text>
+
+  <!-- ===== Down arrows ===== -->
+  <line x1="530" y1="206" x2="530" y2="244" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="342" x2="530" y2="380" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="478" x2="530" y2="516" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="614" x2="530" y2="652" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="750" x2="530" y2="788" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="886" x2="530" y2="924" stroke="#5A6B7B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== Right: how each link is made ===== -->
+  <text x="790" y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1">HOW EACH LINK IS MADE</text>
+
+  <text x="790" y="222" font-size="12" fill="#43515F">Provisioning function looks the group</text>
+  <text x="790" y="238" font-size="12" fill="#43515F">up in the DynamoDB mapping table</text>
+
+  <text x="790" y="358" font-size="12" fill="#43515F">The profile's ExecutionRole setting;</text>
+  <text x="790" y="374" font-size="12" fill="#43515F">sign-in opens only the user's own profile</text>
+
+  <text x="790" y="494" font-size="12" fill="#43515F">The access entry's principal is the role</text>
+  <text x="790" y="510" font-size="12" fill="#43515F">(EKS authorizes the role, not the person)</text>
+
+  <text x="790" y="630" font-size="12" fill="#43515F">Namespace-scoped access policies</text>
+  <rect x="790" y="638" width="260" height="22" rx="4" fill="#FEF3F2" stroke="#E8A8A8"/>
+  <text x="800" y="653" font-size="11.5" font-weight="bold" fill="#B42318">Other teams' namespaces: Forbidden</text>
+
+  <text x="790" y="766" font-size="12" fill="#43515F">Task governance creates one LocalQueue</text>
+  <text x="790" y="782" font-size="12" fill="#43515F">in each team namespace</text>
+
+  <text x="790" y="902" font-size="12" fill="#43515F">The ClusterQueue carries the quota's limits;</text>
+  <text x="790" y="918" font-size="12" fill="#43515F">Kueue admits or holds work against them</text>
+
+  <!-- Enforcement markers -->
+  <rect x="790" y="546" width="210" height="40" rx="6" fill="#16222F"/>
+  <text x="805" y="563" font-size="11" font-weight="bold" fill="#9FB0BF" letter-spacing="1">ENFORCED BY</text>
+  <text x="805" y="579" font-size="12.5" font-weight="bold" fill="#FFFFFF">Kubernetes RBAC (EKS)</text>
+
+  <rect x="790" y="954" width="210" height="40" rx="6" fill="#16222F"/>
+  <text x="805" y="971" font-size="11" font-weight="bold" fill="#9FB0BF" letter-spacing="1">ENFORCED BY</text>
+  <text x="805" y="987" font-size="12.5" font-weight="bold" fill="#FFFFFF">Kueue admission</text>
+
+  <!-- Footer -->
+  <text x="40" y="1078" font-size="12.5" fill="#43515F">Assign the right execution role to each user, and steps 4 to 7 follow from it. The cluster checks them on every request.</text>
+</svg>

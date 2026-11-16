@@ -1,0 +1,455 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Stack 1 of 3. Self-contained network and EKS control plane for validating AD group
+  to HyperPod GPU quota mapping. Creates its own VPC, so deploying and deleting this
+  stack cannot affect any other workload in the account.
+
+  HyperPod requires private subnets, so this builds two private subnets reached through
+  a single NAT gateway in a public subnet. Nothing here is shared with, or imported
+  from, any existing VPC.
+
+  After this stack completes you MUST run the HyperPod Helm chart against the cluster
+  before deploying stack 2. That step is required by the service and cannot be
+  expressed in CloudFormation. The HelmCommands output prints what to run.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Networking
+        Parameters:
+          - VpcCidr
+          - CreateInterfaceEndpoints
+      - Label:
+          default: EKS
+        Parameters:
+          - KubernetesVersion
+          - ClusterAdminPrincipalArn
+    ParameterLabels:
+      VpcCidr:
+        default: VPC CIDR block
+      CreateInterfaceEndpoints:
+        default: Create interface VPC endpoints
+      KubernetesVersion:
+        default: Kubernetes version
+      ClusterAdminPrincipalArn:
+        default: Cluster admin principal ARN
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.42.0.0/16
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])/16$'
+    ConstraintDescription: >-
+      Must be a /16. The subnet carving below adds 8 bits to produce /24 subnets, so a
+      smaller VPC prefix would yield subnets too small for EKS.
+    Description: >-
+      CIDR for the new VPC, which must be a /16. The default avoids the 10.0.0.0/16,
+      10.1.0.0/16 and 172.31.0.0/16 ranges commonly already present in an account.
+      Subnets are carved as three /24s: one public for the NAT gateway and two private.
+
+  KubernetesVersion:
+    Type: String
+    Default: '1.33'
+    AllowedValues: ['1.30', '1.31', '1.32', '1.33', '1.34', '1.35']
+    Description: >-
+      HyperPod supports 1.30 through 1.35. Task governance additionally requires 1.30
+      or later.
+
+  ClusterAdminPrincipalArn:
+    Type: String
+    MinLength: 1
+    Description: >-
+      REQUIRED. ARN of the principal that will run kubectl, Helm and the validation
+      notebook. This stack creates its EKS access entry explicitly and disables
+      BootstrapClusterCreatorAdminPermissions, so cluster admin does not depend on
+      which principal happens to run the deployment.
+
+      For an SSO role use the role ARN, not the assumed-role ARN that
+      "sts get-caller-identity" returns:
+        arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<name>_<suffix>
+
+      Passing the deploying principal here while leaving bootstrap enabled causes a
+      409 AlreadyExists on the access entry, because bootstrap has already created one
+      for the same principal.
+
+  CreateInterfaceEndpoints:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Leave false. The NAT gateway already gives nodes access to every AWS API, and the
+      nodes also need public.ecr.aws, which no interface endpoint covers. Setting true
+      adds nine endpoints across two subnets at roughly 0.01 USD per endpoint per hour,
+      which exceeds the cost of the rest of this stack. Turn it on only to mirror a
+      locked-down production topology.
+
+Conditions:
+  WithEndpoints: !Equals [!Ref CreateInterfaceEndpoints, 'true']
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # VPC. DNS support and hostnames are both required by EKS.
+  # ---------------------------------------------------------------------------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---------------------------------------------------------------------------
+  # One public subnet, only to host the NAT gateway. No cluster resource is
+  # placed here, because HyperPod requires private subnets.
+  # ---------------------------------------------------------------------------
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-2'
+
+  # ---------------------------------------------------------------------------
+  # Routing. Public subnet to the internet gateway, both private subnets
+  # through one NAT gateway.
+  # ---------------------------------------------------------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-rt'
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nat-eip'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nat'
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-rt'
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ---------------------------------------------------------------------------
+  # S3 gateway endpoint. Free, and ECR image layers are served from S3, so this
+  # keeps the bulk of image pull traffic off the NAT gateway.
+  # ---------------------------------------------------------------------------
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  # ---------------------------------------------------------------------------
+  # One security group, attached to both the EKS control plane ENIs and the
+  # HyperPod instances. A single all-traffic self-ingress rule then covers
+  # node to control plane and control plane to node in both directions.
+  # ---------------------------------------------------------------------------
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HyperPod and EKS intra-cluster traffic.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Outbound to AWS APIs and public container registries via NAT.
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cluster-sg'
+
+  ClusterSecurityGroupSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+      Description: All traffic between members of this security group.
+
+  # ---------------------------------------------------------------------------
+  # Optional interface endpoints. Off by default. See the parameter description.
+  # ---------------------------------------------------------------------------
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithEndpoints
+    Properties:
+      GroupDescription: HTTPS from inside the VPC to interface endpoints.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS from anywhere in this VPC.
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-endpoint-sg'
+
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  EcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  StsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sts'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SageMakerApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sagemaker.api'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  # ---------------------------------------------------------------------------
+  # EKS control plane. HyperPod supplies the nodes, so there are no node groups
+  # and no node IAM role here.
+  # ---------------------------------------------------------------------------
+  EksClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy'
+
+  EksCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${AWS::StackName}-eks'
+      Version: !Ref KubernetesVersion
+      RoleArn: !GetAtt EksClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        # Public access is what lets kubectl reach the API from a laptop while
+        # every node stays in a private subnet.
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+      AccessConfig:
+        # HyperPod supports API and API_AND_CONFIG_MAP only.
+        AuthenticationMode: API_AND_CONFIG_MAP
+        # Off deliberately. Bootstrap grants admin to whichever principal creates the
+        # cluster, which is implicit and collides with the explicit access entry below
+        # when they are the same principal. Granting admin only through
+        # ClusterAdminPrincipalArn makes the outcome identical no matter who deploys.
+        BootstrapClusterCreatorAdminPermissions: false
+
+  NotebookClusterAdmin:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref EksCluster
+      PrincipalArn: !Ref ClusterAdminPrincipalArn
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: !Sub 'arn:${AWS::Partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy'
+          AccessScope:
+            Type: cluster
+
+Outputs:
+  VpcId:
+    Description: The VPC this stack created. Nothing else in the account uses it.
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub '${AWS::StackName}-vpc-id'
+
+  PrivateSubnet1Id:
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub '${AWS::StackName}-private-subnet-1'
+
+  PrivateSubnet2Id:
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub '${AWS::StackName}-private-subnet-2'
+
+  ClusterSecurityGroupId:
+    Value: !Ref ClusterSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-cluster-sg'
+
+  EksClusterName:
+    Value: !Ref EksCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-eks-cluster-name'
+
+  EksClusterArn:
+    Value: !GetAtt EksCluster.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-eks-cluster-arn'
+
+  KubeconfigCommand:
+    Description: Run this first, then confirm with kubectl get ns.
+    Value: !Sub 'aws eks update-kubeconfig --name ${EksCluster} --region ${AWS::Region}'
+
+  HelmCommands:
+    Description: >-
+      REQUIRED before stack 2. Installs the HyperPod dependency chart with the chart's
+      own defaults, which is what the service documents. The chart has no Kueue
+      dependency, so it does not collide with the Kueue that the task governance
+      add-on installs in stack 2. Daemonsets stay Pending until HyperPod nodes join,
+      which is expected at this point.
+    Value: >-
+      git clone --depth 1 https://github.com/aws/sagemaker-hyperpod-cli.git &&
+      cd sagemaker-hyperpod-cli/helm_chart &&
+      helm dependencies update HyperPodHelmChart &&
+      helm install hyperpod-dependencies HyperPodHelmChart --namespace kube-system
+
+  NextStackCommand:
+    Description: Deploy this after the Helm chart is installed.
+    Value: !Sub >-
+      aws cloudformation deploy --template-file cloudformation/02-hyperpod-domain.yaml
+      --stack-name ${AWS::StackName}-hp
+      --capabilities CAPABILITY_IAM
+      --parameter-overrides NetworkStackName=${AWS::StackName}
+      Tier=Tier1NoGpu AuthMode=IAM
+
+  EstimatedHourlyCost:
+    Description: Rough running cost of this stack alone, before HyperPod instances.
+    Value: >-
+      EKS control plane 0.10 USD per hour, NAT gateway about 0.045 USD per hour plus
+      data processing. Confirm current pricing for your Region.

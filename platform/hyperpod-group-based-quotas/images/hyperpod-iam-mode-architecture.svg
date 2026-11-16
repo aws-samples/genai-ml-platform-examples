@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="940" viewBox="0 0 1500 940" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#5A6B7B"/>
+    </marker>
+    <marker id="arrowBold" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="12" refX="13" refY="6" orient="auto">
+      <path d="M0,0 L14,6 L0,12 Z" fill="#D45B07"/>
+    </marker>
+    <marker id="arrowDeny" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#B42318"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="940" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="30" y="40" font-size="21" font-weight="bold" fill="#16222F">IAM-mode Studio domain: the AD group in a user's SAML claim decides which HyperPod quota they consume</text>
+  <text x="30" y="64" font-size="13.5" fill="#5A6B7B">Users are provisioned at sign-in. The team execution role links identity to compute, and EKS and Kueue enforce everything after it.</text>
+
+  <!-- ================= IDENTITY SIDE ================= -->
+  <rect x="30" y="92" width="370" height="476" rx="10" fill="#F7F5FF" stroke="#7A5AF8" stroke-width="1.6" stroke-dasharray="7 4"/>
+  <text x="48" y="116" font-size="12" font-weight="bold" fill="#5B3FD6" letter-spacing="1.1">IDENTITY SIDE</text>
+  <text x="48" y="134" font-size="11.5" fill="#6B5BA8">Your directory, IdP and SAML front end</text>
+
+  <rect x="48" y="152" width="150" height="62" rx="6" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text x="123" y="178" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">Active Directory</text>
+  <text x="123" y="197" font-size="11" fill="#5A6B7B" text-anchor="middle">group membership</text>
+
+  <rect x="214" y="152" width="168" height="62" rx="6" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text x="298" y="178" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">User (alice)</text>
+  <text x="298" y="197" font-size="11" fill="#5A6B7B" text-anchor="middle">browser</text>
+
+  <rect x="48" y="262" width="334" height="80" rx="6" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text x="215" y="287" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">Identity provider</text>
+  <text x="215" y="305" font-size="11" fill="#5A6B7B" text-anchor="middle">AD FS, Microsoft Entra ID or Okta</text>
+  <text x="215" y="322" font-size="11" fill="#5A6B7B" text-anchor="middle">SAML assertion with a groups claim</text>
+
+  <rect x="48" y="392" width="334" height="150" rx="6" fill="#FFFFFF" stroke="#7A5AF8" stroke-dasharray="5 3"/>
+  <text x="215" y="417" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">SAML front end</text>
+  <text x="215" y="436" font-size="11" fill="#5A6B7B" text-anchor="middle">for example API Gateway + Lambda</text>
+  <text x="215" y="456" font-size="11" fill="#5A6B7B" text-anchor="middle">validates signature, audience, expiry</text>
+  <text x="215" y="474" font-size="11" fill="#5A6B7B" text-anchor="middle">extracts NameID and groups</text>
+  <text x="215" y="500" font-size="11" font-style="italic" fill="#5B3FD6" text-anchor="middle">You build this. Not deployed by this post;</text>
+  <text x="215" y="517" font-size="11" font-style="italic" fill="#5B3FD6" text-anchor="middle">the notebook calls sign-in directly instead.</text>
+
+  <!-- identity arrows -->
+  <line x1="123" y1="214" x2="123" y2="259" stroke="#5A6B7B" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="131" y="242" font-size="10.5" fill="#5A6B7B">sync</text>
+  <line x1="298" y1="214" x2="298" y2="259" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="318" cy="237" r="9" fill="#16222F"/><text x="318" y="241" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+  <line x1="215" y1="342" x2="215" y2="389" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="235" cy="366" r="9" fill="#16222F"/><text x="235" y="370" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
+
+  <!-- ================= AWS SIDE ================= -->
+  <rect x="430" y="92" width="1040" height="610" rx="10" fill="#FFFBF5" stroke="#D45B07" stroke-width="1.6" stroke-dasharray="7 4"/>
+  <text x="448" y="116" font-size="12" font-weight="bold" fill="#B54708" letter-spacing="1.1">AWS SIDE</text>
+  <text x="448" y="134" font-size="11.5" fill="#8A5A2B">Deployed and tested by this post</text>
+
+  <!-- Automation plane -->
+  <rect x="448" y="148" width="388" height="398" rx="8" fill="#FFFFFF" stroke="#C3CCD5"/>
+  <text x="642" y="170" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">Automation plane</text>
+
+  <rect x="474" y="184" width="344" height="66" rx="6" fill="#FFF4E5" stroke="#FFB84D"/>
+  <text x="646" y="208" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">Sign-in function (Lambda)</text>
+  <text x="646" y="226" font-size="11" fill="#5A6B7B" text-anchor="middle">{"user", "groups"} in, Studio URL out</text>
+  <text x="646" y="242" font-size="11" fill="#5A6B7B" text-anchor="middle">refuses unmapped, conflicting or moved users</text>
+
+  <rect x="474" y="286" width="344" height="66" rx="6" fill="#FFF4E5" stroke="#FFB84D"/>
+  <text x="646" y="310" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">Provisioning function (Lambda)</text>
+  <text x="646" y="328" font-size="11" fill="#5A6B7B" text-anchor="middle">group to team, then CreateUserProfile</text>
+  <text x="646" y="344" font-size="11" fill="#5A6B7B" text-anchor="middle">with the team's execution role (first sign-in)</text>
+
+  <rect x="474" y="384" width="344" height="56" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="646" y="407" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">DynamoDB mapping table</text>
+  <text x="646" y="426" font-size="11" fill="#5A6B7B" text-anchor="middle">adGroup + domainId  to  team role, namespace</text>
+
+  <rect x="474" y="466" width="344" height="66" rx="6" fill="#EEF4FF" stroke="#9EC4E8"/>
+  <text x="646" y="489" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">Presigned-URL role (IAM)</text>
+  <text x="646" y="507" font-size="11" fill="#5A6B7B" text-anchor="middle">session name = user, tag studiouserid = user</text>
+  <text x="646" y="523" font-size="11" fill="#5A6B7B" text-anchor="middle">may open only the profile with a matching tag</text>
+
+  <!-- automation arrows -->
+  <line x1="646" y1="250" x2="646" y2="283" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="666" cy="267" r="9" fill="#16222F"/><text x="666" y="271" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
+  <line x1="646" y1="352" x2="646" y2="381" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="656" y="372" font-size="10.5" fill="#5A6B7B">lookup</text>
+  <path d="M474,240 L460,240 L460,498 L471,498" fill="none" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="460" cy="455" r="9" fill="#16222F"/><text x="460" y="459" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">6</text>
+
+  <!-- identity to AWS arrows -->
+  <path d="M382,470 C420,470 430,206 471,206" fill="none" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="420" cy="330" r="9" fill="#16222F"/><text x="420" y="334" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
+  <path d="M474,196 C440,196 420,180 385,180" fill="none" stroke="#5A6B7B" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <circle cx="430" cy="176" r="9" fill="#16222F"/><text x="430" y="180" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">7</text>
+
+  <!-- Studio domain -->
+  <rect x="868" y="148" width="250" height="398" rx="8" fill="#FFFFFF" stroke="#C3CCD5"/>
+  <text x="993" y="170" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">SageMaker Studio domain</text>
+  <text x="993" y="186" font-size="11" fill="#5A6B7B" text-anchor="middle">IAM authentication mode</text>
+
+  <rect x="884" y="200" width="218" height="112" rx="6" fill="#EAF6EF" stroke="#7CC79B"/>
+  <text x="993" y="222" font-size="12" font-weight="bold" fill="#16222F" text-anchor="middle">alice-corp-example-com</text>
+  <text x="993" y="243" font-size="11.5" font-weight="bold" fill="#0A6E3D" text-anchor="middle">execution role A</text>
+  <text x="993" y="262" font-size="10.5" fill="#5A6B7B" text-anchor="middle">tags: studiouserid, Team,</text>
+  <text x="993" y="277" font-size="10.5" fill="#5A6B7B" text-anchor="middle">ADGroup = search-ranking</text>
+  <text x="993" y="297" font-size="10.5" fill="#5A6B7B" text-anchor="middle">Studio identity = alice</text>
+
+  <rect x="884" y="336" width="218" height="112" rx="6" fill="#FDF0F0" stroke="#E8A8A8"/>
+  <text x="993" y="358" font-size="12" font-weight="bold" fill="#16222F" text-anchor="middle">bob-corp-example-com</text>
+  <text x="993" y="379" font-size="11.5" font-weight="bold" fill="#9A2F2F" text-anchor="middle">execution role B</text>
+  <text x="993" y="398" font-size="10.5" fill="#5A6B7B" text-anchor="middle">tags: studiouserid, Team,</text>
+  <text x="993" y="413" font-size="10.5" fill="#5A6B7B" text-anchor="middle">ADGroup = fraud-detection</text>
+  <text x="993" y="433" font-size="10.5" fill="#5A6B7B" text-anchor="middle">Studio identity = bob</text>
+
+  <text x="993" y="478" font-size="10.5" fill="#8A97A3" text-anchor="middle">One profile per user per domain.</text>
+  <text x="993" y="494" font-size="10.5" fill="#8A97A3" text-anchor="middle">Teammates share their team's role</text>
+  <text x="993" y="510" font-size="10.5" fill="#8A97A3" text-anchor="middle">but keep their own identity.</text>
+
+  <!-- automation to studio arrows -->
+  <path d="M818,319 C845,319 850,250 881,250" fill="none" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <circle cx="850" cy="286" r="9" fill="#16222F"/><text x="850" y="290" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">5</text>
+  <path d="M818,499 C850,499 852,290 881,282" fill="none" stroke="#5A6B7B" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+
+  <!-- HyperPod cluster -->
+  <rect x="1150" y="148" width="302" height="398" rx="8" fill="#FFFFFF" stroke="#C3CCD5"/>
+  <text x="1301" y="170" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">HyperPod cluster on Amazon EKS</text>
+  <text x="1301" y="186" font-size="11" fill="#5A6B7B" text-anchor="middle">task governance (Kueue)</text>
+
+  <rect x="1166" y="200" width="270" height="112" rx="6" fill="#EAF6EF" stroke="#7CC79B"/>
+  <text x="1301" y="222" font-size="12.5" font-weight="bold" fill="#0A6E3D" text-anchor="middle">hyperpod-ns-search-ranking</text>
+  <text x="1301" y="242" font-size="11" fill="#5A6B7B" text-anchor="middle">LocalQueue  to  ClusterQueue</text>
+  <text x="1301" y="261" font-size="11" fill="#5A6B7B" text-anchor="middle">compute quota: 1 x ml.m5.2xlarge</text>
+  <text x="1301" y="278" font-size="11" fill="#5A6B7B" text-anchor="middle">(8 CPU nominal)</text>
+  <text x="1301" y="298" font-size="10.5" fill="#5A6B7B" text-anchor="middle">tag ADGroup = search-ranking</text>
+
+  <rect x="1166" y="336" width="270" height="112" rx="6" fill="#FDF0F0" stroke="#E8A8A8"/>
+  <text x="1301" y="358" font-size="12.5" font-weight="bold" fill="#9A2F2F" text-anchor="middle">hyperpod-ns-fraud-detection</text>
+  <text x="1301" y="378" font-size="11" fill="#5A6B7B" text-anchor="middle">LocalQueue  to  ClusterQueue</text>
+  <text x="1301" y="397" font-size="11" fill="#5A6B7B" text-anchor="middle">compute quota: 1 x ml.m5.2xlarge</text>
+  <text x="1301" y="414" font-size="11" fill="#5A6B7B" text-anchor="middle">(8 CPU nominal)</text>
+  <text x="1301" y="434" font-size="10.5" fill="#5A6B7B" text-anchor="middle">tag ADGroup = fraud-detection</text>
+
+  <rect x="1166" y="466" width="270" height="62" rx="5" fill="#EEF1F4" stroke="#C3CCD5"/>
+  <text x="1301" y="488" font-size="11.5" font-weight="bold" fill="#43515F" text-anchor="middle">Shared cohort</text>
+  <text x="1301" y="505" font-size="10.5" fill="#43515F" text-anchor="middle">LendAndBorrow: borrow idle capacity</text>
+  <text x="1301" y="520" font-size="10.5" fill="#43515F" text-anchor="middle">DontLend: each quota is a hard limit</text>
+
+  <!-- enforcement arrows -->
+  <line x1="1102" y1="240" x2="1162" y2="240" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+  <circle cx="1132" cy="224" r="9" fill="#16222F"/><text x="1132" y="228" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">8</text>
+  <line x1="1102" y1="380" x2="1162" y2="380" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+  <path d="M1102,290 C1128,290 1132,340 1160,350" fill="none" stroke="#B42318" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowDeny)"/>
+  <g>
+    <circle cx="1131" cy="318" r="12" fill="#FFFFFF" stroke="#B42318" stroke-width="2"/>
+    <line x1="1125" y1="312" x2="1137" y2="324" stroke="#B42318" stroke-width="2.2"/>
+    <line x1="1137" y1="312" x2="1125" y2="324" stroke="#B42318" stroke-width="2.2"/>
+  </g>
+
+  <!-- Per-team / per-user lifecycle band inside AWS side -->
+  <rect x="448" y="566" width="660" height="118" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="466" y="590" font-size="12.5" font-weight="bold" fill="#16222F">Per team, at onboarding (infrastructure as code)</text>
+  <text x="466" y="612" font-size="11.5" fill="#43515F">Team execution role, with the Studio baseline and a deny on quota and access changes</text>
+  <text x="466" y="632" font-size="11.5" fill="#43515F">Compute quota, which creates the namespace and its Kueue queues</text>
+  <text x="466" y="652" font-size="11.5" fill="#43515F">EKS access entry: Training, Inference, Space policies on the team namespace;</text>
+  <text x="466" y="670" font-size="11.5" fill="#43515F">SpaceTemplate on the template namespace; UserCluster on the whole cluster</text>
+
+  <rect x="1124" y="566" width="328" height="118" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="1142" y="590" font-size="12.5" font-weight="bold" fill="#16222F">Per user, at sign-in</text>
+  <text x="1142" y="612" font-size="11.5" fill="#43515F">The Studio user profile, and nothing else.</text>
+  <text x="1142" y="632" font-size="11.5" fill="#43515F">Adding a team member changes nothing</text>
+  <text x="1142" y="652" font-size="11.5" fill="#43515F">on the compute side. Leavers and movers</text>
+  <text x="1142" y="670" font-size="11.5" fill="#43515F">are handled by scheduled reconciliation.</text>
+
+  <!-- ================= Steps and legend ================= -->
+  <text x="30" y="736" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">SIGN-IN FLOW</text>
+  <text x="30" y="760" font-size="12" fill="#43515F"><tspan font-weight="bold">1</tspan>  User signs in at the identity provider.</text>
+  <text x="30" y="782" font-size="12" fill="#43515F"><tspan font-weight="bold">2</tspan>  IdP posts a SAML assertion with the groups claim.</text>
+  <text x="30" y="804" font-size="12" fill="#43515F"><tspan font-weight="bold">3</tspan>  Front end validates it and calls sign-in with {user, groups}.</text>
+  <text x="30" y="826" font-size="12" fill="#43515F"><tspan font-weight="bold">4</tspan>  Sign-in invokes the provisioning function.</text>
+  <text x="520" y="760" font-size="12" fill="#43515F"><tspan font-weight="bold">5</tspan>  Provisioning maps the group to a team and creates the profile with that team's role.</text>
+  <text x="520" y="782" font-size="12" fill="#43515F"><tspan font-weight="bold">6</tspan>  Sign-in assumes the presigned-URL role as the user and mints a URL for their own profile.</text>
+  <text x="520" y="804" font-size="12" fill="#43515F"><tspan font-weight="bold">7</tspan>  The browser opens Studio as the user.</text>
+  <text x="520" y="826" font-size="12" fill="#43515F"><tspan font-weight="bold">8</tspan>  Work runs as the team's execution role: EKS admits it only in the team namespace, Kueue charges the team quota.</text>
+
+  <text x="30" y="868" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">LEGEND</text>
+  <line x1="110" y1="864" x2="160" y2="864" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="170" y="868" font-size="12" fill="#43515F">Sign-in and provisioning</text>
+  <line x1="350" y1="864" x2="400" y2="864" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+  <text x="410" y="868" font-size="12" fill="#43515F">EKS access entry, namespace-scoped</text>
+  <line x1="650" y1="864" x2="700" y2="864" stroke="#B42318" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowDeny)"/>
+  <text x="710" y="868" font-size="12" fill="#43515F">Refused by Kubernetes RBAC (another team's namespace)</text>
+
+  <rect x="30" y="890" width="1440" height="38" rx="6" fill="#16222F"/>
+  <text x="750" y="914" font-size="13.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">AD group  →  SAML groups claim  →  mapping table  →  user profile  →  team execution role  →  EKS access entry  →  namespace  →  Kueue queue  →  compute quota</text>
+</svg>
