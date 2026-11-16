@@ -80,3 +80,16 @@ slides/*.pptx
 # Scratch exports (PDF/PNG) if you render the deck for review.
 slides/*.pdf
 slides/*.png
+
+# Internal planning docs that live beside the source material in this folder and
+# are derived from it (unpublished launch blog, beta user guides). They quote
+# confidential detail -- beta IAM action lists, setup steps -- so they must not
+# reach GitHub or Workshop Studio. Named explicitly rather than slides/*.md so
+# slides/README.md stays tracked (see the note above).
+slides/catalog-integration-tasks.md
+slides/tech-blog-draft.md
+# Unpublished source and draft documents: the launch blog arrives as .docx and
+# the how-to draft may too. Both are pre-announcement material under embargo, and
+# neither was covered by the .pdf/.pptx/.png rules above -- the launch blog .docx
+# showed as a plain untracked file, i.e. one `git add .` away from being pushed.
+slides/*.docx
