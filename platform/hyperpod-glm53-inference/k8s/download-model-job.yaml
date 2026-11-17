@@ -1,0 +1,58 @@
+# Copies GLM-5.3 from Hugging Face into the model bucket. Runs on the system
+# instance group, so it can be done before the GPU nodes exist.
+#
+#   kubectl create configmap download-to-s3 -n $NAMESPACE \
+#     --from-file=k8s/download_to_s3.py --dry-run=client -o yaml | kubectl apply -f -
+#   envsubst < k8s/download-model-job.yaml | kubectl apply -f -
+#   kubectl logs -n $NAMESPACE -f job/download-glm53
+#
+# Smoke test first: set ONLY to "config.json,tokenizer_config.json" (below) to copy
+# two small files and confirm permissions, then delete the job and run it in full.
+#
+# Cost note: the download comes from the internet, so it goes through the NAT
+# gateway, which charges per GB processed (about 756 GB for this checkpoint).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-glm53
+  namespace: ${NAMESPACE}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      serviceAccountName: model-downloader
+      restartPolicy: Never
+      nodeSelector:
+        hpglm/role: system
+      containers:
+        - name: download
+          image: public.ecr.aws/docker/library/python:3.12-slim
+          command: [sh, -c]
+          args:
+            - pip install --quiet --no-cache-dir "huggingface_hub>=1.0,<2" boto3 &&
+              python /app/download_to_s3.py
+          env:
+            - {name: HF_REPO, value: zai-org/GLM-5.3}
+            - {name: HF_REVISION, value: main}
+            - {name: MODEL_BUCKET, value: "${MODEL_BUCKET}"}
+            - {name: MODEL_PREFIX, value: "${MODEL_PREFIX}"}
+            - {name: AWS_REGION, value: "${AWS_REGION}"}
+            # Hugging Face downloads go through Xet; this turns on its parallel mode.
+            - {name: HF_XET_HIGH_PERFORMANCE, value: "1"}
+            - {name: WORKERS, value: "4"}
+            - {name: ONLY, value: ""}
+          resources:
+            requests: {cpu: "3", memory: 8Gi}
+            limits: {memory: 12Gi}
+          volumeMounts:
+            - {name: app, mountPath: /app}
+            - {name: scratch, mountPath: /scratch}
+      volumes:
+        - name: app
+          configMap:
+            name: download-to-s3
+        # Four files of at most 5.4 GB in flight at once.
+        - name: scratch
+          emptyDir:
+            sizeLimit: 40Gi

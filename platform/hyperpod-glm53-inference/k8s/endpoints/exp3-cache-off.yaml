@@ -1,0 +1,70 @@
+# Experiment 3, baseline: no model or image caching.
+#
+# Starts with 2 replicas. loadgen/scaleout_timer.py adds a third and times how long the
+# new replica takes to serve. Without caching, the new pod pulls the vLLM image and
+# downloads all 756 GB of weights from S3 first.
+#
+# Apply with: envsubst < k8s/endpoints/exp3-cache-off.yaml | kubectl apply -f -
+# Required variables: NAMESPACE, MODEL_BUCKET, MODEL_PREFIX, AWS_REGION, INSTANCE_TYPE,
+# VLLM_IMAGE. See README.md.
+apiVersion: inference.sagemaker.aws.amazon.com/v1
+kind: InferenceEndpointConfig
+metadata:
+  name: glm53-cold
+  namespace: ${NAMESPACE}
+spec:
+  modelName: glm-5.3
+  instanceType: ${INSTANCE_TYPE}
+  invocationEndpoint: v1/chat/completions
+  replicas: 2
+  modelSourceConfig:
+    modelSourceType: s3
+    s3Storage:
+      bucketName: ${MODEL_BUCKET}
+      region: ${AWS_REGION}
+    modelLocation: ${MODEL_PREFIX}
+    prefetchEnabled: true
+  metrics:
+    enabled: true
+    modelMetrics:
+      port: 8000
+  worker:
+    image: ${VLLM_IMAGE}
+    modelInvocationPort:
+      containerPort: 8000
+      name: http
+    modelVolumeMount:
+      name: model-weights
+      mountPath: /opt/ml/model
+    resources:
+      # One replica uses a whole ml.p5en.48xlarge: 8x H200, tensor-parallel 8.
+      requests:
+        nvidia.com/gpu: 8
+        cpu: "160"
+        memory: 1200Gi
+      limits:
+        nvidia.com/gpu: 8
+    # vLLM's GLM-5.3 recipe: FP8 KV cache, MTP speculative decoding, GLM parsers.
+    args:
+      - "--model"
+      - "/opt/ml/model"
+      - "--served-model-name"
+      - "glm-5.3"
+      - "--port"
+      - "8000"
+      - "--tensor-parallel-size"
+      - "8"
+      - "--kv-cache-dtype"
+      - "fp8"
+      - "--max-model-len"
+      - "131072"
+      - "--speculative-config"
+      - '{"method": "mtp", "num_speculative_tokens": 5}'
+      - "--tool-call-parser"
+      - "glm47"
+      - "--reasoning-parser"
+      - "glm45"
+      - "--enable-auto-tool-choice"
+    environmentVariables:
+      - name: VLLM_REQUEST_TIMEOUT
+        value: "1800"
