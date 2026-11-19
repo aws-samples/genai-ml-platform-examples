@@ -13,8 +13,8 @@ metadata:
   name: model-downloader
   namespace: ${NAMESPACE}
 ---
-# Used by the load-test toolbox. scaleout_timer.py patches endpoint replicas
-# and watches pods, so it needs exactly those permissions in this namespace.
+# Used by the load-test toolbox. scaleout_timer.py scales endpoint worker
+# Deployments and watches pods, so it needs exactly those permissions here.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -30,6 +30,9 @@ rules:
   - apiGroups: [inference.sagemaker.aws.amazon.com]
     resources: [inferenceendpointconfigs]
     verbs: [get, list, watch, patch]
+  - apiGroups: [apps]
+    resources: [deployments, deployments/scale]
+    verbs: [get, list, watch, patch, update]
   - apiGroups: ['']
     resources: [pods, services, endpoints, events]
     verbs: [get, list, watch]

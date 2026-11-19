@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Experiment 3: time for a new GLM-5.3 replica to start serving during scale-out.
 
-Raises spec.replicas on an InferenceEndpointConfig by one, finds the new GPU pod,
-and records when it was created, scheduled, initialized (image pulled and weights
+Adds one replica to an endpoint's worker Deployment (the Deployment the operator
+creates, named after the InferenceEndpointConfig), the way an autoscaler does. The
+operator does not act on a changed spec.replicas once the endpoint exists. The
+script then finds the new GPU pod and records when it was created, scheduled, initialized (image pulled and weights
 loaded or prefetched), became Ready, and answered its first request directly on
 its pod IP. Run it against exp3-cache-off and exp3-cache-on and compare.
 
@@ -10,8 +12,8 @@ its pod IP. Run it against exp3-cache-off and exp3-cache-on and compare.
   python scaleout_timer.py --endpoint glm53-warm --namespace glm53 --label cache-on
 
 Run inside the cluster (the toolbox pod), so the pod IP is reachable. Needs kubectl
-with permission to patch inferenceendpointconfigs and read pods in the namespace,
-which k8s/namespace.yaml grants to the loadgen service account.
+with permission to scale deployments and read pods in the namespace, which
+k8s/namespace.yaml grants to the loadgen service account.
 """
 
 import argparse
@@ -74,14 +76,14 @@ def main():
     ap.add_argument("--out", default="results")
     args = ap.parse_args()
 
-    iec = kubectl_json("get", "inferenceendpointconfig", args.endpoint, "-n", args.namespace)
-    before = iec["spec"].get("replicas", 1)
+    deploy = kubectl_json("get", "deployment", args.endpoint, "-n", args.namespace)
+    before = deploy["spec"].get("replicas", 1)
     existing = set(gpu_pods(args.namespace))
     print(f"{args.endpoint}: {before} replica(s), {len(existing)} GPU pod(s); scaling to {before + 1}")
 
     t_patch = time.time()
-    subprocess.run(["kubectl", "patch", "inferenceendpointconfig", args.endpoint, "-n", args.namespace,
-                    "--type", "merge", "-p", json.dumps({"spec": {"replicas": before + 1}})], check=True)
+    subprocess.run(["kubectl", "scale", "deployment", args.endpoint, "-n", args.namespace,
+                    f"--replicas={before + 1}"], check=True)
 
     new, deadline = None, t_patch + args.timeout
     while time.time() < deadline:
@@ -123,8 +125,8 @@ def main():
     write_results(args.out, f"scaleout-{args.label}", [], summary)
 
     if args.restore:
-        subprocess.run(["kubectl", "patch", "inferenceendpointconfig", args.endpoint, "-n", args.namespace,
-                        "--type", "merge", "-p", json.dumps({"spec": {"replicas": before}})], check=True)
+        subprocess.run(["kubectl", "scale", "deployment", args.endpoint, "-n", args.namespace,
+                        f"--replicas={before}"], check=True)
         print(f"restored {args.endpoint} to {before} replica(s)")
 
 
