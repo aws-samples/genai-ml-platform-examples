@@ -20,7 +20,7 @@ Each replica runs vLLM with tensor parallelism across the 8 H200 GPUs of one `ml
 | `k8s/namespace.yaml` | Model namespace, service accounts and the load generator's Role |
 | `k8s/download-model-job.yaml`, `k8s/download_to_s3.py` | Job that copies GLM-5.3 from Hugging Face to the model bucket, one file at a time, resumable |
 | `k8s/toolbox.yaml` | Pod on the system nodes for running the load generators inside the cluster |
-| `k8s/endpoints/` | One `InferenceEndpointConfig` per experiment arm |
+| `k8s/endpoints/` | One `InferenceEndpointConfig` per experiment arm; `qwen3-0.6b/` has the same arms for a small-model rehearsal |
 | `loadgen/` | Load generators for the three experiments (Python, `httpx`) |
 
 ## Prerequisites
@@ -82,6 +82,7 @@ kubectl get crd | grep -E 'inferenceendpointconfigs|inferencegatewayconfigs'
 The job runs on the system nodes, so you can do this before the GPU nodes arrive.
 
 ```bash
+export HF_REPO=zai-org/GLM-5.3   # Hugging Face repository to copy
 envsubst < k8s/namespace.yaml | kubectl apply -f -
 kubectl create configmap download-to-s3 -n $NAMESPACE \
   --from-file=k8s/download_to_s3.py --dry-run=client -o yaml | kubectl apply -f -
@@ -123,7 +124,21 @@ aws cloudformation deploy --stack-name hpglm-hp \
 kubectl get nodes -L hpglm/role,node.kubernetes.io/instance-type
 ```
 
-Adding GPU nodes also turns on the cluster's managed tiered storage, which experiment 1 uses as its L2 KV cache. `TieredStorageMemoryPercent` (default 20) sets the share of each node's memory it takes. Leave `GpuDeepHealthChecks=false` unless you can afford the longer node start-up.
+Adding GPU nodes also turns on the cluster's managed tiered storage, which experiment 1 uses as its L2 KV cache. `TieredStorageMemoryPercent` (default 20) sets the share of each node's memory it takes; set `TieredStorage=Disable` if your GPU instance type doesn't support it. Leave `GpuDeepHealthChecks=false` unless you can afford the longer node start-up.
+
+If GPU launches fail with "insufficient capacity", give the GPU group more zones. Redeploy stack 1 with `ExtraPrivateSubnetAzId` set to a third zone ID (for example `usw2-az3`), then pass all three private subnets from its outputs to stack 3 as `GpuSubnetIds=subnet-a,subnet-b,subnet-c`. Only the GPU group moves; the cluster's own subnets can't change without replacing it.
+
+### Rehearse with a small model (optional)
+
+`k8s/endpoints/qwen3-0.6b/` has the same five arms for Qwen3-0.6B, one replica per A10G GPU (`ml.g5.8xlarge` or `ml.g5.12xlarge`). Use it to check the operator, router, gateway and caches end to end before GPU time for GLM-5.3. It proves the features work; the model is too small to show realistic gains.
+
+```bash
+export HF_REPO=Qwen/Qwen3-0.6B MODEL_PREFIX=Qwen/Qwen3-0.6B INSTANCE_TYPE=ml.g5.8xlarge
+envsubst < k8s/download-model-job.yaml | kubectl apply -f -
+envsubst < k8s/endpoints/qwen3-0.6b/exp1-roundrobin.yaml | kubectl apply -f -
+```
+
+Pass `--model qwen3-0.6b` to the load generators. The endpoint manifests also need `VLLM_IMAGE` and `NVME_HOST_PATH`, set as in [Run the experiments](#run-the-experiments).
 
 ## Run the experiments
 

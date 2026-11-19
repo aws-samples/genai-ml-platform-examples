@@ -1,5 +1,6 @@
-# Copies GLM-5.3 from Hugging Face into the model bucket. Runs on the system
-# instance group, so it can be done before the GPU nodes exist.
+# Copies a model checkpoint (HF_REPO, for example zai-org/GLM-5.3) from Hugging
+# Face into the model bucket under MODEL_PREFIX. Runs on the system instance
+# group, so it can be done before the GPU nodes exist.
 #
 #   kubectl create configmap download-to-s3 -n $NAMESPACE \
 #     --from-file=k8s/download_to_s3.py --dry-run=client -o yaml | kubectl apply -f -
@@ -33,7 +34,7 @@ spec:
             - pip install --quiet --no-cache-dir "huggingface_hub>=1.0,<2" boto3 &&
               python /app/download_to_s3.py
           env:
-            - {name: HF_REPO, value: zai-org/GLM-5.3}
+            - {name: HF_REPO, value: "${HF_REPO}"}
             - {name: HF_REVISION, value: main}
             - {name: MODEL_BUCKET, value: "${MODEL_BUCKET}"}
             - {name: MODEL_PREFIX, value: "${MODEL_PREFIX}"}
