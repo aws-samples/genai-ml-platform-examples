@@ -1,0 +1,801 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Stack 2 of 3. HyperPod cluster, EKS add-ons, cluster scheduler policy and Studio
+  domain. Imports its network and EKS cluster from stack 1, so it creates no shared
+  infrastructure and deleting it leaves the network intact.
+
+  PREREQUISITE: the HyperPod dependency Helm chart must already be installed on the
+  EKS cluster. The service documents that step as required and warns that skipping it
+  can make HyperPod cluster creation fail outright. Stack 1 prints the command in its
+  HelmCommands output.
+
+  Tier1NoGpu is the default and provisions CPU instances only. The governance chain
+  this validates is enforced at the EKS authorization layer, so the group to role to
+  namespace to quota mapping and both RBAC tests work without a GPU.
+
+Metadata:
+  # W6001 warns that an output re-exports a value imported from another stack. That is
+  # deliberate here: stack 2 cannot exist without stack 1, and passing the EKS cluster
+  # name through means the stack 3 deploy command is complete with nothing to look up
+  # by hand. The coupling the rule warns about is the intended design.
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W6001
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Upstream stack
+        Parameters:
+          - NetworkStackName
+      - Label:
+          default: Tier and authentication
+        Parameters:
+          - Tier
+          - AuthMode
+      - Label:
+          default: Cluster sizing
+        Parameters:
+          - CpuInstanceType
+          - CpuInstanceCount
+          - GpuInstanceType
+          - GpuInstanceCount
+    ParameterLabels:
+      NetworkStackName:
+        default: Stack 1 name
+      Tier:
+        default: Validation tier
+      AuthMode:
+        default: Studio authentication mode
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    MinLength: 1
+    Description: >-
+      Name of the stack 1 deployment, used to import the VPC, private subnets,
+      security group and EKS cluster.
+
+  Tier:
+    Type: String
+    Default: Tier1NoGpu
+    AllowedValues: [Tier1NoGpu, Tier2WithGpu]
+    Description: >-
+      Tier1NoGpu validates the entire governance chain including the cross-team denial
+      test. Tier2WithGpu adds a GPU instance group, for interactive Spaces on a GPU or
+      realistic quota pressure.
+
+  AuthMode:
+    Type: String
+    Default: IAM
+    AllowedValues: [IAM, SSO]
+    Description: >-
+      SSO requires an IAM Identity Center instance to already exist in this Region.
+      Verify with "aws sso-admin list-instances" before choosing it; an empty result
+      means SSO mode will fail and the Identity Center trigger test cannot run.
+
+  CpuInstanceType:
+    Type: String
+    Default: ml.m5.2xlarge
+    Description: >-
+      Must be a HyperPod-supported type with "for cluster usage" quota above zero.
+      Check with "aws service-quotas list-service-quotas --service-code sagemaker".
+
+  CpuInstanceCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: >-
+      Instance count for the CPU instance group. Two, because the notebook gives
+      each of two teams a quota of one instance, and because HyperPod caps
+      ml.m5.2xlarge at 14 pods per node. One node cannot hold the add-on
+      controllers, and Kueue's controller gets preempted.
+
+  GpuInstanceType:
+    Type: String
+    Default: ml.g5.2xlarge
+    Description: Instance type for the GPU instance group. Tier2WithGpu only.
+
+  GpuInstanceCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Instance count for the GPU instance group. Tier2WithGpu only.
+
+  InstallTrainingOperatorAddon:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Leave false. No item in the validation checklist needs the HyperPod training
+      operator, the Helm chart already installs Kubeflow training operators by
+      default, and each extra add-on is another way for this stack to fail. Set true
+      only if you want to submit HyperPodPyTorchJob workloads.
+
+Conditions:
+  WithGpu: !Equals [!Ref Tier, Tier2WithGpu]
+  IsSsoMode: !Equals [!Ref AuthMode, SSO]
+  WithTrainingOperator: !Equals [!Ref InstallTrainingOperatorAddon, 'true']
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # HyperPod instance group execution role.
+  # ---------------------------------------------------------------------------
+  HyperPodInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerClusterInstanceRolePolicy'
+      Policies:
+        - PolicyName: hyperpod-eks-networking
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:AttachNetworkInterface
+                  - ec2:CreateNetworkInterface
+                  - ec2:CreateNetworkInterfacePermission
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DeleteNetworkInterfacePermission
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeTags
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DetachNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+                  - ec2:UnassignPrivateIpAddresses
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetDownloadUrlForLayer
+                  - eks-auth:AssumeRoleForPodIdentity
+                Resource: '*'
+              - Effect: Allow
+                Action: ec2:CreateTags
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:*:*:network-interface/*'
+              # AmazonSageMakerClusterInstanceRolePolicy already grants S3 access to
+              # buckets prefixed "sagemaker-", which is why the lifecycle bucket below
+              # must carry that prefix. Granting it explicitly as well makes the
+              # dependency visible rather than implicit in a managed policy.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::sagemaker-${AWS::StackName}-lc-${AWS::AccountId}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::sagemaker-${AWS::StackName}-lc-${AWS::AccountId}/*'
+
+  # ---------------------------------------------------------------------------
+  # Lifecycle scripts. An EKS-orchestrated HyperPod cluster rejects an instance
+  # group with no LifeCycleConfig:
+  #   "LifeCycleConfig is required for instance group cpu-workers.
+  #    LifeCycleConfig must be provided for clusters with EKS orchestrator."
+  # SourceS3Uri must begin with s3://sagemaker- because that is the only prefix
+  # AmazonSageMakerClusterInstanceRolePolicy allows the instance role to read.
+  #
+  # For EKS the AMI and the HyperPod agent perform the node join, so OnCreate is
+  # only a hook. The script below is the one the official AWS cluster-setup
+  # template ships for EKS: it adjusts the containerd data root when a secondary
+  # EBS volume is mounted and otherwise does nothing.
+  # ---------------------------------------------------------------------------
+  LifecycleBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub 'sagemaker-${AWS::StackName}-lc-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  LifecycleScriptWriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: write-lifecycle-script
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${LifecycleBucket.Arn}/*'
+
+  LifecycleScriptWriter:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-write-lifecycle-script'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 60
+      Role: !GetAtt LifecycleScriptWriterRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          s3 = boto3.client("s3")
+
+
+          def lambda_handler(event, context):
+              props = event["ResourceProperties"]
+              bucket = props["Bucket"]
+              key = props["Key"]
+
+              try:
+                  if event["RequestType"] == "Delete":
+                      # Remove the object so the bucket can be deleted with the stack.
+                      s3.delete_object(Bucket=bucket, Key=key)
+                      print("deleted s3://%s/%s" % (bucket, key))
+                  else:
+                      # The script arrives as a property rather than being embedded in
+                      # this source, so no shell escaping survives a Python literal.
+                      s3.put_object(
+                          Bucket=bucket,
+                          Key=key,
+                          Body=props["Script"].encode("utf-8"),
+                      )
+                      print("wrote s3://%s/%s" % (bucket, key))
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as exc:
+                  print(exc)
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, reason=str(exc)
+                  )
+
+  LifecycleScript:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt LifecycleScriptWriter.Arn
+      Bucket: !Ref LifecycleBucket
+      Key: on_create.sh
+      Script: |
+        #!/bin/bash
+
+        set -ex
+
+        LOG_FILE="/var/log/provision/provisioning.log"
+        mkdir -p "/var/log/provision"
+        touch $LOG_FILE
+
+        # Function to log messages
+        logger() {
+          echo "$@" | tee -a $LOG_FILE
+        }
+
+        logger "[start] on_create.sh"
+
+        if [[ $(mount | grep /opt/sagemaker) ]]; then
+          logger "Found secondary EBS volume. Setting containerd data root to /opt/sagemaker/containerd/data-root"
+          sed -i -e "/^[# ]*root\s*=/c\root = \"/opt/sagemaker/containerd/data-root\"" /etc/eks/containerd/containerd-config.toml
+        fi
+
+        logger "no more steps to run"
+        logger "[stop] on_create.sh"
+
+  # ---------------------------------------------------------------------------
+  # HyperPod cluster. NodeRecovery is Automatic only for the GPU tier: node
+  # auto-replacement is not supported for CPU instances, and the health
+  # monitoring agent supports GPU and Trainium instances only.
+  # ---------------------------------------------------------------------------
+  HyperPodCluster:
+    Type: AWS::SageMaker::Cluster
+    # The lifecycle script object must exist in S3 before the cluster is created,
+    # because the instance groups reference it by S3 URI.
+    DependsOn: LifecycleScript
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-hp'
+      NodeRecovery: !If [WithGpu, Automatic, None]
+      Orchestrator:
+        Eks:
+          ClusterArn:
+            Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-arn'
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+        Subnets:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-2'
+      InstanceGroups:
+        - InstanceGroupName: cpu-workers
+          InstanceType: !Ref CpuInstanceType
+          InstanceCount: !Ref CpuInstanceCount
+          ExecutionRole: !GetAtt HyperPodInstanceRole.Arn
+          ThreadsPerCore: 1
+          LifeCycleConfig:
+            SourceS3Uri: !Sub 's3://${LifecycleBucket}/'
+            OnCreate: on_create.sh
+        - !If
+          - WithGpu
+          - InstanceGroupName: gpu-workers
+            InstanceType: !Ref GpuInstanceType
+            InstanceCount: !Ref GpuInstanceCount
+            ExecutionRole: !GetAtt HyperPodInstanceRole.Arn
+            ThreadsPerCore: 1
+            LifeCycleConfig:
+              SourceS3Uri: !Sub 's3://${LifecycleBucket}/'
+              OnCreate: on_create.sh
+          - !Ref AWS::NoValue
+      Tags:
+        - Key: Purpose
+          Value: group-to-quota-validation
+
+  # ---------------------------------------------------------------------------
+  # Add-ons. All of these are daemonsets or controllers that need a node to
+  # schedule onto, so every one depends on the HyperPod cluster being InService.
+  # Task governance additionally documents that a HyperPod node must already
+  # exist before it is installed. They are serialized rather than parallel so a
+  # failure is attributable to one add-on.
+  # ---------------------------------------------------------------------------
+  PodIdentityAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: HyperPodCluster
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: eks-pod-identity-agent
+      ResolveConflicts: OVERWRITE
+
+  TaskGovernanceAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: PodIdentityAddon
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: amazon-sagemaker-hyperpod-taskgovernance
+      ResolveConflicts: OVERWRITE
+
+  # The task governance add-on reports CREATE_COMPLETE before the Kueue webhook
+  # has endpoints. Anything that creates a Deployment or a scheduler config right
+  # away fails with "no endpoints available for service kueue-webhook-service".
+  # Pause here so the dependents start after Kueue is serving.
+  KueueReadyWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  KueueReadyWaitFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-kueue-ready-wait'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 300
+      Role: !GetAtt KueueReadyWaitRole.Arn
+      Code:
+        ZipFile: |
+          import time
+
+          import cfnresponse
+
+
+          def lambda_handler(event, context):
+              if event["RequestType"] != "Delete":
+                  time.sleep(int(event["ResourceProperties"]["Seconds"]))
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+  KueueReadyWait:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: TaskGovernanceAddon
+    Properties:
+      ServiceToken: !GetAtt KueueReadyWaitFunction.Arn
+      Seconds: 120
+
+  # ---------------------------------------------------------------------------
+  # Spaces prerequisites. The Spaces add-on fails with "cert-manager is not
+  # installed on this cluster" without cert-manager, and needs the EBS CSI driver
+  # for space storage. Web UI and remote IDE access stay at their defaults (off),
+  # so the router and SSM roles from the Spaces permission guide are not needed.
+  # ---------------------------------------------------------------------------
+  CertManagerAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: KueueReadyWait
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: cert-manager
+      ResolveConflicts: OVERWRITE
+
+  EbsCsiDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn:
+                  Fn::Sub:
+                    - 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+                    - Cluster:
+                        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonEBSCSIDriverPolicyV2'
+      Policies:
+        # HyperPod-specific additions from "Using the Amazon EBS CSI driver on
+        # SageMaker HyperPod EKS clusters".
+        - PolicyName: hyperpod-node-volumes
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:AttachClusterNodeVolume
+                  - sagemaker:DetachClusterNodeVolume
+                Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:cluster/*'
+              - Effect: Allow
+                Action: eks:DescribeCluster
+                Resource:
+                  Fn::Sub:
+                    - 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+                    - Cluster:
+                        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+
+  EbsCsiAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: CertManagerAddon
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: aws-ebs-csi-driver
+      ResolveConflicts: OVERWRITE
+      PodIdentityAssociations:
+        - ServiceAccount: ebs-csi-controller-sa
+          RoleArn: !GetAtt EbsCsiDriverRole.Arn
+
+  # Same race as Kueue: cert-manager's webhook may not be serving the moment its
+  # add-on reports CREATE_COMPLETE, and Spaces creates cert-manager resources.
+  CertManagerReadyWait:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: EbsCsiAddon
+    Properties:
+      ServiceToken: !GetAtt KueueReadyWaitFunction.Arn
+      Seconds: 60
+
+  SpacesControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn:
+                  Fn::Sub:
+                    - 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+                    - Cluster:
+                        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerSpacesControllerPolicy'
+
+  SpacesAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: CertManagerReadyWait
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: amazon-sagemaker-spaces
+      ResolveConflicts: OVERWRITE
+      PodIdentityAssociations:
+        - ServiceAccount: jupyter-k8s-controller-manager
+          RoleArn: !GetAtt SpacesControllerRole.Arn
+
+  TrainingOperatorAddon:
+    Type: AWS::EKS::Addon
+    Condition: WithTrainingOperator
+    DependsOn: SpacesAddon
+    Properties:
+      ClusterName:
+        Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+      AddonName: amazon-sagemaker-hyperpod-training-operator
+      ResolveConflicts: OVERWRITE
+
+  # ---------------------------------------------------------------------------
+  # Cluster policy. Fair share and idle sharing on, which is what makes the
+  # lend and borrow behaviour in the per-team compute quotas meaningful.
+  # ---------------------------------------------------------------------------
+  ClusterSchedulerPolicy:
+    Type: AWS::SageMaker::ClusterSchedulerConfig
+    DependsOn: KueueReadyWait
+    # cfn-lint 1.55.1 ships a stale resource spec and reports E3006 for this type.
+    # Re-verify with:
+    #   aws cloudformation describe-type --type RESOURCE \
+    #     --type-name AWS::SageMaker::ClusterSchedulerConfig
+    # which reports it LIVE in the registry.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub '${AWS::StackName}-policy'
+      Description: Cluster policy for the group-to-quota validation.
+      ClusterArn: !GetAtt HyperPodCluster.ClusterArn
+      SchedulerConfig:
+        FairShare: Enabled
+        IdleResourceSharing: Enabled
+
+  # ---------------------------------------------------------------------------
+  # Studio domain. The default execution role is deliberately minimal, because
+  # teams receive their own execution role from stack 3, which is the point of
+  # the design being validated.
+  # ---------------------------------------------------------------------------
+  DomainDefaultExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: >-
+        Deliberately minimal default role. Teams receive their own execution role.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: studio-minimal
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:DescribeDomain
+                  - sagemaker:DescribeUserProfile
+                  - sagemaker:ListTags
+                Resource: '*'
+
+  StudioDomain:
+    Type: AWS::SageMaker::Domain
+    Properties:
+      DomainName: !Sub '${AWS::StackName}-domain'
+      AuthMode: !Ref AuthMode
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-vpc-id'
+      SubnetIds:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-1'
+        - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-2'
+      AppNetworkAccessType: PublicInternetOnly
+      DefaultUserSettings:
+        ExecutionRole: !GetAtt DomainDefaultExecutionRole.Arn
+        SecurityGroups:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+      # ExecutionRoleSessionNameMode is deliberately absent. The CloudFormation schema
+      # for StudioWebPortalSettings sets additionalProperties: false and allows only
+      # HiddenMlTools, HiddenAppTypes, HiddenInstanceTypes and
+      # HiddenSageMakerImageVersionAliases, so the property cannot be set through this
+      # resource even though the SageMaker API accepts it. The custom resource below
+      # sets it with UpdateDomain. Remove the workaround if the schema gains the field.
+
+  # ---------------------------------------------------------------------------
+  # Set ExecutionRoleSessionNameMode, which the Domain resource cannot express.
+  # Required so users sharing a team execution role keep private spaces and stay
+  # individually attributable in CloudTrail.
+  # ---------------------------------------------------------------------------
+  SessionNameModeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: update-domain
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sagemaker:UpdateDomain
+                  - sagemaker:DescribeDomain
+                Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/*'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt DomainDefaultExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+
+  SessionNameModeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-set-session-name-mode'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 120
+      Role: !GetAtt SessionNameModeFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          import cfnresponse
+          from botocore.auth import SigV4Auth
+          from botocore.awsrequest import AWSRequest
+          from botocore.session import get_session
+
+          # The boto3 bundled in the Lambda runtime predates
+          # ExecutionRoleSessionNameMode and rejects it client-side, so send the
+          # UpdateDomain request directly. botocore signs it without validating
+          # the body against its service model.
+          REGION = os.environ["AWS_REGION"]
+          URL = "https://api.sagemaker.%s.amazonaws.com/" % REGION
+
+
+          def update_domain(body):
+              data = json.dumps(body)
+              headers = {
+                  "Content-Type": "application/x-amz-json-1.1",
+                  "X-Amz-Target": "SageMaker.UpdateDomain",
+              }
+              req = AWSRequest("POST", URL, data=data, headers=headers)
+              creds = get_session().get_credentials().get_frozen_credentials()
+              SigV4Auth(creds, "sagemaker", REGION).add_auth(req)
+              http = urllib.request.Request(
+                  URL, data=data.encode(), headers=dict(req.headers), method="POST"
+              )
+              try:
+                  urllib.request.urlopen(http, timeout=60).read()
+              except urllib.error.HTTPError as err:
+                  raise RuntimeError("%s %s" % (err.code, err.read().decode()))
+
+
+          def lambda_handler(event, context):
+              props = event["ResourceProperties"]
+
+              try:
+                  if event["RequestType"] != "Delete":
+                      # Rebuild DefaultUserSettings deterministically rather than
+                      # merging a DescribeDomain response, because that response
+                      # contains fields UpdateDomain will not accept.
+                      update_domain(
+                          {
+                              "DomainId": props["DomainId"],
+                              "DefaultUserSettings": {
+                                  "ExecutionRole": props["ExecutionRole"],
+                                  "SecurityGroups": props["SecurityGroups"],
+                                  "StudioWebPortalSettings": {
+                                      "ExecutionRoleSessionNameMode": props["Mode"]
+                                  },
+                              },
+                          }
+                      )
+                      print("set ExecutionRoleSessionNameMode=%s" % props["Mode"])
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as exc:
+                  print(exc)
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, reason=str(exc)
+                  )
+
+  DomainSessionNameMode:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SessionNameModeFunction.Arn
+      DomainId: !GetAtt StudioDomain.DomainId
+      ExecutionRole: !GetAtt DomainDefaultExecutionRole.Arn
+      SecurityGroups:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+      Mode: USER_IDENTITY
+
+Outputs:
+  TierDeployed:
+    Value: !Ref Tier
+
+  AuthModeDeployed:
+    Value: !Ref AuthMode
+
+  EksClusterName:
+    Description: Pass to stack 3 as EksClusterName.
+    Value:
+      Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+
+  HyperPodClusterArn:
+    Description: Pass to stack 3 as HyperPodClusterArn.
+    Value: !GetAtt HyperPodCluster.ClusterArn
+
+  StudioDomainId:
+    Description: Pass to stack 3 as StudioDomainId.
+    Value: !GetAtt StudioDomain.DomainId
+
+  AutomationStackCommand:
+    Description: >-
+      Deploy command for stack 3. Append ValidationPrincipalArn=<your notebook role>
+      so the notebook can assume the team roles for the RBAC tests.
+    Value: !Sub
+      - >-
+        aws cloudformation deploy --template-file cloudformation/03-automation-plane.yaml
+        --stack-name ${AWS::StackName}-automation
+        --capabilities CAPABILITY_NAMED_IAM
+        --parameter-overrides
+        EksClusterName=${EksName}
+        HyperPodClusterArn=${HyperPodCluster.ClusterArn}
+        StudioDomainId=${StudioDomain.DomainId}
+        NotebookTier=${Tier}
+        NotebookAuthMode=${AuthMode}
+        CreateCloudTrail=false
+      - EksName:
+          Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-name'
+
+  GpuTestsAvailable:
+    Description: Whether notebook section 9 and GPU Spaces tests can run.
+    Value: !If [WithGpu, 'yes', 'no, Tier1NoGpu. Sections 3 to 6, 8, 10 still run.']
+
+  IdentityCenterTestsAvailable:
+    Description: Whether notebook section 7 can run.
+    Value: !If
+      - IsSsoMode
+      - 'yes, supply IDENTITY_STORE_ID in the notebook'
+      - 'no, IAM mode. Section 8 covers the IAM provisioning path instead.'
+
+  TeardownOrder:
+    Description: Read before deleting anything.
+    Value: >-
+      Run the notebook's clean-up section, then delete stack 3, then this stack, then stack 1. A
+      Studio domain will not delete while any app, space or user profile exists inside
+      it, and the provisioning function creates user profiles this stack does not know
+      about. If deletion stalls, list and delete the remaining user profiles and apps,
+      then retry.

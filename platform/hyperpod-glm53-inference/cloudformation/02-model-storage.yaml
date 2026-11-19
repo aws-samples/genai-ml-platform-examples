@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Stack 2 of 3. S3 bucket for the GLM-5.3 checkpoint (about 756 GB). Kept in its
+  own stack so the weights survive deleting and rebuilding the cluster: copying
+  them from Hugging Face again takes time and NAT gateway data charges.
+
+  Deploy this before stack 3, which grants the S3 CSI driver read access to this
+  bucket and the download job write access to its model prefix.
+
+Parameters:
+  ModelPrefix:
+    Type: String
+    Default: zai-org/GLM-5.3
+    AllowedPattern: '^[A-Za-z0-9._/-]+$'
+    Description: Key prefix the checkpoint is copied to, and that endpoints read from.
+
+Resources:
+  ModelBucket:
+    Type: AWS::S3::Bucket
+    # Retain: the weights are expensive to copy again. Delete the bucket yourself
+    # when you no longer need it (see the README clean-up section).
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'hpglm-models-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-multipart-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 2
+
+  ModelBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ModelBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt ModelBucket.Arn
+              - !Sub '${ModelBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+Outputs:
+  ModelBucketName:
+    Value: !Ref ModelBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-model-bucket'
+
+  ModelBucketArn:
+    Value: !GetAtt ModelBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-model-bucket-arn'
+
+  ModelPrefix:
+    Value: !Ref ModelPrefix
+    Export:
+      Name: !Sub '${AWS::StackName}-model-prefix'
+
+  ModelS3Uri:
+    Value: !Sub 's3://${ModelBucket}/${ModelPrefix}/'

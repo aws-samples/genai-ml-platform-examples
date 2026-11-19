@@ -1,0 +1,46 @@
+# A long-running pod on the system nodes for running the load generators inside
+# the cluster, so results don't depend on a laptop's network path. Exec in, run a
+# script, then copy the results out.
+#
+#   kubectl create configmap loadgen-scripts -n $NAMESPACE --from-file=loadgen/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   envsubst < k8s/toolbox.yaml | kubectl apply -f -
+#   kubectl exec -it -n $NAMESPACE deploy/loadgen-toolbox -- bash
+#   # inside: cd /work && python multiturn_coding.py --help
+#   kubectl cp $NAMESPACE/<toolbox-pod>:/work/results ./results
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-toolbox
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: loadgen-toolbox}
+  template:
+    metadata:
+      labels: {app: loadgen-toolbox}
+    spec:
+      serviceAccountName: loadgen
+      nodeSelector:
+        hpglm/role: system
+      containers:
+        - name: toolbox
+          image: public.ecr.aws/docker/library/python:3.12-slim
+          command: [sh, -c]
+          args:
+            - pip install --quiet --no-cache-dir -r /loadgen/requirements.txt &&
+              python -c "import urllib.request; urllib.request.urlretrieve('https://dl.k8s.io/release/v1.33.5/bin/linux/amd64/kubectl', '/usr/local/bin/kubectl')" &&
+              chmod +x /usr/local/bin/kubectl &&
+              mkdir -p /work && cp /loadgen/*.py /work/ &&
+              echo ready && sleep infinity
+          workingDir: /work
+          resources:
+            requests: {cpu: "2", memory: 4Gi}
+            limits: {memory: 8Gi}
+          volumeMounts:
+            - {name: scripts, mountPath: /loadgen}
+      volumes:
+        - name: scripts
+          configMap:
+            name: loadgen-scripts

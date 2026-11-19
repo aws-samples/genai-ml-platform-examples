@@ -1,0 +1,1018 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Stack 3 of 3. Automation plane for assigning SageMaker HyperPod compute quotas from
+  Active Directory group membership. Creates the group mapping table, two team
+  execution roles, the provisioning function, the IAM-mode sign-in function and its
+  presigned-URL role, and the EventBridge rule for Identity Center group events.
+
+  NOT created by this template, and expected to exist already: the HyperPod cluster,
+  its EKS cluster, and the SageMaker Studio domain. Compute quotas and EKS access
+  entries are created by the notebook, because they are what the walkthrough teaches.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Existing infrastructure
+        Parameters:
+          - EksClusterName
+          - HyperPodClusterArn
+          - StudioDomainId
+          - IdentityStoreId
+      - Label:
+          default: Teams to onboard
+        Parameters:
+          - TeamAName
+          - TeamBName
+      - Label:
+          default: Validation and auditing
+        Parameters:
+          - ValidationPrincipalArn
+          - CreateCloudTrail
+    ParameterLabels:
+      EksClusterName:
+        default: EKS cluster name
+      HyperPodClusterArn:
+        default: HyperPod cluster ARN
+      StudioDomainId:
+        default: Studio domain ID
+      IdentityStoreId:
+        default: Identity Store ID (optional)
+      ValidationPrincipalArn:
+        default: Validation principal ARN (test only)
+      CreateCloudTrail:
+        default: Create a CloudTrail trail
+
+Parameters:
+  EksClusterName:
+    Type: String
+    Description: Name of the EKS cluster orchestrating the HyperPod cluster.
+    MinLength: 1
+
+  HyperPodClusterArn:
+    Type: String
+    Description: ARN of the SageMaker HyperPod cluster.
+    AllowedPattern: '^arn:aws[a-z\-]*:sagemaker:[a-z0-9\-]+:[0-9]{12}:cluster/[a-z0-9]{12}$'
+    ConstraintDescription: Must be a SageMaker HyperPod cluster ARN.
+
+  StudioDomainId:
+    Type: String
+    Description: ID of the existing SageMaker Studio domain, for example d-abcd1234efgh.
+    AllowedPattern: '^d-[a-z0-9]{12}$'
+    ConstraintDescription: Must be a Studio domain ID of the form d-xxxxxxxxxxxx.
+
+  IdentityStoreId:
+    Type: String
+    Default: ''
+    Description: >-
+      Identity Store ID, for an Identity Center domain. Leave blank for an IAM-mode
+      domain; the EventBridge rules are still created but will not fire.
+
+  TeamAName:
+    Type: String
+    Default: validate-search-ranking
+    Description: >-
+      Team name for the first team. Becomes the ComputeQuota TeamName and therefore
+      the namespace hyperpod-ns-<name>, so it must satisfy the quota target pattern.
+    AllowedPattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9]){0,39}?$'
+    ConstraintDescription: Lowercase letters, digits and internal hyphens, 40 characters maximum.
+
+  TeamBName:
+    Type: String
+    Default: validate-fraud-detection
+    Description: Team name for the second team. Needed for the cross-team denial test.
+    AllowedPattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9]){0,39}?$'
+    ConstraintDescription: Lowercase letters, digits and internal hyphens, 40 characters maximum.
+
+  ValidationPrincipalArn:
+    Type: String
+    Default: ''
+    Description: >-
+      TEST ONLY. ARN of the principal running the validation notebook. Adding it lets
+      the notebook assume each team execution role for the RBAC tests. Leave blank for
+      any environment you intend to keep, and remove it after validating.
+
+  NotebookTier:
+    Type: String
+    Default: Tier1NoGpu
+    AllowedValues: [Tier1NoGpu, Tier2WithGpu]
+    Description: >-
+      Pass-through for the NotebookConfig output only. Set it to the Tier you deployed
+      in the foundation stack so the generated config block is complete.
+
+  NotebookAuthMode:
+    Type: String
+    Default: IAM
+    AllowedValues: [IAM, SSO]
+    Description: >-
+      Pass-through for the NotebookConfig output only. Set it to the AuthMode you
+      deployed in the foundation stack.
+
+  CreateCloudTrail:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Create a management-events trail. EventBridge only sees AddMemberToGroup if a
+      trail is logging management events in the Identity Center instance Region.
+      Leave false if you already have one.
+
+Conditions:
+  HasValidationPrincipal: !Not [!Equals [!Ref ValidationPrincipalArn, '']]
+  ShouldCreateTrail: !Equals [!Ref CreateCloudTrail, 'true']
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Group mapping table. Composite key so a user can belong to several teams,
+  # one per domain.
+  # ---------------------------------------------------------------------------
+  MappingTable:
+    Type: AWS::DynamoDB::Table
+    # Delete is deliberate: this stack seeds the table with test teams and is meant
+    # to be torn down. Change both policies to Retain before adapting for production.
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub '${AWS::StackName}-group-mapping'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: adGroup
+          AttributeType: S
+        - AttributeName: domainId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: adGroup
+          KeyType: HASH
+        - AttributeName: domainId
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ---------------------------------------------------------------------------
+  # Permissions a team execution role needs to reach HyperPod from Studio.
+  # ---------------------------------------------------------------------------
+  StudioHyperPodAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-studio-hyperpod-access'
+      Description: Lets a Studio execution role describe and use the HyperPod EKS cluster.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DescribeHyperPodCluster
+            Effect: Allow
+            Action: sagemaker:DescribeCluster
+            Resource: !Ref HyperPodClusterArn
+          - Sid: ListHyperPodClusters
+            Effect: Allow
+            Action: sagemaker:ListClusters
+            Resource: '*'
+          - Sid: UseEksCluster
+            Effect: Allow
+            Action:
+              - eks:DescribeCluster
+              - eks:AccessKubernetesApi
+              - eks:MutateViaKubernetesApi
+            Resource: !Sub 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${EksClusterName}'
+          - Sid: DescribeSpacesAddon
+            Effect: Allow
+            Action: eks:DescribeAddon
+            # The docs show cluster/<name>/*, but add-on ARNs have the form
+            # addon/<cluster>/<addon>/<id>, so that pattern never matches.
+            Resource: !Sub 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:addon/${EksClusterName}/*'
+          - Sid: HyperPodClusterDetailsInStudio
+            Effect: Allow
+            Action:
+              - sagemaker:ListClusterNodes
+              - sagemaker:ListTags
+            Resource: !Ref HyperPodClusterArn
+          - Sid: DescribeNetworkForUi
+            Effect: Allow
+            Action: ec2:Describe*
+            Resource: '*'
+          - Sid: RemoteAccessOverSsm
+            Effect: Allow
+            Action:
+              - ssm:StartSession
+              - ssm:TerminateSession
+            Resource: '*'
+          - Sid: ClusterMetrics
+            Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+              - cloudwatch:GetMetricData
+            Resource: '*'
+
+  # ---------------------------------------------------------------------------
+  # What Studio itself needs to load and run private spaces as a team role. The
+  # HyperPod-specific permissions above sit on top of this. Not
+  # AmazonSageMakerFullAccess, because that would let a team role edit compute
+  # quotas, including other teams', which defeats the design.
+  # ---------------------------------------------------------------------------
+  StudioUserBaselinePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-studio-user-baseline'
+      Description: Minimum for a team execution role to open Studio and use spaces in one domain.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadDomainAndProfiles
+            Effect: Allow
+            Action:
+              - sagemaker:DescribeDomain
+              - sagemaker:DescribeUserProfile
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/${StudioDomainId}'
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/${StudioDomainId}/*'
+          - Sid: SpacesAndAppsInThisDomain
+            Effect: Allow
+            Action:
+              - sagemaker:CreateSpace
+              - sagemaker:UpdateSpace
+              - sagemaker:DeleteSpace
+              - sagemaker:DescribeSpace
+              - sagemaker:CreateApp
+              - sagemaker:DeleteApp
+              - sagemaker:DescribeApp
+              - sagemaker:AddTags
+              - sagemaker:ListTags
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:space/${StudioDomainId}/*'
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:app/${StudioDomainId}/*'
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/${StudioDomainId}/*'
+          - Sid: ListCallsHaveNoResourceScope
+            Effect: Allow
+            Action:
+              - sagemaker:ListDomains
+              - sagemaker:ListUserProfiles
+              - sagemaker:ListSpaces
+              - sagemaker:ListApps
+              - sagemaker:ListImages
+              - sagemaker:ListComputeQuotas
+              - sagemaker:ListClusterSchedulerConfigs
+              - sagemaker:DescribeComputeQuota
+              - sagemaker:DescribeClusterSchedulerConfig
+              - sagemaker:GetSagemakerServicecatalogPortfolioStatus
+              - sagemaker:Search
+              - sagemaker:ListPartnerApps
+              - sagemaker:ListPipelines
+              - sagemaker:ListTrainingJobs
+            Resource: '*'
+          - Sid: TagsOnTheDomain
+            Effect: Allow
+            Action: sagemaker:ListTags
+            Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/${StudioDomainId}'
+          - Sid: ReadPublicHubForImageAndModelLists
+            Effect: Allow
+            Action:
+              - sagemaker:DescribeHubContent
+              - sagemaker:ListHubContents
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:aws:hub/SageMakerPublicHub'
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:aws:hub-content/SageMakerPublicHub/*'
+          # Studio calls this to open applications. Limit it to profiles of the
+          # caller's own team: profiles carry a Team tag and so does the role.
+          - Sid: OpenAppsForOwnTeamProfilesOnly
+            Effect: Allow
+            Action: sagemaker:CreatePresignedDomainUrl
+            Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/${StudioDomainId}/*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/Team: '${aws:PrincipalTag/Team}'
+          - Sid: TeamsCannotChangeGovernance
+            Effect: Deny
+            Action:
+              - sagemaker:CreateComputeQuota
+              - sagemaker:UpdateComputeQuota
+              - sagemaker:DeleteComputeQuota
+              - sagemaker:CreateClusterSchedulerConfig
+              - sagemaker:UpdateClusterSchedulerConfig
+              - sagemaker:DeleteClusterSchedulerConfig
+              - sagemaker:CreateUserProfile
+              - sagemaker:UpdateUserProfile
+              - eks:CreateAccessEntry
+              - eks:UpdateAccessEntry
+              - eks:DeleteAccessEntry
+              - eks:AssociateAccessPolicy
+              - eks:DisassociateAccessPolicy
+            Resource: '*'
+
+  TeamAExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-${TeamAName}'
+      Description: !Sub 'Studio execution role for team ${TeamAName}.'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+          - !If
+            - HasValidationPrincipal
+            - Sid: ValidationOnlyRemoveAfterTesting
+              Effect: Allow
+              Principal:
+                AWS: !Ref ValidationPrincipalArn
+              Action: sts:AssumeRole
+            - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Ref StudioHyperPodAccessPolicy
+        - !Ref StudioUserBaselinePolicy
+      Tags:
+        - Key: Team
+          Value: !Ref TeamAName
+
+  TeamBExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-${TeamBName}'
+      Description: !Sub 'Studio execution role for team ${TeamBName}.'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+          - !If
+            - HasValidationPrincipal
+            - Sid: ValidationOnlyRemoveAfterTesting
+              Effect: Allow
+              Principal:
+                AWS: !Ref ValidationPrincipalArn
+              Action: sts:AssumeRole
+            - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Ref StudioHyperPodAccessPolicy
+        - !Ref StudioUserBaselinePolicy
+      Tags:
+        - Key: Team
+          Value: !Ref TeamBName
+
+  # ---------------------------------------------------------------------------
+  # Provisioning function. Two entry points share one onboarding path:
+  #   Identity Center: AddMemberToGroup / DeleteGroupMembership via EventBridge.
+  #   IAM mode: {"user": ..., "groups": [...]} from a SAML front end, IdP webhook
+  #   or reconciler; {"action": "remove", "user": ...} to offboard.
+  # A user mapped to two teams in one domain is refused ("conflict"), because a
+  # user can hold only one profile per domain.
+  # ---------------------------------------------------------------------------
+  ProvisioningFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: provisioning
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ResolveIdentity
+                Effect: Allow
+                Action:
+                  - identitystore:DescribeGroup
+                  - identitystore:DescribeUser
+                Resource: '*'
+              - Sid: ReadMapping
+                Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt MappingTable.Arn
+              - Sid: ManageUserProfiles
+                Effect: Allow
+                Action:
+                  - sagemaker:CreateUserProfile
+                  - sagemaker:DescribeUserProfile
+                  - sagemaker:DeleteUserProfile
+                  - sagemaker:AddTags
+                  - sagemaker:DescribeApp
+                  - sagemaker:DeleteApp
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/${StudioDomainId}/*'
+                  - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:app/${StudioDomainId}/*'
+              - Sid: ListAppsHasNoResourceScope
+                Effect: Allow
+                Action: sagemaker:ListApps
+                Resource: '*'
+              - Sid: PassOnlyTeamRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt TeamAExecutionRole.Arn
+                  - !GetAtt TeamBExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+
+  ProvisioningFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    # Retain so the provisioning logs survive a stack delete and remain available
+    # for writing up the validation findings.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-provisioning'
+      RetentionInDays: 30
+
+  ProvisioningFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ProvisioningFunctionLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-provisioning'
+      Description: Creates and removes Studio user profiles from group membership events.
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt ProvisioningFunctionRole.Arn
+      Environment:
+        Variables:
+          DOMAIN_ID: !Ref StudioDomainId
+          MAPPING_TABLE: !Ref MappingTable
+      Code:
+        ZipFile: |
+          import os
+          import re
+          import time
+
+          import boto3
+
+          DOMAIN_ID = os.environ["DOMAIN_ID"]
+
+          ddb = boto3.resource("dynamodb").Table(os.environ["MAPPING_TABLE"])
+          sm = boto3.client("sagemaker")
+          ids = boto3.client("identitystore")
+
+
+          def profile_name(user):
+              # Studio profile names allow only letters, digits and hyphens
+              return re.sub(r"[^A-Za-z0-9-]", "-", user)[:63]
+
+
+          def lookup(group):
+              key = {"adGroup": group, "domainId": DOMAIN_ID}
+              return ddb.get_item(Key=key).get("Item")
+
+
+          def onboard(user, groups, sso):
+              teams = {}
+              for g in groups:
+                  t = lookup(g)
+                  if t:
+                      teams[t["teamName"]] = dict(t, adGroup=g)
+              if not teams:
+                  return {"status": "no-mapping", "user": user, "groups": groups}
+              if len(teams) > 1:
+                  # One profile per user per domain means one team. Refuse, don't guess.
+                  return {"status": "conflict", "user": user, "teams": sorted(teams)}
+
+              team = list(teams.values())[0]
+              name = profile_name(user)
+              role = team["executionRoleArn"]
+              out = {"user": user, "profile": name, "team": team["teamName"],
+                     "executionRoleArn": role, "namespace": team["hyperPodNamespace"]}
+              try:
+                  cur = sm.describe_user_profile(DomainId=DOMAIN_ID, UserProfileName=name)
+                  cur = cur["UserSettings"]["ExecutionRole"]
+                  out["status"] = "exists" if cur == role else "role-mismatch"
+                  out["currentRole"] = cur
+                  return out
+              except sm.exceptions.ResourceNotFound:
+                  pass
+
+              sso_args = {}
+              if sso:
+                  sso_args = {"SingleSignOnUserIdentifier": "UserName",
+                              "SingleSignOnUserValue": user}
+              # ExecutionRoleSessionNameMode is inherited from the domain default.
+              # The runtime's boto3 rejects it here anyway.
+              sm.create_user_profile(
+                  DomainId=DOMAIN_ID,
+                  UserProfileName=name,
+                  UserSettings={"ExecutionRole": role},
+                  Tags=[
+                      {"Key": "studiouserid", "Value": name},
+                      {"Key": "Team", "Value": team["teamName"]},
+                      {"Key": "ADGroup", "Value": team["adGroup"]},
+                  ],
+                  **sso_args,
+              )
+              out["status"] = "created"
+              return out
+
+
+          def offboard(user):
+              name = profile_name(user)
+              q = {"DomainIdEquals": DOMAIN_ID, "UserProfileNameEquals": name}
+              for app in sm.list_apps(**q).get("Apps", []):
+                  if app["Status"] not in ("Deleted", "Deleting"):
+                      sm.delete_app(DomainId=DOMAIN_ID, UserProfileName=name,
+                                    AppType=app["AppType"], AppName=app["AppName"])
+              for _ in range(28):
+                  live = [a for a in sm.list_apps(**q).get("Apps", [])
+                          if a["Status"] not in ("Deleted", "Failed")]
+                  if not live:
+                      break
+                  time.sleep(10)
+              try:
+                  sm.delete_user_profile(DomainId=DOMAIN_ID, UserProfileName=name)
+              except sm.exceptions.ResourceNotFound:
+                  return {"status": "absent", "profile": name}
+              return {"status": "deleted", "profile": name}
+
+
+          def lambda_handler(event, context):
+              print(event)
+              if "detail" in event:
+                  # Identity Center: CloudTrail event delivered by EventBridge
+                  d = event["detail"]
+                  p = d["requestParameters"]
+                  s = p["identityStoreId"]
+                  group = ids.describe_group(IdentityStoreId=s, GroupId=p["groupId"])
+                  user = ids.describe_user(IdentityStoreId=s, UserId=p["member"]["memberId"])
+                  group, user = group["DisplayName"], user["UserName"]
+                  if d["eventName"] == "AddMemberToGroup":
+                      out = onboard(user, [group], True)
+                  elif d["eventName"] == "DeleteGroupMembership":
+                      out = offboard(user)
+                  else:
+                      out = {"status": "ignored", "event": d["eventName"]}
+              elif event.get("action") == "remove":
+                  out = offboard(event["user"])
+              else:
+                  # IAM mode: {"user": ..., "groups": [...]} from a SAML front end,
+                  # an IdP webhook, or a reconciler
+                  out = onboard(event["user"], event.get("groups", []), False)
+              print(out)
+              return out
+
+  # ---------------------------------------------------------------------------
+  # Triggers
+  # ---------------------------------------------------------------------------
+  GroupMembershipRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-group-membership'
+      Description: Routes Identity Center group membership changes to the provisioning function.
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.sso-directory
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - sso-directory.amazonaws.com
+          eventName:
+            - AddMemberToGroup
+            - DeleteGroupMembership
+      Targets:
+        - Id: provisioning
+          Arn: !GetAtt ProvisioningFunction.Arn
+
+  GroupMembershipRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ProvisioningFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt GroupMembershipRule.Arn
+
+  # ---------------------------------------------------------------------------
+  # IAM-mode sign-in (blog Steps 7 and 8). In production this sits behind the
+  # SAML front end, which validates the assertion and passes {"user", "groups"}.
+  #   1. Provision: invoke the provisioning function (creates the profile if new).
+  #   2. Assume PresignedUrlRole with RoleSessionName=<profile> and session tag
+  #      studiouserid=<profile>. The session name becomes the Studio identity,
+  #      so teammates sharing an execution role stay distinguishable.
+  #   3. Mint the URL with those credentials. PresignedUrlRole may only open a
+  #      profile whose studiouserid tag equals its session tag.
+  # "requestProfile" lets a test ask for someone else's profile to show step 3
+  # refusing it.
+  # ---------------------------------------------------------------------------
+  SignInFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: sign-in
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ProvisioningFunction.Arn
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                  - sts:TagSession
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-presigned-url'
+
+  PresignedUrlRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-presigned-url'
+      Description: Mints Studio URLs, only for the profile named in the session tag.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt SignInFunctionRole.Arn
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+            Condition:
+              StringLike:
+                aws:RequestTag/studiouserid: '*'
+      Policies:
+        - PolicyName: own-profile-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PresignedUrlForOwnProfileOnly
+                Effect: Allow
+                Action: sagemaker:CreatePresignedDomainUrl
+                Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/${StudioDomainId}/*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/studiouserid: '${aws:PrincipalTag/studiouserid}'
+
+  SignInFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-sign-in'
+      Description: IAM-mode sign-in. Provisions the profile, then mints a Studio URL as the user.
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 60
+      Role: !GetAtt SignInFunctionRole.Arn
+      Environment:
+        Variables:
+          DOMAIN_ID: !Ref StudioDomainId
+          PROVISIONING_FUNCTION: !Ref ProvisioningFunction
+          PRESIGNED_URL_ROLE: !GetAtt PresignedUrlRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+
+          import boto3
+          from botocore.exceptions import ClientError
+
+          lam = boto3.client("lambda")
+          sts = boto3.client("sts")
+
+
+          def lambda_handler(event, context):
+              req = {"user": event["user"], "groups": event.get("groups", [])}
+              r = lam.invoke(FunctionName=os.environ["PROVISIONING_FUNCTION"],
+                             Payload=json.dumps(req).encode())
+              prov = json.loads(r["Payload"].read())
+              if prov.get("status") not in ("created", "exists"):
+                  return {"status": "denied", "provisioning": prov}
+
+              me = prov["profile"]
+              creds = sts.assume_role(
+                  RoleArn=os.environ["PRESIGNED_URL_ROLE"],
+                  RoleSessionName=me,          # becomes the Studio user identity
+                  Tags=[{"Key": "studiouserid", "Value": me}],
+              )["Credentials"]
+              sm = boto3.client(
+                  "sagemaker",
+                  aws_access_key_id=creds["AccessKeyId"],
+                  aws_secret_access_key=creds["SecretAccessKey"],
+                  aws_session_token=creds["SessionToken"],
+              )
+              target = event.get("requestProfile", me)
+              try:
+                  url = sm.create_presigned_domain_url(
+                      DomainId=os.environ["DOMAIN_ID"], UserProfileName=target,
+                      ExpiresInSeconds=300, SessionExpirationDurationInSeconds=3600,
+                  )["AuthorizedUrl"]
+              except ClientError as e:
+                  print("refused %s -> %s: %s" % (me, target, e))
+                  return {"status": "forbidden", "profile": target, "error": str(e)}
+              print("signed in %s as team %s" % (me, prov["team"]))
+              return {"status": "ok", "profile": target, "team": prov["team"], "url": url}
+
+  # ---------------------------------------------------------------------------
+  # Seed the mapping table so the trigger has somewhere to look.
+  # ---------------------------------------------------------------------------
+  SeedFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: seed
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt MappingTable.Arn
+
+  SeedFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-seed-mapping'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 60
+      Role: !GetAtt SeedFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          ddb = boto3.resource("dynamodb")
+
+
+          def lambda_handler(event, context):
+              props = event["ResourceProperties"]
+              table = ddb.Table(props["TableName"])
+              rows = props["Rows"]
+
+              try:
+                  if event["RequestType"] == "Delete":
+                      for row in rows:
+                          table.delete_item(
+                              Key={
+                                  "adGroup": row["adGroup"],
+                                  "domainId": row["domainId"],
+                              }
+                          )
+                  else:
+                      for row in rows:
+                          table.put_item(Item=row)
+
+                  cfnresponse.send(
+                      event, context, cfnresponse.SUCCESS,
+                      {"Rows": str(len(rows))},
+                  )
+              except Exception as exc:  # surface the reason in the stack event
+                  print(exc)
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, reason=str(exc)
+                  )
+
+  MappingSeed:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SeedFunction.Arn
+      TableName: !Ref MappingTable
+      Rows:
+        - adGroup: !Ref TeamAName
+          domainId: !Ref StudioDomainId
+          teamName: !Ref TeamAName
+          executionRoleArn: !GetAtt TeamAExecutionRole.Arn
+          hyperPodNamespace: !Sub 'hyperpod-ns-${TeamAName}'
+          eksClusterName: !Ref EksClusterName
+          hyperPodClusterArn: !Ref HyperPodClusterArn
+        - adGroup: !Ref TeamBName
+          domainId: !Ref StudioDomainId
+          teamName: !Ref TeamBName
+          executionRoleArn: !GetAtt TeamBExecutionRole.Arn
+          hyperPodNamespace: !Sub 'hyperpod-ns-${TeamBName}'
+          eksClusterName: !Ref EksClusterName
+          hyperPodClusterArn: !Ref HyperPodClusterArn
+
+  # ---------------------------------------------------------------------------
+  # Permissions for whoever runs the validation notebook.
+  # ---------------------------------------------------------------------------
+  ValidationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: HasValidationPrincipal
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-validation'
+      Description: TEST ONLY. Permissions the validation notebook needs. Detach after validating.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ManageComputeQuotas
+            Effect: Allow
+            Action:
+              - sagemaker:CreateComputeQuota
+              - sagemaker:DeleteComputeQuota
+              - sagemaker:DescribeComputeQuota
+              - sagemaker:ListComputeQuotas
+              - sagemaker:DescribeCluster
+              - sagemaker:ListClusters
+            Resource: '*'
+          - Sid: ManageAccessEntries
+            Effect: Allow
+            Action:
+              - eks:CreateAccessEntry
+              - eks:DeleteAccessEntry
+              - eks:DescribeAccessEntry
+              - eks:ListAccessEntries
+              - eks:AssociateAccessPolicy
+              - eks:DisassociateAccessPolicy
+              - eks:ListAssociatedAccessPolicies
+              - eks:DescribeCluster
+              - eks:AccessKubernetesApi
+            Resource: !Sub 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${EksClusterName}'
+          - Sid: AssumeTeamRolesForRbacTests
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource:
+              - !GetAtt TeamAExecutionRole.Arn
+              - !GetAtt TeamBExecutionRole.Arn
+          - Sid: InspectAndSeedMapping
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Scan
+            Resource: !GetAtt MappingTable.Arn
+          - Sid: InspectUserProfiles
+            Effect: Allow
+            Action:
+              - sagemaker:DescribeUserProfile
+              - sagemaker:ListUserProfiles
+              - sagemaker:DeleteUserProfile
+              - sagemaker:DescribeDomain
+            Resource: '*'
+          - Sid: ManageTestIdentities
+            Effect: Allow
+            Action:
+              - identitystore:CreateGroup
+              - identitystore:DeleteGroup
+              - identitystore:CreateUser
+              - identitystore:DeleteUser
+              - identitystore:CreateGroupMembership
+              - identitystore:DeleteGroupMembership
+              - identitystore:DescribeGroup
+              - identitystore:DescribeUser
+              - identitystore:ListGroupMemberships
+            Resource: '*'
+
+  # ---------------------------------------------------------------------------
+  # Optional trail. EventBridge only sees AddMemberToGroup when management
+  # events are being logged in the Identity Center instance Region.
+  # ---------------------------------------------------------------------------
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateTrail
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-trail-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-trail-objects
+            Status: Enabled
+            ExpirationInDays: 30
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateTrail
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Condition: ShouldCreateTrail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName: !Sub '${AWS::StackName}-management-events'
+      S3BucketName: !Ref TrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+
+Outputs:
+  NotebookConfig:
+    Description: Configuration block for notebooks that do not read stack outputs. The Part 1 notebook reads outputs directly and does not need it.
+    Value: !Sub |
+      REGION          = "${AWS::Region}"
+      EKS_CLUSTER     = "${EksClusterName}"
+      HP_CLUSTER_ARN  = "${HyperPodClusterArn}"
+      DOMAIN_ID       = "${StudioDomainId}"
+      TIER      = "${NotebookTier}"
+      AUTH_MODE = "${NotebookAuthMode}"
+      IDENTITY_STORE_ID = "${IdentityStoreId}" or None
+      TEAMS = [
+        {"adGroup": "${TeamAName}", "teamName": "${TeamAName}", "executionRoleArn": "${TeamAExecutionRole.Arn}"},
+        {"adGroup": "${TeamBName}", "teamName": "${TeamBName}", "executionRoleArn": "${TeamBExecutionRole.Arn}"},
+      ]
+
+  MappingTableName:
+    Description: Group mapping table, seeded with both teams.
+    Value: !Ref MappingTable
+
+  TeamARoleArn:
+    Description: Execution role for the first team.
+    Value: !GetAtt TeamAExecutionRole.Arn
+
+  TeamBRoleArn:
+    Description: Execution role for the second team.
+    Value: !GetAtt TeamBExecutionRole.Arn
+
+  TeamANamespace:
+    Description: Namespace task governance will create for the first team.
+    Value: !Sub 'hyperpod-ns-${TeamAName}'
+
+  TeamBNamespace:
+    Description: Namespace task governance will create for the second team.
+    Value: !Sub 'hyperpod-ns-${TeamBName}'
+
+  ProvisioningFunctionName:
+    Description: Provisioning function, for tailing logs during validation.
+    Value: !Ref ProvisioningFunction
+
+  SignInFunctionName:
+    Description: IAM-mode sign-in. Invoke with {"user", "groups"} to get a Studio URL as that user.
+    Value: !Ref SignInFunction
+
+  ProvisioningLogsCommand:
+    Description: Tail the provisioning function while you add a group member.
+    Value: !Sub 'aws logs tail /aws/lambda/${AWS::StackName}-provisioning --follow --region ${AWS::Region}'
+
+  ValidationPolicyArn:
+    Condition: HasValidationPrincipal
+    Description: Attach to the notebook principal, then detach after validating.
+    Value: !Ref ValidationPolicy
+
+  NextSteps:
+    Description: What to do after the stack completes.
+    Value: >-
+      1. Grant the cluster-admin principal access to the EKS cluster if it does not
+      have it. 2. Attach ValidationPolicyArn to your notebook principal. 3. Paste
+      NotebookConfig into the notebook and run it top to bottom. 4. When finished,
+      delete the stack, which removes the test trust policy entries with the roles.
+
+  SecurityReminder:
+    Condition: HasValidationPrincipal
+    Description: Read this.
+    Value: >-
+      Both team execution roles currently trust ValidationPrincipalArn so the notebook
+      can run the RBAC tests. That is a standing privilege escalation path into the
+      team roles. Delete this stack, or redeploy with ValidationPrincipalArn blank,
+      as soon as validation is complete.

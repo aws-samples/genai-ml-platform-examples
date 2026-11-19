@@ -1,0 +1,4 @@
+.venv/
+.ipynb_checkpoints/
+*-findings.json
+.DS_Store

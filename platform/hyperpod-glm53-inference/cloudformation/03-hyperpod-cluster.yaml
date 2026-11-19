@@ -1,0 +1,1128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Stack 3 of 3. SageMaker HyperPod cluster for serving GLM-5.3, with the HyperPod
+  Inference add-on (inference operator, managed tiered KV cache and intelligent
+  routing, Inference Gateway, model and image caching) and its dependencies.
+
+  Deploy it with GpuInstanceCount=0 first. That builds the system instance group
+  and every add-on, which is cheap and catches IAM and dependency problems early.
+  When GPU capacity arrives, update the stack with GpuInstanceCount and
+  TrainingPlanArn. Install the HyperPod Helm chart (stack 1 HelmCommands output)
+  before creating this stack.
+
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks:
+        # EnvExports deliberately re-exports stack 2's bucket and prefix.
+        - W6001
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Stacks this one builds on
+        Parameters: [NetworkStackName, StorageStackName]
+      - Label:
+          default: System instance group (controllers, router, gateway, load tests)
+        Parameters: [SystemInstanceType, SystemInstanceCount]
+      - Label:
+          default: GPU instance group (GLM-5.3 replicas)
+        Parameters: [GpuInstanceType, GpuInstanceCount, TrainingPlanArn, GpuSubnetIds, GpuDeepHealthChecks, TieredStorage, TieredStorageMemoryPercent]
+      - Label:
+          default: Inference
+        Parameters: [InferenceAddonVersion, ModelNamespace]
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    Default: hpglm-net
+    Description: Name of the stack 1 deployment.
+
+  StorageStackName:
+    Type: String
+    Default: hpglm-models
+    Description: Name of the stack 2 deployment.
+
+  SystemInstanceType:
+    Type: String
+    Default: ml.m5.2xlarge
+    Description: Instance type for the system group.
+
+  SystemInstanceCount:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    Description: >-
+      Three. HyperPod caps ml.m5.2xlarge at 14 pods per node, and the inference
+      add-on and its dependencies alone need more than the 28 pods two nodes allow.
+
+  GpuInstanceType:
+    Type: String
+    Default: ml.p5en.48xlarge
+    Description: >-
+      8x H200 (1,128 GB of GPU memory) holds the FP8 GLM-5.3 checkpoint, about 743 GB
+      of weights, with room for KV cache. One replica uses one whole node.
+
+  GpuInstanceCount:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: >-
+      0 builds the cluster without GPUs. Set to 3 when the training plan is active:
+      two or three replicas for the routing experiments, plus room to scale out.
+
+  TrainingPlanArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of the SageMaker flexible training plan that reserves the GPU capacity.
+      Leave empty to use on-demand capacity and quota instead.
+
+  GpuSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      Optional comma-separated private subnets for the GPU instance group only, for
+      example stack 1's three private subnets. Listing more zones gives HyperPod more
+      places to find GPU capacity. Leave empty to use the cluster's two subnets.
+
+  GpuDeepHealthChecks:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Run deep health checks (InstanceStress, InstanceConnectivity) when GPU nodes
+      start. They catch bad hardware before serving, but add significant time to
+      node start-up. Leave false for a short experiment window.
+
+  TieredStorage:
+    Type: String
+    Default: Enable
+    AllowedValues: [Enable, Disable]
+    Description: >-
+      HyperPod managed tiered storage, the L2 backend of the managed KV cache. Applied
+      only when GPU nodes are present. Disable it if your GPU instance type doesn't
+      support it; the KV cache then uses its L1 (CPU memory) tier only.
+
+  TieredStorageMemoryPercent:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Percentage of each node's memory given to HyperPod managed tiered storage, which
+      backs the L2 tier of the managed KV cache (l2CacheBackend tieredstorage). Applied
+      only when GPU nodes are present.
+
+  InferenceAddonVersion:
+    Type: String
+    Default: v2.1.0-eksbuild.1
+    Description: >-
+      HyperPod Inference add-on version. The Inference Gateway needs v2.0.0-eksbuild.2
+      or later.
+
+  ModelNamespace:
+    Type: String
+    Default: glm53
+    AllowedPattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+    Description: Kubernetes namespace for the GLM-5.3 endpoints, the download job and the load tests.
+
+Conditions:
+  HasGpu: !Not [!Equals [!Ref GpuInstanceCount, 0]]
+  HasTrainingPlan: !Not [!Equals [!Ref TrainingPlanArn, '']]
+  HasGpuSubnet: !Not [!Equals [!Join ['', !Ref GpuSubnetIds], '']]
+  WithDeepHealthChecks: !And [!Condition HasGpu, !Equals [!Ref GpuDeepHealthChecks, 'true']]
+  UseTieredStorage: !And [!Condition HasGpu, !Equals [!Ref TieredStorage, Enable]]
+
+Resources:
+
+  # ===========================================================================
+  # Helpers: a fixed wait (add-on webhooks report ready before they serve), a
+  # wait for HyperPod nodes to join, and an emptier so buckets the operator
+  # writes to can be deleted with the stack.
+  # ===========================================================================
+  HelperFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: manage-stack-buckets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::sagemaker-${AWS::StackName}-lc-${AWS::AccountId}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::sagemaker-${AWS::StackName}-lc-${AWS::AccountId}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::hyperpod-tls-${AWS::AccountId}-${AWS::StackName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::hyperpod-tls-${AWS::AccountId}-${AWS::StackName}/*'
+              - Effect: Allow
+                Action:
+                  - sagemaker:DescribeCluster
+                  - sagemaker:ListClusterNodes
+                Resource: !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:cluster/*'
+              # The cluster-ready wait re-invokes itself to outlast the Lambda timeout.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-helper'
+
+  HelperFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-helper'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 900
+      Role: !GetAtt HelperFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import time
+
+          import boto3
+          import cfnresponse
+
+          s3 = boto3.client("s3")
+          sm = boto3.client("sagemaker")
+          lam = boto3.client("lambda")
+
+
+          def cluster_ready(name):
+              """True when InService with every instance group at its target count."""
+              c = sm.describe_cluster(ClusterName=name)
+              status = c["ClusterStatus"]
+              if status == "Failed":
+                  raise RuntimeError(f"cluster {name} is Failed: {c.get('FailureMessage', '')}")
+              groups = c.get("InstanceGroups", [])
+              counts = ", ".join(f"{g['InstanceGroupName']} {g.get('CurrentCount', 0)}/"
+                                 f"{g.get('TargetCount', 0)}" for g in groups)
+              print(f"{name}: {status}; {counts}")
+              # HyperPod keeps replacing nodes whose lifecycle script fails, so the
+              # counts never converge. Fail fast instead of waiting out the deadline.
+              for page in sm.get_paginator("list_cluster_nodes").paginate(ClusterName=name):
+                  for n in page["ClusterNodeSummaries"]:
+                      msg = n["InstanceStatus"].get("Message", "")
+                      if "Lifecycle scripts did not run" in msg:
+                          raise RuntimeError(f"node {n['InstanceId']}: {msg}")
+              return status == "InService" and all(
+                  g.get("CurrentCount", 0) >= g.get("TargetCount", 0) for g in groups)
+
+
+          def wait_for_cluster(event, context, p):
+              # Poll until ready. Before this invocation times out, hand the same
+              # event to a fresh asynchronous invocation, which responds later.
+              deadline = event.setdefault("WaitDeadline", time.time() + int(p.get("MaxSeconds", 3300)))
+              while not cluster_ready(p["ClusterName"]):
+                  if time.time() > deadline:
+                      raise RuntimeError(f"cluster {p['ClusterName']} not ready in time")
+                  if context.get_remaining_time_in_millis() < 90_000:
+                      lam.invoke(FunctionName=context.function_name, InvocationType="Event",
+                                 Payload=json.dumps(event).encode("utf-8"))
+                      return False
+                  time.sleep(30)
+              return True
+
+
+          def empty(bucket):
+              pages = s3.get_paginator("list_object_versions").paginate(Bucket=bucket)
+              for page in pages:
+                  keys = [{"Key": o["Key"], "VersionId": o["VersionId"]}
+                          for o in page.get("Versions", []) + page.get("DeleteMarkers", [])]
+                  if keys:
+                      s3.delete_objects(Bucket=bucket, Delete={"Objects": keys})
+
+
+          def lambda_handler(event, context):
+              p = event["ResourceProperties"]
+              action, req = p["Action"], event["RequestType"]
+              try:
+                  if action == "wait" and req != "Delete":
+                      time.sleep(int(p["Seconds"]))
+                  elif action == "cluster-ready" and req != "Delete":
+                      if not wait_for_cluster(event, context, p):
+                          return  # a later invocation sends the response
+                  elif action == "write" and req != "Delete":
+                      s3.put_object(Bucket=p["Bucket"], Key=p["Key"],
+                                    Body=p["Body"].encode("utf-8"))
+                  elif action in ("write", "empty") and req == "Delete":
+                      empty(p["Bucket"])
+                  # Keep the physical ID stable across updates. A new ID makes
+                  # CloudFormation delete the old resource, and for "write" that
+                  # empties the bucket the update just wrote to.
+                  pid = event.get("PhysicalResourceId", event["LogicalResourceId"])
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=pid)
+              except Exception as exc:
+                  print(exc)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(exc),
+                                   physicalResourceId=event.get("PhysicalResourceId", event["LogicalResourceId"]))
+
+  # ===========================================================================
+  # HyperPod instance role and lifecycle script
+  # ===========================================================================
+  HyperPodInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerClusterInstanceRolePolicy'
+      Policies:
+        - PolicyName: hyperpod-eks-networking
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:AttachNetworkInterface
+                  - ec2:CreateNetworkInterface
+                  - ec2:CreateNetworkInterfacePermission
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DeleteNetworkInterfacePermission
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeTags
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DetachNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+                  - ec2:UnassignPrivateIpAddresses
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetDownloadUrlForLayer
+                  - eks-auth:AssumeRoleForPodIdentity
+                Resource: '*'
+              - Effect: Allow
+                Action: ec2:CreateTags
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:*:*:network-interface/*'
+
+  # The lifecycle bucket must start with "sagemaker-": that is the only prefix
+  # AmazonSageMakerClusterInstanceRolePolicy lets the instance role read.
+  LifecycleBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'sagemaker-${AWS::StackName}-lc-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # The lifecycle scripts are AWS's EKS base config from
+  # aws-samples/awsome-distributed-training (1.architectures/7.sagemaker-hyperpod-eks/
+  # LifecycleScripts/base-config). They move containerd and kubelet onto the
+  # /opt/sagemaker EBS volume, on both Amazon Linux 2 and Amazon Linux 2023. The
+  # EFA FSx for Lustre client section is left out: this sample doesn't use FSx.
+  LifecycleScript:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt HelperFunction.Arn
+      Action: write
+      Bucket: !Ref LifecycleBucket
+      Key: on_create.sh
+      Body: |
+        #!/bin/bash
+
+        set -ex
+
+        LOG_FILE="/var/log/provision/provisioning.log"
+        mkdir -p "/var/log/provision"
+        touch "$LOG_FILE"
+
+        logger() {
+          echo "$@" | tee -a "$LOG_FILE"
+        }
+
+        logger "[start] on_create.sh"
+
+        if [ -f "./on_create_main.sh" ]; then
+          if ! bash ./on_create_main.sh >> "$LOG_FILE" 2>&1; then
+            logger "[error] on_create_main.sh failed, waiting 60 seconds before exit, to make sure logs are uploaded"
+            sync
+            sleep 60
+            logger "[stop] on_create.sh with error"
+            exit 1
+          fi
+        else
+          logger "[warning] on_create_main.sh not found, skipping execution"
+        fi
+
+        logger "[stop] on_create.sh"
+
+  LifecycleScriptMain:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt HelperFunction.Arn
+      Action: write
+      Bucket: !Ref LifecycleBucket
+      Key: on_create_main.sh
+      Body: |
+        #!/bin/bash
+
+        set -ex
+
+        # Disk for containerd and kubelet: "/opt/sagemaker" or "/opt/dlami/nvme"
+        DISK_FOR_CONTAINERD_KUBELET="/opt/sagemaker"
+
+        logger() {
+          echo "$@"
+        }
+
+        logger "[start] on_create_main.sh"
+        logger "Disk for containerd and kubelet: $DISK_FOR_CONTAINERD_KUBELET"
+
+        # Wait for disk to be mounted (max 60s)
+        for i in {1..12}; do
+          if mount | grep -q "$DISK_FOR_CONTAINERD_KUBELET"; then
+            logger "$DISK_FOR_CONTAINERD_KUBELET is mounted"
+            break
+          else
+            logger "Waiting for $DISK_FOR_CONTAINERD_KUBELET to be mounted..."
+            sleep 5
+          fi
+        done
+
+        systemctl status containerd.service --no-pager || true
+        systemctl status kubelet.service --no-pager || true
+
+        if mount | grep -q "$DISK_FOR_CONTAINERD_KUBELET"; then
+          logger "Setting containerd data root to $DISK_FOR_CONTAINERD_KUBELET/containerd/data-root"
+
+          source /etc/os-release
+          os_version="$VERSION_ID"
+          logger "Detected OS version: $os_version"
+
+          if [[ "$os_version" == "2" ]]; then
+            CONFIG_FILE="/etc/eks/containerd/containerd-config.toml"
+            if [[ -f "$CONFIG_FILE" ]]; then
+              logger "Amazon Linux 2 detected. Modifying $CONFIG_FILE using sed"
+              sed -i -e "/^[# ]*root\s*=/c\root = \"$DISK_FOR_CONTAINERD_KUBELET/containerd/data-root\"" "$CONFIG_FILE"
+            else
+              logger "Amazon Linux 2 detected, but $CONFIG_FILE not found!"
+            fi
+
+          elif [[ "$os_version" == "2023" ]]; then
+            logger "Amazon Linux 2023 detected. Creating custom containerd config and systemd override"
+
+            if [[ -d "$DISK_FOR_CONTAINERD_KUBELET/containerd/data-root" ]]; then
+              rm -rf "$DISK_FOR_CONTAINERD_KUBELET/containerd/data-root"
+            fi
+
+            mkdir -p "$DISK_FOR_CONTAINERD_KUBELET/containerd"
+
+            cat <<EOF | tee "$DISK_FOR_CONTAINERD_KUBELET/containerd/config.toml"
+        version = 2
+        root = "$DISK_FOR_CONTAINERD_KUBELET/containerd/data-root"
+        state = "/run/containerd"
+
+        [grpc]
+        address = "/run/containerd/containerd.sock"
+
+        [plugins."io.containerd.grpc.v1.cri".containerd]
+        default_runtime_name = "nvidia"
+        discard_unpacked_layers = true
+
+        [plugins."io.containerd.grpc.v1.cri"]
+        sandbox_image = "localhost/kubernetes/pause"
+        enable_cdi = true
+
+        [plugins."io.containerd.grpc.v1.cri".registry]
+        config_path = "/etc/containerd/certs.d:/etc/docker/certs.d"
+
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+        runtime_type = "io.containerd.runc.v2"
+        base_runtime_spec = "/etc/containerd/base-runtime-spec.json"
+
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+        BinaryName = "/usr/bin/nvidia-container-runtime"
+        SystemdCgroup = true
+
+        [plugins."io.containerd.grpc.v1.cri".cni]
+        bin_dir = "/opt/cni/bin"
+        conf_dir = "/etc/cni/net.d"
+        EOF
+
+            mkdir -p /etc/systemd/system/containerd.service.d
+
+            cat <<EOF | tee /etc/systemd/system/containerd.service.d/override.conf
+        [Service]
+        Environment="CONTAINERD_CONFIG=$DISK_FOR_CONTAINERD_KUBELET/containerd/config.toml"
+        ExecStart=
+        ExecStart=/usr/bin/containerd --config \$CONTAINERD_CONFIG
+        EOF
+
+            systemctl daemon-reload
+
+            cp -a /var/lib/containerd "$DISK_FOR_CONTAINERD_KUBELET/containerd/data-root"
+
+          else
+            logger "Unsupported OS version: $os_version. Skipping containerd configuration."
+          fi
+
+          logger "Creating symbolic link from /var/lib/kubelet to $DISK_FOR_CONTAINERD_KUBELET/kubelet"
+
+          if [[ -d "$DISK_FOR_CONTAINERD_KUBELET/kubelet" ]]; then
+            rm -rf "$DISK_FOR_CONTAINERD_KUBELET/kubelet"
+          fi
+
+          mkdir -p "$DISK_FOR_CONTAINERD_KUBELET/kubelet"
+          if [ "$(ls -A /var/lib/kubelet 2>/dev/null)" ]; then
+            mv /var/lib/kubelet/* "$DISK_FOR_CONTAINERD_KUBELET/kubelet/"
+          else
+            logger "/var/lib/kubelet is empty, skipping file move"
+          fi
+          rmdir /var/lib/kubelet
+          ln -s "$DISK_FOR_CONTAINERD_KUBELET/kubelet" /var/lib/
+
+        else
+          logger "$DISK_FOR_CONTAINERD_KUBELET not mounted. Skipping containerd configuration"
+        fi
+
+        logger "[stop] on_create_main.sh"
+
+  # ===========================================================================
+  # HyperPod cluster
+  # ===========================================================================
+  HyperPodCluster:
+    Type: AWS::SageMaker::Cluster
+    DependsOn: [LifecycleScript, LifecycleScriptMain]
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-hp'
+      # Automatic node recovery is supported for GPU instances only.
+      NodeRecovery: !If [HasGpu, Automatic, None]
+      # Backs the L2 tier of the managed KV cache when l2CacheBackend is tieredstorage.
+      TieredStorageConfig: !If
+        - UseTieredStorage
+        - Mode: Enable
+          InstanceMemoryAllocationPercentage: !Ref TieredStorageMemoryPercent
+        - !Ref AWS::NoValue
+      Orchestrator:
+        Eks:
+          ClusterArn:
+            Fn::ImportValue: !Sub '${NetworkStackName}-eks-cluster-arn'
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+        Subnets:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${NetworkStackName}-private-subnet-2'
+      InstanceGroups:
+        - InstanceGroupName: system
+          InstanceType: !Ref SystemInstanceType
+          InstanceCount: !Ref SystemInstanceCount
+          ExecutionRole: !GetAtt HyperPodInstanceRole.Arn
+          # 2 exposes all 8 vCPUs of an ml.m5.2xlarge. With 1, pods see about 3.9.
+          ThreadsPerCore: 2
+          KubernetesConfig:
+            Labels:
+              hpglm/role: system
+          InstanceStorageConfigs:
+            - EbsVolumeConfig:
+                VolumeSizeInGB: 200
+          LifeCycleConfig:
+            SourceS3Uri: !Sub 's3://${LifecycleBucket}/'
+            OnCreate: on_create.sh
+        - !If
+          - HasGpu
+          - InstanceGroupName: gpu
+            InstanceType: !Ref GpuInstanceType
+            InstanceCount: !Ref GpuInstanceCount
+            ExecutionRole: !GetAtt HyperPodInstanceRole.Arn
+            ThreadsPerCore: 1
+            TrainingPlanArn: !If [HasTrainingPlan, !Ref TrainingPlanArn, !Ref AWS::NoValue]
+            # The cluster-level VpcConfig can't change without replacing the cluster;
+            # an instance-group override can.
+            OverrideVpcConfig: !If
+              - HasGpuSubnet
+              - SecurityGroupIds:
+                  - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+                Subnets: !Ref GpuSubnetIds
+              - !Ref AWS::NoValue
+            OnStartDeepHealthChecks: !If
+              - WithDeepHealthChecks
+              - [InstanceStress, InstanceConnectivity]
+              - !Ref AWS::NoValue
+            KubernetesConfig:
+              Labels:
+                hpglm/role: gpu
+            LifeCycleConfig:
+              SourceS3Uri: !Sub 's3://${LifecycleBucket}/'
+              OnCreate: on_create.sh
+          - !Ref AWS::NoValue
+
+  # ===========================================================================
+  # IAM roles for service accounts (IRSA). The trust conditions name the exact
+  # namespace and service account each add-on component runs as.
+  # ===========================================================================
+  InferenceExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: HyperPod inference operator execution role.
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Principal": {"Service": "sagemaker.amazonaws.com"}, "Action": "sts:AssumeRole"},
+              {"Effect": "Allow", "Principal": {"Federated": "${Oidc}"}, "Action": "sts:AssumeRoleWithWebIdentity",
+               "Condition": {"StringEquals": {
+                 "${Issuer}:aud": "sts.amazonaws.com",
+                 "${Issuer}:sub": "system:serviceaccount:hyperpod-inference-system:hyperpod-inference-controller-manager"}}}
+            ]
+          }
+        - Oidc: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-provider-arn'}
+          Issuer: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-issuer'}
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerHyperPodInferenceAccess'
+      Policies:
+        # The operator warms the model weights cache from the model bucket.
+        - PolicyName: read-model-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - '${Arn}/*'
+                  - Arn: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+
+  # On start-up the operator calls UpdateClusterInference, passing its own role to
+  # SageMaker. AmazonSageMakerHyperPodInferenceAccess doesn't grant that. A separate
+  # resource avoids a circular reference to the role's own ARN.
+  InferenceExecutionPassRole:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref InferenceExecutionRole
+      PolicyName: pass-self-to-sagemaker
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt InferenceExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: sagemaker.amazonaws.com
+
+  AlbControllerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: AWS Load Balancer Controller v2.13.0 IAM policy (upstream iam_policy.json).
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+            - iam:CreateServiceLinkedRole
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName: elasticloadbalancing.amazonaws.com
+          - Effect: Allow
+            Action:
+            - ec2:DescribeAccountAttributes
+            - ec2:DescribeAddresses
+            - ec2:DescribeAvailabilityZones
+            - ec2:DescribeInternetGateways
+            - ec2:DescribeVpcs
+            - ec2:DescribeVpcPeeringConnections
+            - ec2:DescribeSubnets
+            - ec2:DescribeSecurityGroups
+            - ec2:DescribeInstances
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DescribeTags
+            - ec2:GetCoipPoolUsage
+            - ec2:DescribeCoipPools
+            - ec2:GetSecurityGroupsForVpc
+            - ec2:DescribeIpamPools
+            - ec2:DescribeRouteTables
+            - elasticloadbalancing:DescribeLoadBalancers
+            - elasticloadbalancing:DescribeLoadBalancerAttributes
+            - elasticloadbalancing:DescribeListeners
+            - elasticloadbalancing:DescribeListenerCertificates
+            - elasticloadbalancing:DescribeSSLPolicies
+            - elasticloadbalancing:DescribeRules
+            - elasticloadbalancing:DescribeTargetGroups
+            - elasticloadbalancing:DescribeTargetGroupAttributes
+            - elasticloadbalancing:DescribeTargetHealth
+            - elasticloadbalancing:DescribeTags
+            - elasticloadbalancing:DescribeTrustStores
+            - elasticloadbalancing:DescribeListenerAttributes
+            - elasticloadbalancing:DescribeCapacityReservation
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - cognito-idp:DescribeUserPoolClient
+            - acm:ListCertificates
+            - acm:DescribeCertificate
+            - iam:ListServerCertificates
+            - iam:GetServerCertificate
+            - waf-regional:GetWebACL
+            - waf-regional:GetWebACLForResource
+            - waf-regional:AssociateWebACL
+            - waf-regional:DisassociateWebACL
+            - wafv2:GetWebACL
+            - wafv2:GetWebACLForResource
+            - wafv2:AssociateWebACL
+            - wafv2:DisassociateWebACL
+            - shield:GetSubscriptionState
+            - shield:DescribeProtection
+            - shield:CreateProtection
+            - shield:DeleteProtection
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:AuthorizeSecurityGroupIngress
+            - ec2:RevokeSecurityGroupIngress
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateSecurityGroup
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateTags
+            Resource: arn:aws:ec2:*:*:security-group/*
+            Condition:
+              StringEquals:
+                ec2:CreateAction: CreateSecurityGroup
+              'Null':
+                aws:RequestTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - ec2:CreateTags
+            - ec2:DeleteTags
+            Resource: arn:aws:ec2:*:*:security-group/*
+            Condition:
+              'Null':
+                aws:RequestTag/elbv2.k8s.aws/cluster: 'true'
+                aws:ResourceTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - ec2:AuthorizeSecurityGroupIngress
+            - ec2:RevokeSecurityGroupIngress
+            - ec2:DeleteSecurityGroup
+            Resource: '*'
+            Condition:
+              'Null':
+                aws:ResourceTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:CreateLoadBalancer
+            - elasticloadbalancing:CreateTargetGroup
+            Resource: '*'
+            Condition:
+              'Null':
+                aws:RequestTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:CreateListener
+            - elasticloadbalancing:DeleteListener
+            - elasticloadbalancing:CreateRule
+            - elasticloadbalancing:DeleteRule
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:AddTags
+            - elasticloadbalancing:RemoveTags
+            Resource:
+            - arn:aws:elasticloadbalancing:*:*:targetgroup/*/*
+            - arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*
+            - arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*
+            Condition:
+              'Null':
+                aws:RequestTag/elbv2.k8s.aws/cluster: 'true'
+                aws:ResourceTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:AddTags
+            - elasticloadbalancing:RemoveTags
+            Resource:
+            - arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*
+            - arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*
+            - arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*
+            - arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:ModifyLoadBalancerAttributes
+            - elasticloadbalancing:SetIpAddressType
+            - elasticloadbalancing:SetSecurityGroups
+            - elasticloadbalancing:SetSubnets
+            - elasticloadbalancing:DeleteLoadBalancer
+            - elasticloadbalancing:ModifyTargetGroup
+            - elasticloadbalancing:ModifyTargetGroupAttributes
+            - elasticloadbalancing:DeleteTargetGroup
+            - elasticloadbalancing:ModifyListenerAttributes
+            - elasticloadbalancing:ModifyCapacityReservation
+            - elasticloadbalancing:ModifyIpPools
+            Resource: '*'
+            Condition:
+              'Null':
+                aws:ResourceTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:AddTags
+            Resource:
+            - arn:aws:elasticloadbalancing:*:*:targetgroup/*/*
+            - arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*
+            - arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*
+            Condition:
+              StringEquals:
+                elasticloadbalancing:CreateAction:
+                - CreateTargetGroup
+                - CreateLoadBalancer
+              'Null':
+                aws:RequestTag/elbv2.k8s.aws/cluster: 'false'
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:RegisterTargets
+            - elasticloadbalancing:DeregisterTargets
+            Resource: arn:aws:elasticloadbalancing:*:*:targetgroup/*/*
+          - Effect: Allow
+            Action:
+            - elasticloadbalancing:SetWebAcl
+            - elasticloadbalancing:ModifyListener
+            - elasticloadbalancing:AddListenerCertificates
+            - elasticloadbalancing:RemoveListenerCertificates
+            - elasticloadbalancing:ModifyRule
+            - elasticloadbalancing:SetRulePriorities
+            Resource: '*'
+
+  AlbControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AWS Load Balancer Controller installed by the HyperPod Inference add-on.
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Principal": {"Federated": "${Oidc}"}, "Action": "sts:AssumeRoleWithWebIdentity",
+               "Condition": {"StringEquals": {
+                 "${Issuer}:aud": "sts.amazonaws.com",
+                 "${Issuer}:sub": "system:serviceaccount:hyperpod-inference-system:aws-load-balancer-controller"}}}
+            ]
+          }
+        - Oidc: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-provider-arn'}
+          Issuer: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-issuer'}
+      ManagedPolicyArns:
+        - !Ref AlbControllerPolicy
+
+  KedaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: KEDA operator installed by the HyperPod Inference add-on.
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Principal": {"Federated": "${Oidc}"}, "Action": "sts:AssumeRoleWithWebIdentity",
+               "Condition": {"StringEquals": {
+                 "${Issuer}:aud": "sts.amazonaws.com",
+                 "${Issuer}:sub": "system:serviceaccount:hyperpod-inference-system:keda-operator"}}}
+            ]
+          }
+        - Oidc: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-provider-arn'}
+          Issuer: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-issuer'}
+      Policies:
+        - PolicyName: read-metrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                  - aps:QueryMetrics
+                  - aps:GetLabels
+                  - aps:GetSeries
+                  - aps:GetMetricMetadata
+                Resource: '*'
+
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Inference Gateway controller; imports auto-issued TLS certificates into ACM.
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Principal": {"Federated": "${Oidc}"}, "Action": "sts:AssumeRoleWithWebIdentity",
+               "Condition": {"StringEquals": {
+                 "${Issuer}:aud": "sts.amazonaws.com",
+                 "${Issuer}:sub": "system:serviceaccount:hyperpod-inference-system:inference-gateway-controller"}}}
+            ]
+          }
+        - Oidc: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-provider-arn'}
+          Issuer: {'Fn::ImportValue': !Sub '${NetworkStackName}-oidc-issuer'}
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerHyperPodInferenceGatewayAccess'
+
+  # ===========================================================================
+  # Pod Identity roles for the CSI drivers and the download job
+  # ===========================================================================
+  S3CsiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Mountpoint for Amazon S3 CSI driver; read-only on the model bucket.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: [sts:AssumeRole, sts:TagSession]
+      Policies:
+        - PolicyName: read-model-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - '${Arn}/*'
+                  - Arn: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+
+  FsxCsiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: FSx for Lustre CSI driver. A required dependency of the inference add-on; no FSx file system is used.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: [sts:AssumeRole, sts:TagSession]
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonFSxReadOnlyAccess'
+
+  ModelDownloaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Download job that copies model checkpoints from Hugging Face into the model bucket.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: [sts:AssumeRole, sts:TagSession]
+      Policies:
+        # The bucket holds only model checkpoints, one prefix per model
+        # (zai-org/GLM-5.3, Qwen/Qwen3-0.6B, ...), so the job may write any of them.
+        - PolicyName: write-model-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:AbortMultipartUpload]
+                Resource: !Sub
+                  - '${Arn}/*'
+                  - Arn: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
+
+  # Required by the add-on. The bucket name must start with "hyperpod-tls-",
+  # which AmazonSageMakerHyperPodInferenceAccess grants access to.
+  TlsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'hyperpod-tls-${AWS::AccountId}-${AWS::StackName}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Empties the TLS bucket on stack delete; the operator writes certificates to it.
+  TlsBucketEmptier:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt HelperFunction.Arn
+      Action: empty
+      Bucket: !Ref TlsBucket
+
+  # ===========================================================================
+  # EKS add-ons, serialized so a failure is attributable to one of them. The
+  # HyperPod Inference add-on fails to install unless cert-manager,
+  # metrics-server and the S3 and FSx CSI drivers are already present.
+  # ===========================================================================
+  # AWS::SageMaker::Cluster completes before any node joins, and an add-on whose
+  # pods have no node to run on cannot serve its webhooks. Wait for the nodes.
+  # The instance counts are properties so that a stack update that changes them
+  # waits again.
+  ClusterReadyWait:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt HelperFunction.Arn
+      ServiceTimeout: 3600
+      Action: cluster-ready
+      ClusterName: !GetAtt HyperPodCluster.ClusterArn
+      MaxSeconds: 3300
+      SystemInstanceCount: !Ref SystemInstanceCount
+      GpuInstanceCount: !Ref GpuInstanceCount
+
+  PodIdentityAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: ClusterReadyWait
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: eks-pod-identity-agent
+      ResolveConflicts: OVERWRITE
+
+  CertManagerAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: PodIdentityAddon
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: cert-manager
+      ResolveConflicts: OVERWRITE
+
+  MetricsServerAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: CertManagerAddon
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: metrics-server
+      ResolveConflicts: OVERWRITE
+
+  S3CsiAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: MetricsServerAddon
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: aws-mountpoint-s3-csi-driver
+      ResolveConflicts: OVERWRITE
+      PodIdentityAssociations:
+        - ServiceAccount: s3-csi-driver-sa
+          RoleArn: !GetAtt S3CsiRole.Arn
+
+  FsxCsiAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: S3CsiAddon
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: aws-fsx-csi-driver
+      ResolveConflicts: OVERWRITE
+      PodIdentityAssociations:
+        - ServiceAccount: fsx-csi-controller-sa
+          RoleArn: !GetAtt FsxCsiRole.Arn
+
+  # cert-manager's webhook can report ready before it serves; give it time
+  # before the inference add-on creates certificates.
+  DependenciesReadyWait:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: FsxCsiAddon
+    Properties:
+      ServiceToken: !GetAtt HelperFunction.Arn
+      Action: wait
+      Seconds: 90
+
+  InferenceAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: [DependenciesReadyWait, TlsBucketEmptier, InferenceExecutionPassRole]
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      AddonName: amazon-sagemaker-hyperpod-inference
+      AddonVersion: !Ref InferenceAddonVersion
+      ResolveConflicts: OVERWRITE
+      ConfigurationValues: !Sub |
+        {
+          "executionRoleArn": "${InferenceExecutionRole.Arn}",
+          "tlsCertificateS3Bucket": "${TlsBucket}",
+          "hyperpodClusterArn": "${HyperPodCluster.ClusterArn}",
+          "inferenceOperator": {"enabled": true},
+          "inferenceGateway": {
+            "enabled": true,
+            "serviceAccount": {"roleArn": "${GatewayRole.Arn}"},
+            "nodeSelector": {"hpglm/role": "system"}
+          },
+          "keda": {
+            "enabled": true,
+            "auth": {"aws": {"irsa": {"enabled": true, "roleArn": "${KedaRole.Arn}"}}},
+            "nodeSelector": {"hpglm/role": "system"}
+          },
+          "alb": {
+            "enabled": true,
+            "serviceAccount": {"create": true, "roleArn": "${AlbControllerRole.Arn}"},
+            "nodeSelector": {"hpglm/role": "system"}
+          }
+        }
+
+  # Lets the download job (k8s/download-model-job.yaml) write the checkpoint.
+  ModelDownloaderPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    DependsOn: PodIdentityAddon
+    Properties:
+      ClusterName: {'Fn::ImportValue': !Sub '${NetworkStackName}-eks-cluster-name'}
+      Namespace: !Ref ModelNamespace
+      ServiceAccount: model-downloader
+      RoleArn: !GetAtt ModelDownloaderRole.Arn
+
+Outputs:
+  HyperPodClusterName:
+    Value: !Ref HyperPodCluster
+
+  HyperPodClusterArn:
+    Value: !GetAtt HyperPodCluster.ClusterArn
+
+  ModelNamespace:
+    Value: !Ref ModelNamespace
+
+  TlsBucketName:
+    Value: !Ref TlsBucket
+
+  GpuNodes:
+    Value: !If [HasGpu, !Sub '${GpuInstanceCount} x ${GpuInstanceType}', 'none (GpuInstanceCount=0)']
+
+  EnvExports:
+    Description: Paste into your shell before running the k8s/ and loadgen/ steps.
+    Value: !Sub
+      - >-
+        export AWS_REGION=${AWS::Region} NAMESPACE=${ModelNamespace}
+        MODEL_BUCKET=${Bucket} MODEL_PREFIX=${Prefix}
+        INSTANCE_TYPE=${GpuInstanceType} HYPERPOD_CLUSTER=${HyperPodCluster}
+      - Bucket: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket'}
+        Prefix: {'Fn::ImportValue': !Sub '${StorageStackName}-model-prefix'}

@@ -1,0 +1,78 @@
+# Qwen3-0.6B variant: a small-model rehearsal of the GLM-5.3 arm in ../exp1-roundrobin.yaml.
+# Only the name, model, resources and vLLM arguments differ.
+#
+# Experiments 1 and 2, baseline: round-robin routing, no managed KV cache.
+#
+# Each request goes to the next replica in turn. vLLM's own on-GPU prefix cache
+# still works, but only when a session's next turn happens to land on the same replica.
+#
+# Apply with: envsubst < k8s/endpoints/qwen3-0.6b/exp1-roundrobin.yaml | kubectl apply -f -
+# Required variables: NAMESPACE, MODEL_BUCKET, MODEL_PREFIX (Qwen/Qwen3-0.6B), AWS_REGION, INSTANCE_TYPE,
+# VLLM_IMAGE, NVME_HOST_PATH. See README.md.
+apiVersion: inference.sagemaker.aws.amazon.com/v1
+kind: InferenceEndpointConfig
+metadata:
+  name: qwen06-rr
+  namespace: ${NAMESPACE}
+spec:
+  modelName: qwen3-0.6b
+  instanceType: ${INSTANCE_TYPE}
+  invocationEndpoint: v1/chat/completions
+  replicas: 3
+  modelSourceConfig:
+    modelSourceType: s3
+    s3Storage:
+      bucketName: ${MODEL_BUCKET}
+      region: ${AWS_REGION}
+    modelLocation: ${MODEL_PREFIX}
+    prefetchEnabled: true
+  metrics:
+    enabled: true
+    modelMetrics:
+      port: 8000
+  # Weights and image caching are on here only to make switching between arms
+  # fast. They do not affect routing, which is what this experiment measures.
+  modelCacheConfig:
+    weightsCache:
+      enabled: true
+      hostPath: ${NVME_HOST_PATH}
+    imageCache:
+      enabled: true
+  intelligentRoutingSpec:
+    enabled: true
+    routingStrategy: roundrobin
+  worker:
+    image: ${VLLM_IMAGE}
+    modelInvocationPort:
+      containerPort: 8000
+      name: http
+    modelVolumeMount:
+      name: model-weights
+      mountPath: /opt/ml/model
+    resources:
+      # One replica per A10G GPU (24 GB). Sized so four replicas share one
+      # ml.g5.12xlarge (4 GPUs, 24 vCPUs with ThreadsPerCore 1, 192 GB) alongside
+      # the 20% of memory that managed tiered storage takes. Requests also fit one
+      # replica per ml.g5.8xlarge.
+      requests:
+        nvidia.com/gpu: 1
+        cpu: "4"
+        memory: 32Gi
+      limits:
+        nvidia.com/gpu: 1
+    # Qwen3-0.6B fits one GPU, so no tensor parallelism. --max-model-len matches the
+    # model's 40,960-token context, which the 32k-token coding context fits under.
+    args:
+      - "--model"
+      - "/opt/ml/model"
+      - "--served-model-name"
+      - "qwen3-0.6b"
+      - "--port"
+      - "8000"
+      - "--max-model-len"
+      - "40960"
+      - "--reasoning-parser"
+      - "qwen3"
+    environmentVariables:
+      - name: VLLM_REQUEST_TIMEOUT
+        value: "1800"

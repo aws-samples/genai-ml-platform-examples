@@ -1,0 +1,52 @@
+# Namespace for the GLM-5.3 endpoints, the download job and the load-test toolbox.
+# Apply with: envsubst < k8s/namespace.yaml | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+---
+# Used by the download job. Stack 3 binds it to ModelDownloaderRole through
+# EKS Pod Identity (write access to the model prefix only).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: model-downloader
+  namespace: ${NAMESPACE}
+---
+# Used by the load-test toolbox. scaleout_timer.py scales endpoint worker
+# Deployments and watches pods, so it needs exactly those permissions here.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: loadgen
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: loadgen
+  namespace: ${NAMESPACE}
+rules:
+  - apiGroups: [inference.sagemaker.aws.amazon.com]
+    resources: [inferenceendpointconfigs]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [apps]
+    resources: [deployments, deployments/scale]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: ['']
+    resources: [pods, services, endpoints, events]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: loadgen
+  namespace: ${NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: loadgen
+subjects:
+  - kind: ServiceAccount
+    name: loadgen
+    namespace: ${NAMESPACE}

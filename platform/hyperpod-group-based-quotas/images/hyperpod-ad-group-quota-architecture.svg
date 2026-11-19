@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1460" height="860" viewBox="0 0 1460 860" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#5A6B7B"/>
+    </marker>
+    <marker id="arrowBold" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
+      <path d="M0,0 L11,4.5 L0,9 Z" fill="#D45B07"/>
+    </marker>
+    <marker id="arrowDeny" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#B42318"/>
+    </marker>
+  </defs>
+
+  <rect width="1460" height="860" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="40" y="40" font-size="21" font-weight="bold" fill="#16222F">Active Directory group membership determines which HyperPod GPU quota a user consumes</text>
+  <text x="40" y="64" font-size="13.5" fill="#5A6B7B">The execution role is the pivot. Everything to the right of it is identical in both Studio authentication modes.</text>
+
+  <!-- Column headers -->
+  <text x="40"   y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">IDENTITY SOURCE</text>
+  <text x="272"  y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">PROVISIONING TRIGGER</text>
+  <text x="590"  y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">RESOLUTION</text>
+  <text x="838"  y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">STUDIO DOMAIN</text>
+  <text x="1120" y="104" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">HYPERPOD EKS CLUSTER</text>
+
+  <!-- ===== Column 1: identity source ===== -->
+  <rect x="40" y="120" width="196" height="62" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="138" y="146" font-size="13.5" font-weight="bold" fill="#16222F" text-anchor="middle">Corporate</text>
+  <text x="138" y="165" font-size="13.5" font-weight="bold" fill="#16222F" text-anchor="middle">Active Directory</text>
+
+  <rect x="40" y="206" width="196" height="62" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="138" y="232" font-size="13.5" font-weight="bold" fill="#16222F" text-anchor="middle">Identity provider</text>
+  <text x="138" y="250" font-size="11.5" fill="#5A6B7B" text-anchor="middle">SAML, SCIM</text>
+
+  <line x1="138" y1="182" x2="138" y2="204" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ===== Column 2: trigger, two paths ===== -->
+  <rect x="266" y="116" width="268" height="212" rx="8" fill="#FFFFFF" stroke="#0972D3" stroke-dasharray="4 3"/>
+  <text x="280" y="136" font-size="11.5" font-weight="bold" fill="#0972D3">PATH A — IAM IDENTITY CENTER DOMAIN</text>
+
+  <rect x="280" y="146" width="240" height="48" rx="5" fill="#EAF2FB" stroke="#9EC4E8"/>
+  <text x="400" y="167" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">IAM Identity Center</text>
+  <text x="400" y="184" font-size="11" fill="#5A6B7B" text-anchor="middle">group synchronized by SCIM</text>
+
+  <rect x="280" y="206" width="240" height="44" rx="5" fill="#EAF2FB" stroke="#9EC4E8"/>
+  <text x="400" y="224" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">AWS CloudTrail</text>
+  <text x="400" y="240" font-size="11" fill="#5A6B7B" text-anchor="middle">AddMemberToGroup event</text>
+
+  <rect x="280" y="262" width="240" height="44" rx="5" fill="#EAF2FB" stroke="#9EC4E8"/>
+  <text x="400" y="280" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">Amazon EventBridge</text>
+  <text x="400" y="296" font-size="11" fill="#5A6B7B" text-anchor="middle">rule matches the event</text>
+
+  <line x1="400" y1="194" x2="400" y2="204" stroke="#5A6B7B" stroke-width="1.4" marker-end="url(#arrow)"/>
+  <line x1="400" y1="250" x2="400" y2="260" stroke="#5A6B7B" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="266" y="344" width="268" height="104" rx="8" fill="#FFFFFF" stroke="#7A5AF8" stroke-dasharray="4 3"/>
+  <text x="280" y="364" font-size="11.5" font-weight="bold" fill="#7A5AF8">PATH B — IAM DOMAIN</text>
+  <rect x="280" y="374" width="240" height="60" rx="5" fill="#F3F0FE" stroke="#C4B5FD"/>
+  <text x="400" y="394" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">SAML group claim at sign-in</text>
+  <text x="400" y="411" font-size="11" fill="#5A6B7B" text-anchor="middle">or IdP webhook, or scheduled</text>
+  <text x="400" y="426" font-size="11" fill="#5A6B7B" text-anchor="middle">reconciliation</text>
+
+  <line x1="236" y1="162" x2="264" y2="162" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <path d="M236,240 C250,240 252,396 264,396" fill="none" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ===== Column 3: resolution ===== -->
+  <rect x="584" y="196" width="212" height="86" rx="6" fill="#FFF4E5" stroke="#FFB84D"/>
+  <text x="690" y="222" font-size="13.5" font-weight="bold" fill="#16222F" text-anchor="middle">AWS Lambda</text>
+  <text x="690" y="241" font-size="11.5" fill="#5A6B7B" text-anchor="middle">resolve group to team,</text>
+  <text x="690" y="257" font-size="11.5" fill="#5A6B7B" text-anchor="middle">then CreateUserProfile</text>
+  <text x="690" y="273" font-size="11.5" fill="#5A6B7B" text-anchor="middle">with the team's role</text>
+
+  <rect x="584" y="312" width="212" height="74" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="690" y="336" font-size="13" font-weight="bold" fill="#16222F" text-anchor="middle">DynamoDB</text>
+  <text x="690" y="353" font-size="11" fill="#5A6B7B" text-anchor="middle">mapping table, keyed on</text>
+  <text x="690" y="369" font-size="11" fill="#5A6B7B" text-anchor="middle">adGroup + domainId</text>
+
+  <line x1="690" y1="310" x2="690" y2="286" stroke="#5A6B7B" stroke-width="1.4" marker-end="url(#arrow)"/>
+  <line x1="534" y1="284" x2="582" y2="250" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="534" y1="400" x2="582" y2="330" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ===== Column 4: Studio domain ===== -->
+  <rect x="832" y="116" width="226" height="332" rx="8" fill="#FBFCFD" stroke="#C3CCD5"/>
+  <text x="945" y="140" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">SageMaker Studio</text>
+
+  <rect x="848" y="156" width="194" height="92" rx="6" fill="#EAF6EF" stroke="#7CC79B"/>
+  <text x="945" y="177" font-size="12" font-weight="bold" fill="#16222F" text-anchor="middle">User profiles</text>
+  <text x="945" y="194" font-size="11" fill="#5A6B7B" text-anchor="middle">team: search-ranking</text>
+  <text x="945" y="214" font-size="11.5" font-weight="bold" fill="#0A6E3D" text-anchor="middle">execution role A</text>
+  <text x="945" y="233" font-size="10.5" fill="#5A6B7B" text-anchor="middle">session name = user identity</text>
+
+  <rect x="848" y="284" width="194" height="92" rx="6" fill="#FDF0F0" stroke="#E8A8A8"/>
+  <text x="945" y="305" font-size="12" font-weight="bold" fill="#16222F" text-anchor="middle">User profiles</text>
+  <text x="945" y="322" font-size="11" fill="#5A6B7B" text-anchor="middle">team: fraud-detection</text>
+  <text x="945" y="342" font-size="11.5" font-weight="bold" fill="#9A2F2F" text-anchor="middle">execution role B</text>
+  <text x="945" y="361" font-size="10.5" fill="#5A6B7B" text-anchor="middle">session name = user identity</text>
+
+  <text x="945" y="404" font-size="10.5" fill="#8A97A3" text-anchor="middle">One profile per user per domain.</text>
+  <text x="945" y="420" font-size="10.5" fill="#8A97A3" text-anchor="middle">Run one domain per team so that</text>
+  <text x="945" y="436" font-size="10.5" fill="#8A97A3" text-anchor="middle">multi-team users get a role in each.</text>
+
+  <line x1="798" y1="240" x2="830" y2="200" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="798" y1="252" x2="830" y2="320" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ===== Column 5: HyperPod cluster ===== -->
+  <rect x="1114" y="116" width="306" height="332" rx="8" fill="#FBFCFD" stroke="#C3CCD5"/>
+  <text x="1267" y="140" font-size="12.5" font-weight="bold" fill="#16222F" text-anchor="middle">HyperPod cluster on Amazon EKS</text>
+
+  <rect x="1130" y="156" width="274" height="92" rx="6" fill="#EAF6EF" stroke="#7CC79B"/>
+  <text x="1267" y="177" font-size="12.5" font-weight="bold" fill="#0A6E3D" text-anchor="middle">hyperpod-ns-search-ranking</text>
+  <text x="1267" y="196" font-size="11" fill="#5A6B7B" text-anchor="middle">Kueue local queue</text>
+  <text x="1267" y="214" font-size="11" fill="#5A6B7B" text-anchor="middle">ComputeQuota, TeamName =</text>
+  <text x="1267" y="230" font-size="11" fill="#5A6B7B" text-anchor="middle">search-ranking, weight 50</text>
+
+  <rect x="1130" y="284" width="274" height="92" rx="6" fill="#FDF0F0" stroke="#E8A8A8"/>
+  <text x="1267" y="305" font-size="12.5" font-weight="bold" fill="#9A2F2F" text-anchor="middle">hyperpod-ns-fraud-detection</text>
+  <text x="1267" y="324" font-size="11" fill="#5A6B7B" text-anchor="middle">Kueue local queue</text>
+  <text x="1267" y="342" font-size="11" fill="#5A6B7B" text-anchor="middle">ComputeQuota, TeamName =</text>
+  <text x="1267" y="358" font-size="11" fill="#5A6B7B" text-anchor="middle">fraud-detection, weight 50</text>
+
+  <rect x="1130" y="398" width="274" height="36" rx="5" fill="#EEF1F4" stroke="#C3CCD5"/>
+  <text x="1267" y="421" font-size="11.5" fill="#43515F" text-anchor="middle">Shared GPU instance groups, lend and borrow</text>
+
+  <!-- ===== Enforcement arrows ===== -->
+  <line x1="1044" y1="196" x2="1126" y2="196" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+  <line x1="1044" y1="326" x2="1126" y2="326" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+
+  <!-- Denial path -->
+  <path d="M1044,232 C1080,232 1085,296 1122,300" fill="none" stroke="#B42318" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowDeny)"/>
+  <g>
+    <circle cx="1086" cy="268" r="13" fill="#FFFFFF" stroke="#B42318" stroke-width="2"/>
+    <line x1="1079" y1="261" x2="1093" y2="275" stroke="#B42318" stroke-width="2.2"/>
+    <line x1="1093" y1="261" x2="1079" y2="275" stroke="#B42318" stroke-width="2.2"/>
+  </g>
+
+  <!-- Enforcement callout -->
+  <rect x="520" y="492" width="900" height="86" rx="8" fill="#FFF7ED" stroke="#D45B07"/>
+  <text x="544" y="518" font-size="13.5" font-weight="bold" fill="#8A3A05">The enforcement point</text>
+  <text x="544" y="540" font-size="12.5" fill="#43515F">An EKS access entry binds each execution role to one namespace. The HyperPod Space creation form lets a user pick any namespace,</text>
+  <text x="544" y="558" font-size="12.5" fill="#43515F">so the access entry, not the form, is what refuses a request for another team's quota. The cluster checks it on every request.</text>
+
+  <!-- ===== Legend ===== -->
+  <text x="40" y="518" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">LEGEND</text>
+
+  <line x1="44" y1="540" x2="96" y2="540" stroke="#5A6B7B" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="106" y="544" font-size="12" fill="#43515F">Provisioning flow, once per user</text>
+
+  <line x1="44" y1="562" x2="96" y2="562" stroke="#D45B07" stroke-width="3.4" marker-end="url(#arrowBold)"/>
+  <text x="106" y="566" font-size="12" fill="#43515F">EKS access entry, namespace-scoped, once per team</text>
+
+  <line x1="44" y1="584" x2="96" y2="584" stroke="#B42318" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowDeny)"/>
+  <text x="106" y="588" font-size="12" fill="#43515F">Request refused by Kubernetes RBAC</text>
+
+  <!-- ===== Lifecycle split ===== -->
+  <text x="40" y="638" font-size="11.5" font-weight="bold" fill="#8A97A3" letter-spacing="1.2">TWO LIFECYCLES</text>
+
+  <rect x="40" y="654" width="660" height="76" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="60" y="678" font-size="13" font-weight="bold" fill="#16222F">Per team, at onboarding</text>
+  <text x="60" y="698" font-size="12" fill="#43515F">Execution role, compute quota, EKS access entry, access policy associations.</text>
+  <text x="60" y="716" font-size="12" fill="#43515F">Keep these in infrastructure as code so the topology has drift detection.</text>
+
+  <rect x="724" y="654" width="696" height="76" rx="6" fill="#F4F6F8" stroke="#C3CCD5"/>
+  <text x="744" y="678" font-size="13" font-weight="bold" fill="#16222F">Per user, on group membership change</text>
+  <text x="744" y="698" font-size="12" fill="#43515F">The Studio user profile, and nothing else. Adding the tenth member of a team</text>
+  <text x="744" y="716" font-size="12" fill="#43515F">requires no change on the compute side.</text>
+
+  <!-- ===== Chain summary ===== -->
+  <rect x="40" y="754" width="1380" height="66" rx="6" fill="#16222F"/>
+  <text x="730" y="779" font-size="12" fill="#9FB0BF" text-anchor="middle">THE COMPLETE CHAIN</text>
+  <text x="730" y="802" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">AD group  →  SSO group or SAML claim  →  Lambda lookup  →  execution role  →  EKS access entry  →  namespace  →  compute quota</text>
+</svg>
