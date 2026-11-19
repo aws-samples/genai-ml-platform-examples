@@ -27,6 +27,7 @@ Metadata:
         Parameters:
           - KubernetesVersion
           - ClusterAdminPrincipalArn
+          - ExtraPrivateSubnetAzId
 
 Parameters:
   VpcCidr:
@@ -53,6 +54,19 @@ Parameters:
       role ARN, not the assumed-role ARN that "sts get-caller-identity" returns. This
       stack grants cluster admin only through this access entry, so the outcome does
       not depend on which principal deploys it.
+
+  ExtraPrivateSubnetAzId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9]+-az[0-9]+$'
+    Description: >-
+      Optional Availability Zone ID (for example usw2-az3) for a third private subnet.
+      Use it when GPU capacity is short in the first two zones; stack 3 can add it to
+      the GPU instance group's subnets with GpuSubnetIds. Zone IDs, unlike zone names, mean
+      the same zone in every account.
+
+Conditions:
+  HasExtraPrivateSubnet: !Not [!Equals [!Ref ExtraPrivateSubnetAzId, '']]
 
 Resources:
 
@@ -124,6 +138,20 @@ Resources:
         - Key: kubernetes.io/role/internal-elb
           Value: '1'
 
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: HasExtraPrivateSubnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZoneId: !Ref ExtraPrivateSubnetAzId
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 16, 12]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-3'
+        - Key: kubernetes.io/role/internal-elb
+          Value: '1'
+
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -189,6 +217,17 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # The NAT gateway stays in the first zone, so internet traffic from this subnet
+  # (container images from public registries, Hugging Face) crosses zones to reach
+  # it, at the usual inter-zone data rate. Model weights in S3 use the S3 gateway
+  # endpoint, which this route table shares.
+  PrivateSubnet3RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasExtraPrivateSubnet
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
       RouteTableId: !Ref PrivateRouteTable
 
   # ---------------------------------------------------------------------------
@@ -312,6 +351,13 @@ Outputs:
     Value: !Ref PrivateSubnet2
     Export:
       Name: !Sub '${AWS::StackName}-private-subnet-2'
+
+  PrivateSubnet3Id:
+    Condition: HasExtraPrivateSubnet
+    Description: Add to stack 3's GpuSubnetIds to let the GPU instance group use this zone.
+    Value: !Ref PrivateSubnet3
+    Export:
+      Name: !Sub '${AWS::StackName}-private-subnet-3'
 
   ClusterSecurityGroupId:
     Value: !Ref ClusterSecurityGroup

@@ -27,7 +27,7 @@ Metadata:
         Parameters: [SystemInstanceType, SystemInstanceCount]
       - Label:
           default: GPU instance group (GLM-5.3 replicas)
-        Parameters: [GpuInstanceType, GpuInstanceCount, TrainingPlanArn, GpuDeepHealthChecks, TieredStorageMemoryPercent]
+        Parameters: [GpuInstanceType, GpuInstanceCount, TrainingPlanArn, GpuSubnetIds, GpuDeepHealthChecks, TieredStorage, TieredStorageMemoryPercent]
       - Label:
           default: Inference
         Parameters: [InferenceAddonVersion, ModelNamespace]
@@ -78,6 +78,14 @@ Parameters:
       ARN of the SageMaker flexible training plan that reserves the GPU capacity.
       Leave empty to use on-demand capacity and quota instead.
 
+  GpuSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      Optional comma-separated private subnets for the GPU instance group only, for
+      example stack 1's three private subnets. Listing more zones gives HyperPod more
+      places to find GPU capacity. Leave empty to use the cluster's two subnets.
+
   GpuDeepHealthChecks:
     Type: String
     Default: 'false'
@@ -86,6 +94,15 @@ Parameters:
       Run deep health checks (InstanceStress, InstanceConnectivity) when GPU nodes
       start. They catch bad hardware before serving, but add significant time to
       node start-up. Leave false for a short experiment window.
+
+  TieredStorage:
+    Type: String
+    Default: Enable
+    AllowedValues: [Enable, Disable]
+    Description: >-
+      HyperPod managed tiered storage, the L2 backend of the managed KV cache. Applied
+      only when GPU nodes are present. Disable it if your GPU instance type doesn't
+      support it; the KV cache then uses its L1 (CPU memory) tier only.
 
   TieredStorageMemoryPercent:
     Type: Number
@@ -113,7 +130,9 @@ Parameters:
 Conditions:
   HasGpu: !Not [!Equals [!Ref GpuInstanceCount, 0]]
   HasTrainingPlan: !Not [!Equals [!Ref TrainingPlanArn, '']]
+  HasGpuSubnet: !Not [!Equals [!Join ['', !Ref GpuSubnetIds], '']]
   WithDeepHealthChecks: !And [!Condition HasGpu, !Equals [!Ref GpuDeepHealthChecks, 'true']]
+  UseTieredStorage: !And [!Condition HasGpu, !Equals [!Ref TieredStorage, Enable]]
 
 Resources:
 
@@ -500,7 +519,7 @@ Resources:
       NodeRecovery: !If [HasGpu, Automatic, None]
       # Backs the L2 tier of the managed KV cache when l2CacheBackend is tieredstorage.
       TieredStorageConfig: !If
-        - HasGpu
+        - UseTieredStorage
         - Mode: Enable
           InstanceMemoryAllocationPercentage: !Ref TieredStorageMemoryPercent
         - !Ref AWS::NoValue
@@ -538,6 +557,14 @@ Resources:
             ExecutionRole: !GetAtt HyperPodInstanceRole.Arn
             ThreadsPerCore: 1
             TrainingPlanArn: !If [HasTrainingPlan, !Ref TrainingPlanArn, !Ref AWS::NoValue]
+            # The cluster-level VpcConfig can't change without replacing the cluster;
+            # an instance-group override can.
+            OverrideVpcConfig: !If
+              - HasGpuSubnet
+              - SecurityGroupIds:
+                  - Fn::ImportValue: !Sub '${NetworkStackName}-cluster-sg'
+                Subnets: !Ref GpuSubnetIds
+              - !Ref AWS::NoValue
             OnStartDeepHealthChecks: !If
               - WithDeepHealthChecks
               - [InstanceStress, InstanceConnectivity]
@@ -909,7 +936,7 @@ Resources:
   ModelDownloaderRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: One-time job that copies GLM-5.3 from Hugging Face into the model bucket.
+      Description: Download job that copies model checkpoints from Hugging Face into the model bucket.
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -918,7 +945,9 @@ Resources:
               Service: pods.eks.amazonaws.com
             Action: [sts:AssumeRole, sts:TagSession]
       Policies:
-        - PolicyName: write-model-prefix
+        # The bucket holds only model checkpoints, one prefix per model
+        # (zai-org/GLM-5.3, Qwen/Qwen3-0.6B, ...), so the job may write any of them.
+        - PolicyName: write-model-bucket
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -928,9 +957,8 @@ Resources:
               - Effect: Allow
                 Action: [s3:PutObject, s3:GetObject, s3:AbortMultipartUpload]
                 Resource: !Sub
-                  - '${Arn}/${Prefix}/*'
+                  - '${Arn}/*'
                   - Arn: {'Fn::ImportValue': !Sub '${StorageStackName}-model-bucket-arn'}
-                    Prefix: {'Fn::ImportValue': !Sub '${StorageStackName}-model-prefix'}
 
   # Required by the add-on. The bucket name must start with "hyperpod-tls-",
   # which AmazonSageMakerHyperPodInferenceAccess grants access to.
